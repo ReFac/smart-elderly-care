@@ -1,0 +1,441 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  buildings      Building[]
+  employees      Employee[]
+  elders         Elder[]
+  featureFlags   FeatureFlag[]
+  feeItems       FeeItem[]
+  priceRules     PriceRule[]
+  mealMenus      MealMenu[]
+  systemAiConfig SystemAiConfig?
+  alerts         Alert[]
+  inventoryItems InventoryItem[]
+  shifts         Shift[]
+}
+
+model Building {
+  id       String  @id @default(cuid())
+  tenantId String
+  name     String
+  code     String
+  address  String?
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  floors   Floor[]
+
+  @@unique([tenantId, code])
+}
+
+model Floor {
+  id         String   @id @default(cuid())
+  buildingId String
+  name       String
+  level      Int
+  planImage  String?
+  building   Building @relation(fields: [buildingId], references: [id])
+  rooms      Room[]
+}
+
+model Room {
+  id       String @id @default(cuid())
+  floorId  String
+  number   String
+  capacity Int    @default(2)
+  floor    Floor  @relation(fields: [floorId], references: [id])
+  beds     Bed[]
+}
+
+model Bed {
+  id     String @id @default(cuid())
+  roomId String
+  code   String
+  status String @default("idle")
+  room   Room   @relation(fields: [roomId], references: [id])
+  elder  Elder?
+
+  @@unique([roomId, code])
+}
+
+model Employee {
+  id           String   @id @default(cuid())
+  tenantId     String
+  username     String
+  passwordHash String
+  name         String
+  phone        String?
+  role         String
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+
+  careCheckins   CareCheckin[]   @relation("CaregiverCheckins")
+  assignedOrders ServiceOrder[]  @relation("AssignedOrders")
+  createdOrders  ServiceOrder[]  @relation("CreatedOrders")
+  familyBindings FamilyBinding[]
+  shifts         Shift[]
+
+  @@unique([tenantId, username])
+}
+
+model Elder {
+  id              String    @id @default(cuid())
+  tenantId        String
+  name            String
+  gender          String    @default("unknown")
+  idNumber        String?
+  birthDate       DateTime?
+  phone           String?
+  admitSource     String?
+  paymentType     String    @default("self")
+  careLevel       String    @default("independent")
+  bedId           String?   @unique
+  checkInDate     DateTime?
+  checkOutDate    DateTime?
+  depositAmount   Float     @default(0)
+  wanderRisk      Boolean   @default(false)
+  status          String    @default("active")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  bed            Bed?            @relation(fields: [bedId], references: [id])
+  health         ElderHealth?
+  contacts       ElderContact[]
+  contracts      Contract[]
+  bedChangeLogs  BedChangeLog[]
+  carePlans      CarePlan[]
+  careTasks      CareTask[]
+  serviceOrders  ServiceOrder[]
+  visitRecords   VisitRecord[]
+  emotionRecords EmotionRecord[]
+  bills          Bill[]
+  deposits       Deposit[]
+  waivers        Waiver[]
+  mealRestrictions MealRestriction[]
+  familyBindings FamilyBinding[]
+  attachments    Attachment[]
+  deviceLocations DeviceLocation[]
+}
+
+model ElderHealth {
+  id              String  @id @default(cuid())
+  elderId         String  @unique
+  medicalHistory  String?
+  allergies       String?
+  chronicDiseases String?
+  forbiddenDrugs  String?
+  dietTaboos      String?
+  assessmentNote  String?
+  elder           Elder   @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model ElderContact {
+  id           String  @id @default(cuid())
+  elderId      String
+  name         String
+  relation     String?
+  phone        String
+  isEmergency  Boolean @default(false)
+  isPrimary    Boolean @default(false)
+  elder        Elder   @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model FamilyBinding {
+  id         String   @id @default(cuid())
+  employeeId String
+  elderId    String
+  relation   String?
+  createdAt  DateTime @default(now())
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  elder      Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, elderId])
+}
+
+model Contract {
+  id        String    @id @default(cuid())
+  elderId   String
+  type      String
+  title     String
+  fileUrl   String?
+  startDate DateTime?
+  endDate   DateTime?
+  reminded  Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  elder     Elder     @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model BedChangeLog {
+  id         String   @id @default(cuid())
+  elderId    String
+  fromBedId  String?
+  toBedId    String?
+  reason     String?
+  operatedBy String?
+  createdAt  DateTime @default(now())
+  elder      Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model CarePlan {
+  id        String   @id @default(cuid())
+  elderId   String
+  careLevel String
+  itemsJson String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  elder     Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+  tasks     CareTask[]
+}
+
+model CareTask {
+  id          String    @id @default(cuid())
+  elderId     String
+  carePlanId  String?
+  title       String
+  scheduledAt DateTime
+  status      String    @default("pending")
+  createdAt   DateTime  @default(now())
+  elder       Elder     @relation(fields: [elderId], references: [id], onDelete: Cascade)
+  carePlan    CarePlan? @relation(fields: [carePlanId], references: [id])
+  checkins    CareCheckin[]
+}
+
+model CareCheckin {
+  id          String   @id @default(cuid())
+  careTaskId  String
+  caregiverId String
+  checkedAt   DateTime @default(now())
+  photoUrl    String?
+  note        String?
+  anomaly     String?
+  careTask    CareTask @relation(fields: [careTaskId], references: [id], onDelete: Cascade)
+  caregiver   Employee @relation("CaregiverCheckins", fields: [caregiverId], references: [id])
+}
+
+model ServiceOrder {
+  id           String    @id @default(cuid())
+  elderId      String
+  title        String
+  description  String?
+  status       String    @default("pending")
+  createdById  String
+  assigneeId   String?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  elder        Elder     @relation(fields: [elderId], references: [id], onDelete: Cascade)
+  createdBy    Employee  @relation("CreatedOrders", fields: [createdById], references: [id])
+  assignee     Employee? @relation("AssignedOrders", fields: [assigneeId], references: [id])
+}
+
+model VisitRecord {
+  id          String   @id @default(cuid())
+  elderId     String
+  visitorName String
+  relation    String?
+  phone       String?
+  visitAt     DateTime @default(now())
+  leaveAt     DateTime?
+  note        String?
+  elder       Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model EmotionRecord {
+  id        String   @id @default(cuid())
+  elderId   String
+  mood      String
+  behavior  String?
+  note      String?
+  recordedAt DateTime @default(now())
+  elder     Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model FeeItem {
+  id          String  @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  unit        String  @default("月")
+  defaultPrice Float  @default(0)
+  category    String  @default("other")
+  active      Boolean @default(true)
+  tenant      Tenant  @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, code])
+}
+
+model PriceRule {
+  id         String  @id @default(cuid())
+  tenantId   String
+  careLevel  String
+  feeItemCode String
+  price      Float
+  billingCycle String @default("monthly")
+  tenant     Tenant  @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, careLevel, feeItemCode])
+}
+
+model Bill {
+  id          String   @id @default(cuid())
+  elderId     String
+  periodStart DateTime
+  periodEnd   DateTime
+  totalAmount Float    @default(0)
+  paidAmount  Float    @default(0)
+  status      String   @default("unpaid")
+  remark      String?
+  createdAt   DateTime @default(now())
+  elder       Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+  lines       BillLine[]
+  payments    Payment[]
+}
+
+model BillLine {
+  id        String @id @default(cuid())
+  billId    String
+  feeCode   String
+  feeName   String
+  quantity  Float  @default(1)
+  unitPrice Float
+  amount    Float
+  bill      Bill   @relation(fields: [billId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  billId    String
+  amount    Float
+  method    String   @default("cash")
+  paidAt    DateTime @default(now())
+  remark    String?
+  bill      Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+}
+
+model Deposit {
+  id        String   @id @default(cuid())
+  elderId   String
+  amount    Float
+  type      String   @default("in")
+  remark    String?
+  createdAt DateTime @default(now())
+  elder     Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model Waiver {
+  id        String   @id @default(cuid())
+  elderId   String
+  amount    Float
+  reason    String?
+  createdAt DateTime @default(now())
+  elder     Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model MealMenu {
+  id        String   @id @default(cuid())
+  tenantId  String
+  date      DateTime
+  mealType  String
+  dishes    String
+  dietTags  String?
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, date, mealType])
+}
+
+model MealRestriction {
+  id      String @id @default(cuid())
+  elderId String
+  tags    String
+  note    String?
+  elder   Elder  @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  elderId   String?
+  category  String   @default("general")
+  fileName  String
+  fileUrl   String
+  mimeType  String?
+  createdAt DateTime @default(now())
+  elder     Elder?   @relation(fields: [elderId], references: [id])
+}
+
+model FeatureFlag {
+  id       String  @id @default(cuid())
+  tenantId String
+  key      String
+  enabled  Boolean @default(false)
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, key])
+}
+
+model SystemAiConfig {
+  id           String  @id @default(cuid())
+  tenantId     String  @unique
+  provider     String  @default("openai_compatible")
+  baseUrl      String  @default("https://api.openai.com/v1")
+  apiKey       String  @default("")
+  model        String  @default("gpt-4o-mini")
+  ocrProvider  String  @default("mock")
+  tenant       Tenant  @relation(fields: [tenantId], references: [id])
+}
+
+model Alert {
+  id        String   @id @default(cuid())
+  tenantId  String
+  type      String
+  title     String
+  message   String?
+  elderId   String?
+  status    String   @default("open")
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+}
+
+model InventoryItem {
+  id        String @id @default(cuid())
+  tenantId  String
+  name      String
+  sku       String?
+  quantity  Float  @default(0)
+  unit      String @default("件")
+  lowStock  Float  @default(10)
+  tenant    Tenant @relation(fields: [tenantId], references: [id])
+}
+
+model Shift {
+  id         String   @id @default(cuid())
+  tenantId   String
+  employeeId String
+  shiftDate  DateTime
+  shiftType  String
+  floorId    String?
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  employee   Employee @relation(fields: [employeeId], references: [id])
+}
+
+model DeviceLocation {
+  id         String   @id @default(cuid())
+  elderId    String
+  deviceId   String
+  lat        Float
+  lng        Float
+  recordedAt DateTime @default(now())
+  elder      Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}

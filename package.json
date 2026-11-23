@@ -1,0 +1,20 @@
+{
+  "name": "nursing-home",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter @nh/api --filter @nh/admin --filter @nh/family run dev",
+    "dev:api": "pnpm --filter @nh/api dev",
+    "dev:admin": "pnpm --filter @nh/admin dev",
+    "dev:family": "pnpm --filter @nh/family dev",
+    "dev:desktop": "pnpm --filter @nh/desktop dev",
+    "build": "pnpm -r run build",
+    "db:generate": "pnpm --filter @nh/api prisma:generate",
+    "db:push": "pnpm --filter @nh/api prisma:push",
+    "db:seed": "pnpm --filter @nh/api prisma:seed",
+    "db:setup": "pnpm db:generate && pnpm db:push && pnpm db:seed"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.9"
+}
