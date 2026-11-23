@@ -15,6 +15,11 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:3000',
       '/uploads': 'http://localhost:3000',
+      '/agent-runtime': {
+        target: 'http://localhost:8100',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/agent-runtime/, ''),
+      },
     },
   },
 });

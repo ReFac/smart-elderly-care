@@ -1,0 +1,26 @@
+[project]
+name = "nh-agent"
+version = "0.2.0"
+description = "智能养老 Agent Runtime — Harness / MCP / Hook / Skill"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "httpx>=0.28.0",
+  "pydantic>=2.10.0",
+  "pydantic-settings>=2.6.0",
+  "pyyaml>=6.0.2",
+  "numpy>=2.1.0",
+  "python-multipart>=0.0.17",
+]
+
+[project.scripts]
+nh-agent = "app.main:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

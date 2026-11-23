@@ -65,6 +65,14 @@ pnpm dev:desktop
 | 人事排班 | 员工、排班、考勤、绩效统计 |
 | 安防告警 | 告警中心、风险扫描、门禁、硬件 webhook |
 | 报表看板 | 运营看板、民政月报表生成/导出 |
+| Agent 智能体 | Python Harness/MCP/Hook/Skill 运行时（8100） |
+
+**Agent Runtime（`apps/agent`，Python）**
+- 多源感知融合、语音增量照护、会议纪要、床位记忆、分级路由、告警反馈自迭代
+- Harness 护栏 + 全链路审计 + 人工复核队列
+- MCP 工具底座；Typeless 全语音入口；DeepSeek OpenAI 兼容
+- 启动：`pnpm dev:agent` → http://localhost:8100/v1/manifest
+- 管理端侧栏「Agent智能体」联调
 
 **接口预留：** `POST /api/ai/ocr`、`POST /api/ai/extract-form`、`POST /api/payment/checkout`、`POST /api/gps/webhook`、`POST /api/security/hardware/webhook`
 

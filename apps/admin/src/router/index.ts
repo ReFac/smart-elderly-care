@@ -19,6 +19,7 @@ const router = createRouter({
         { path: 'billing', component: () => import('../views/Billing.vue') },
         { path: 'meals', component: () => import('../views/Meals.vue') },
         { path: 'settings', component: () => import('../views/Settings.vue') },
+        { path: 'agent', component: () => import('../views/Agent.vue') },
         { path: 'medical', component: () => import('../views/Medical.vue') },
         { path: 'ltc', component: () => import('../views/Ltc.vue') },
         { path: 'inventory', component: () => import('../views/Inventory.vue') },

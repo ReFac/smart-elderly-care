@@ -59,6 +59,7 @@ const menus = [
   { path: '/hr', title: '人事排班' },
   { path: '/security', title: '安防告警' },
   { path: '/reports', title: '报表报送' },
+  { path: '/agent', title: 'Agent智能体' },
   { path: '/settings', title: '系统设置' },
 ];
 

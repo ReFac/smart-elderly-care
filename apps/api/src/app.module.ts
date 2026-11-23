@@ -20,6 +20,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { HrModule } from './hr/hr.module';
 import { SecurityModule } from './security/security.module';
 import { ReportsModule } from './reports/reports.module';
+import { AgentBridgeModule } from './agent-bridge/agent-bridge.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { ReportsModule } from './reports/reports.module';
     HrModule,
     SecurityModule,
     ReportsModule,
+    AgentBridgeModule,
   ],
 })
 export class AppModule {}
