@@ -32,6 +32,7 @@ const router = createRouter({
         { path: 'extensions', component: () => import('../views/Extensions.vue') },
         { path: 'control-plane', component: () => import('../views/ControlPlane.vue') },
         { path: 'room-tours', component: () => import('../views/RoomTours.vue') },
+        { path: 'clinical-intel', component: () => import('../views/ClinicalIntel.vue') },
       ],
     },
   ],

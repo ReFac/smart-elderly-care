@@ -11,6 +11,10 @@ const DEFAULT_VARS: Array<{ key: string; value: string; valueType: string; group
   { key: 'tour.default_fov', value: '75', valueType: 'number', groupName: 'tour', description: '3D 导览默认 FOV' },
   { key: 'learning.noise_on_fp', value: 'true', valueType: 'boolean', groupName: 'learning', description: '误报自动加噪声' },
   { key: 'learning.noise_on_fn', value: 'true', valueType: 'boolean', groupName: 'learning', description: '漏报自动加噪声' },
+  { key: 'clinical.cough_sensitivity', value: '0.55', valueType: 'number', groupName: 'clinical', description: '咳嗽识别灵敏度' },
+  { key: 'clinical.hard_impact_threshold', value: '0.72', valueType: 'number', groupName: 'clinical', description: '硬碰撞阈值' },
+  { key: 'clinical.inference_base_url', value: '', valueType: 'string', groupName: 'clinical', description: 'SOTA 声学推理服务 URL' },
+  { key: 'clinical.auto_facility_push', value: 'true', valueType: 'boolean', groupName: 'clinical', description: '病理事件自动院内推送' },
 ];
 
 const DEFAULT_SERVICES = [

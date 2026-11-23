@@ -236,6 +236,22 @@ export const FEATURE_REGISTRY: FeatureEntry[] = [
     extensible: true,
     settingsKeys: ['tour.default_fov'],
   },
+  {
+    id: 'clinical_intel',
+    title: '声学异常与 AI 预诊',
+    group: 'clinical',
+    path: '/clinical-intel',
+    keywords: ['咳嗽', '麦克风', '碰撞', '预诊', 'acoustic', 'SOTA', '推送家属'],
+    description: '床头麦克风异常识别、档案更新、AI 预诊与院内/家属推送（接口预留）',
+    apiPrefix: '/api/clinical',
+    extensible: true,
+    settingsKeys: [
+      'clinical.cough_sensitivity',
+      'clinical.hard_impact_threshold',
+      'clinical.inference_base_url',
+      'clinical.auto_facility_push',
+    ],
+  },
 ]
 
 /** 简易模糊匹配：子串 + 字符序 + 关键词 */

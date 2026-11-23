@@ -47,6 +47,11 @@ export class AgentBridgeController {
     return this.agent.post('/v1/health/auto', body);
   }
 
+  @Post('acoustic/ingest')
+  acoustic(@Body() body: any) {
+    return this.agent.post('/v1/acoustic/ingest', body);
+  }
+
   @Post('feedback')
   feedback(@Body() body: any) {
     return this.agent.post('/v1/alerts/feedback', body);

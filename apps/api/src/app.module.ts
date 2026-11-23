@@ -25,6 +25,7 @@ import { ExtensionsModule } from './extensions/extensions.module';
 import { ControlPlaneModule } from './control-plane/control-plane.module';
 import { PortalModule } from './portal/portal.module';
 import { ToursModule } from './tours/tours.module';
+import { ClinicalIntelModule } from './clinical-intel/clinical-intel.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { ToursModule } from './tours/tours.module';
     ControlPlaneModule,
     PortalModule,
     ToursModule,
+    ClinicalIntelModule,
   ],
 })
 export class AppModule {}

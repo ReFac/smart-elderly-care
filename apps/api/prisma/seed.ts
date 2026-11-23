@@ -46,6 +46,13 @@ async function main() {
   await prisma.reportSubmission.deleteMany();
   await prisma.roomTourHotspot.deleteMany();
   await prisma.roomTour.deleteMany();
+  await prisma.clinicalPush.deleteMany();
+  await prisma.prediagnosisReport.deleteMany();
+  await prisma.clinicalFinding.deleteMany();
+  await prisma.acousticEvent.deleteMany();
+  await prisma.acousticDevice.deleteMany();
+  await prisma.promptTemplate.deleteMany();
+  await prisma.acousticSensitivityConfig.deleteMany();
   await prisma.apiEndpointMeta.deleteMany();
   await prisma.serviceRegistry.deleteMany();
   await prisma.systemVariable.deleteMany();
@@ -618,11 +625,38 @@ async function main() {
     },
   });
 
+  await prisma.acousticDevice.create({
+    data: {
+      tenantId: tenant.id,
+      code: 'mic-a201',
+      name: 'A201 床头麦克风',
+      bedId: elders[0].bedId || undefined,
+      elderId: elders[0].id,
+      vendor: 'generic',
+      enabled: true,
+    },
+  });
+  await prisma.acousticSensitivityConfig.create({
+    data: { tenantId: tenant.id, name: 'default', modelId: 'stub-acoustic-v0' },
+  });
+  const { BUILTIN_PROMPTS } = await import('../src/clinical-intel/prompts');
+  for (const p of BUILTIN_PROMPTS) {
+    await prisma.promptTemplate.create({
+      data: {
+        tenantId: tenant.id,
+        key: p.key,
+        title: p.title,
+        version: p.version,
+        content: p.content,
+      },
+    });
+  }
+
   console.log('Seed complete');
   console.log(`Beds: ${allBeds.length}`);
   console.log('Accounts (password 123456): admin / nurse / caregiver / finance / family');
   console.log(`Family bound to elder: ${elders[0].name}`);
-  console.log('Domains seeded: medical/ltc/inventory/hr/security/reports/control/tours');
+  console.log('Domains seeded: medical/ltc/inventory/hr/security/reports/control/tours/clinical-intel');
   void nurse;
   void caregiver;
   void finance;

@@ -6,6 +6,7 @@
       <el-tag type="warning" v-if="elder.wanderRisk">走失风险</el-tag>
       <el-button @click="$router.back()">返回</el-button>
       <el-button type="primary" @click="changeBedDialog = true">调房换床</el-button>
+      <el-button type="success" :loading="preLoading" @click="genPrediagnosis">一键 AI 预诊</el-button>
     </div>
     <el-descriptions :column="2" border>
       <el-descriptions-item label="性别">{{ elder.gender }}</el-descriptions-item>
@@ -45,6 +46,21 @@
       </el-table-column>
     </el-table>
 
+    <div v-if="preResult" class="page-card" style="margin: 16px 0; box-shadow: none; border: 1px solid #e5eee8">
+      <h3>AI 预诊草稿</h3>
+      <el-alert type="warning" :closable="false" show-icon title="辅助信息，不构成医疗诊断或处方" />
+      <p><b>情况</b></p>
+      <pre style="white-space: pre-wrap; font-size: 13px">{{ preResult.draft?.situation }}</pre>
+      <p><b>医学建议</b></p>
+      <pre style="white-space: pre-wrap; font-size: 13px">{{ preResult.draft?.medicalAdvice }}</pre>
+      <p><b>风险提示</b></p>
+      <pre style="white-space: pre-wrap; font-size: 13px">{{ preResult.draft?.riskHints }}</pre>
+    </div>
+
+    <h3>临床摘要（声学/预诊自动维护）</h3>
+    <pre style="white-space: pre-wrap; font-size: 13px; background: #f4f7f5; padding: 10px; border-radius: 8px">{{ elder.health?.clinicalNotes || '暂无' }}</pre>
+    <p class="muted" v-if="elder.health?.acousticRiskTags">风险标签：{{ elder.health.acousticRiskTags }}</p>
+
     <h3>情绪行为（失智专项）</h3>
     <div class="toolbar">
       <el-input v-model="emotion.mood" placeholder="情绪" style="width: 140px" />
@@ -81,6 +97,8 @@ const changeBedDialog = ref(false);
 const idleBeds = ref<any[]>([]);
 const toBedId = ref('');
 const emotion = reactive({ mood: '', behavior: '', note: '' });
+const preLoading = ref(false);
+const preResult = ref<any>(null);
 
 function levelLabel(v: string) {
   return (CARE_LEVEL_LABELS as any)[v] || v;
@@ -92,6 +110,17 @@ function formatDate(v?: string) {
 async function load() {
   elder.value = await http.get(`/elders/${route.params.id}`);
   idleBeds.value = await http.get('/org/beds', { params: { status: 'idle' } });
+}
+
+async function genPrediagnosis() {
+  preLoading.value = true;
+  try {
+    preResult.value = await http.post('/clinical/prediagnosis/generate', { elderId: route.params.id });
+    ElMessage.success('已生成 AI 预诊草稿');
+    await load();
+  } finally {
+    preLoading.value = false;
+  }
 }
 
 async function doChangeBed() {

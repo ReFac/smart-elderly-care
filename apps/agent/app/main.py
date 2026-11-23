@@ -136,6 +136,12 @@ def health_auto(req: HealthAutoRequest) -> dict[str, Any]:
     return _o().health.run(req)
 
 
+@app.post("/v1/acoustic/ingest")
+def acoustic_ingest(payload: dict[str, Any]) -> dict[str, Any]:
+    """床头麦克风异常上报（转发 clinical-intel，见 docs/clinical-intel-sota.md）"""
+    return _o().acoustic.run(payload)
+
+
 @app.post("/v1/typeless")
 async def typeless(cmd: TypelessCommand) -> dict[str, Any]:
     return await _o().typeless.run(cmd)

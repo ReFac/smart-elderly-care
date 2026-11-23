@@ -34,6 +34,13 @@ model Tenant {
   serviceRegistries ServiceRegistry[]
   apiEndpoints   ApiEndpointMeta[]
   roomTours      RoomTour[]
+  acousticDevices AcousticDevice[]
+  acousticEvents AcousticEvent[]
+  clinicalFindings ClinicalFinding[]
+  prediagnosisReports PrediagnosisReport[]
+  clinicalPushes ClinicalPush[]
+  promptTemplates PromptTemplate[]
+  acousticConfigs AcousticSensitivityConfig[]
 }
 
 model Building {
@@ -151,6 +158,10 @@ model Elder {
   ltcAssessments LtcAssessment[]
   ltcServiceRecords LtcServiceRecord[]
   ltcReconciliations LtcReconciliation[]
+  acousticEvents AcousticEvent[]
+  clinicalFindings ClinicalFinding[]
+  prediagnosisReports PrediagnosisReport[]
+  clinicalPushes ClinicalPush[]
 }
 
 model ElderHealth {
@@ -162,6 +173,9 @@ model ElderHealth {
   forbiddenDrugs  String?
   dietTaboos      String?
   assessmentNote  String?
+  /// 声学/病理性特征摘要（JSON 或短文本，由 clinical-intel 自动维护）
+  clinicalNotes   String?
+  acousticRiskTags String?
   elder           Elder   @relation(fields: [elderId], references: [id], onDelete: Cascade)
 }
 
@@ -796,4 +810,158 @@ model RoomTourHotspot {
   targetTourId String?
   payloadJson String?
   tour        RoomTour @relation(fields: [tourId], references: [id], onDelete: Cascade)
+}
+
+/// 床头麦克风 / 声学设备（可选择接入）
+model AcousticDevice {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  bedId     String?
+  elderId   String?
+  vendor    String   @default("generic")
+  enabled   Boolean  @default(true)
+  metaJson  String?
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, code])
+}
+
+/// 声学事件：咳嗽、碰撞异响等（原始/模型输出入库）
+model AcousticEvent {
+  id            String   @id @default(cuid())
+  tenantId      String
+  elderId       String?
+  deviceId      String?
+  bedId         String?
+  eventType     String   // cough | impact | speech | unknown
+  subtype       String?  // paroxysmal_cough | mild_cough | hard_impact | soft_impact
+  confidence    Float    @default(0)
+  severity      String   @default("low") // low | medium | high | critical
+  pathological  Boolean  @default(false)
+  contextScore  Float?   // 结合历史上下文后的评分
+  modelId       String?  // 推理模型标识，便于 SOTA 替换
+  modelVersion  String?
+  rawJson       String?  // 原始特征/波形元数据（不含音频二进制时可存 URI）
+  audioUri      String?
+  decidedBy     String   @default("stub") // stub | sota | human
+  status        String   @default("pending") // pending | accepted | rejected | noise
+  note          String?
+  createdAt     DateTime @default(now())
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  elder         Elder?   @relation(fields: [elderId], references: [id])
+}
+
+/// 识别出的病理性特征 → 写入老人档案的结构化条目
+model ClinicalFinding {
+  id          String   @id @default(cuid())
+  tenantId    String
+  elderId     String
+  eventId     String?
+  category    String   // respiratory | trauma_risk | fall_risk | other
+  code        String?  // 可映射 ICD/内部编码
+  title       String
+  detail      String?
+  evidenceJson String?
+  source      String   @default("acoustic")
+  confidence  Float    @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  elder       Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+/// AI 预诊报告（一键生成，可人工复核）
+model PrediagnosisReport {
+  id            String   @id @default(cuid())
+  tenantId      String
+  elderId       String
+  promptKey     String   @default("clinical.prediagnosis.v1")
+  status        String   @default("draft") // draft | reviewed | archived
+  situation     String?  // 老人相关情况详述
+  medicalAdvice String?  // 医学性建议（非诊断结论）
+  riskHints     String?  // 风险提示
+  inferenceJson String?  // 可能性医疗推断结构
+  modelId       String?
+  modelVersion  String?
+  generatedBy   String   @default("system")
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  elder         Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+/// 推送：默认院内；护工确认后才可推家属
+model ClinicalPush {
+  id          String   @id @default(cuid())
+  tenantId    String
+  elderId     String
+  reportId    String?
+  eventId     String?
+  audience    String   // facility | family
+  channel     String   @default("in_app") // in_app | sms | wechat | wecom
+  title       String
+  body        String
+  status      String   @default("queued") // queued | sent | blocked | approved | rejected
+  approvedBy  String?
+  approvedAt  DateTime?
+  sentAt      DateTime?
+  error       String?
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  elder       Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+/// 系统提示词（医学建议 / 风险提示等，可后台改）
+model PromptTemplate {
+  id          String   @id @default(cuid())
+  tenantId    String
+  key         String
+  title       String
+  content     String
+  version     String   @default("v1")
+  locale      String   @default("zh-CN")
+  enabled     Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, key, version])
+}
+
+/// 识别敏捷度 / 灵敏度（后台可调，模型侧读取）
+model AcousticSensitivityConfig {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  name               String   @default("default")
+  /// 0~1 咳嗽检出灵敏度（越高越敏感，误报可能↑）
+  coughSensitivity   Float    @default(0.55)
+  /// 急促型咳嗽判定窗口（秒）
+  paroxysmalWindowSec Float   @default(8)
+  /// 急促型最少咳嗽次数
+  paroxysmalMinCount Int      @default(3)
+  /// 硬碰撞阈值（软碰撞默认忽略）
+  hardImpactThreshold Float   @default(0.72)
+  softImpactIgnore   Boolean  @default(true)
+  /// 上下文加权：近期同类事件抬升分
+  contextBoost       Float    @default(0.15)
+  /// 是否自动写档案
+  autoUpdateProfile  Boolean  @default(true)
+  /// 是否自动生成院内推送（家属仍需人工确认）
+  autoFacilityPush   Boolean  @default(true)
+  /// 外部 SOTA 推理服务 URL（空则用 stub）
+  inferenceBaseUrl   String?
+  inferenceApiKey    String?
+  modelId            String   @default("stub-acoustic-v0")
+  enabled            Boolean  @default(true)
+  updatedAt          DateTime @updatedAt
+  createdAt          DateTime @default(now())
+  tenant             Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, name])
 }

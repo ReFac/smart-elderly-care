@@ -11,6 +11,7 @@ from app.skills.health_auto.skill import HealthAutoSkill
 from app.skills.meeting_minutes.skill import MeetingMinutesSkill
 from app.skills.voice_care_record.skill import VoiceCareRecordSkill
 from app.skills.voice_typeless.skill import VoiceTypelessSkill
+from app.skills.acoustic_anomaly.skill import AcousticAnomalySkill
 
 
 class AgentOrchestrator:
@@ -28,6 +29,7 @@ class AgentOrchestrator:
         self.routing = GradedRoutingSkill(self.harness)
         self.health = HealthAutoSkill(self.harness)
         self.typeless = VoiceTypelessSkill(self.harness, self.llm, self.care, self.routing, self.health)
+        self.acoustic = AcousticAnomalySkill(self.harness)
 
     def manifest(self) -> dict:
         return {
@@ -44,7 +46,9 @@ class AgentOrchestrator:
                 "graded_routing",
                 "voice_typeless",
                 "health_auto",
+                "acoustic_anomaly",
             ],
             "mcp": mcp_manifest(self.harness),
             "policy_version": self.harness.policy.data.get("version"),
+            "docs": ["docs/clinical-intel-sota.md"],
         }

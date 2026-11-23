@@ -77,6 +77,12 @@ pnpm dev:desktop
 
 **接口预留：** `POST /api/ai/ocr`、`POST /api/ai/extract-form`、`POST /api/payment/checkout`、`POST /api/gps/webhook`、`POST /api/security/hardware/webhook`
 
+**临床智能 / 声学异常 / AI 预诊（接口预留 + stub）**
+- 管理端：`/clinical-intel`（灵敏度、事件模拟、一键预诊、家属推送审批）
+- API：`/api/clinical/*`（契约 `GET /api/clinical/contract`）
+- 院内优先推送；家属推送需护工批准；提示词入库可改
+- SOTA / 麦克风网关完整接入说明：[`docs/clinical-intel-sota.md`](docs/clinical-intel-sota.md)
+
 ## 切换 PostgreSQL（可选）
 
 1. `docker compose up -d`  
