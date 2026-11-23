@@ -22,6 +22,9 @@ import { SecurityModule } from './security/security.module';
 import { ReportsModule } from './reports/reports.module';
 import { AgentBridgeModule } from './agent-bridge/agent-bridge.module';
 import { ExtensionsModule } from './extensions/extensions.module';
+import { ControlPlaneModule } from './control-plane/control-plane.module';
+import { PortalModule } from './portal/portal.module';
+import { ToursModule } from './tours/tours.module';
 
 @Module({
   imports: [
@@ -48,6 +51,9 @@ import { ExtensionsModule } from './extensions/extensions.module';
     ReportsModule,
     AgentBridgeModule,
     ExtensionsModule,
+    ControlPlaneModule,
+    PortalModule,
+    ToursModule,
   ],
 })
 export class AppModule {}

@@ -44,6 +44,11 @@ async function main() {
   await prisma.performanceRecord.deleteMany();
   await prisma.accessLog.deleteMany();
   await prisma.reportSubmission.deleteMany();
+  await prisma.roomTourHotspot.deleteMany();
+  await prisma.roomTour.deleteMany();
+  await prisma.apiEndpointMeta.deleteMany();
+  await prisma.serviceRegistry.deleteMany();
+  await prisma.systemVariable.deleteMany();
   await prisma.elder.deleteMany();
   await prisma.bed.deleteMany();
   await prisma.room.deleteMany();
@@ -582,11 +587,42 @@ async function main() {
     },
   });
 
+  await prisma.roomTour.create({
+    data: {
+      tenantId: tenant.id,
+      title: 'A栋标准间全景',
+      sceneType: 'panorama',
+      sceneUrl: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=1600',
+      coverUrl: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400',
+      published: true,
+      fov: 75,
+      hotspots: {
+        create: [
+          { label: '床位区', kind: 'info', yaw: -15, pitch: -5, payloadJson: JSON.stringify({ note: '双人护理床' }) },
+          { label: '卫生间', kind: 'info', yaw: 40, pitch: 0 },
+          { label: '门口', kind: 'link', yaw: -50, pitch: 5 },
+        ],
+      },
+    },
+  });
+  await prisma.roomTour.create({
+    data: {
+      tenantId: tenant.id,
+      title: '公共活动区',
+      sceneType: 'panorama',
+      sceneUrl: 'https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=1600',
+      published: true,
+      hotspots: {
+        create: [{ label: '休息沙发', kind: 'info', yaw: 10, pitch: -8 }],
+      },
+    },
+  });
+
   console.log('Seed complete');
   console.log(`Beds: ${allBeds.length}`);
   console.log('Accounts (password 123456): admin / nurse / caregiver / finance / family');
   console.log(`Family bound to elder: ${elders[0].name}`);
-  console.log('Domains seeded: medical/ltc/inventory/hr/security/reports');
+  console.log('Domains seeded: medical/ltc/inventory/hr/security/reports/control/tours');
   void nurse;
   void caregiver;
   void finance;

@@ -30,6 +30,10 @@ model Tenant {
   reportSubmissions ReportSubmission[]
   accessLogs     AccessLog[]
   maintenanceOrders MaintenanceOrder[]
+  systemVariables SystemVariable[]
+  serviceRegistries ServiceRegistry[]
+  apiEndpoints   ApiEndpointMeta[]
+  roomTours      RoomTour[]
 }
 
 model Building {
@@ -708,4 +712,88 @@ model ReportSubmission {
   submittedAt DateTime?
   createdAt   DateTime @default(now())
   tenant      Tenant   @relation(fields: [tenantId], references: [id])
+}
+
+/// 主控台可改运行变量（敏捷配置，非改代码）
+model SystemVariable {
+  id          String   @id @default(cuid())
+  tenantId    String
+  key         String
+  value       String
+  valueType   String   @default("string")
+  groupName   String   @default("general")
+  description String?
+  editable    Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, key])
+}
+
+/// 可启停的后端/外部服务注册
+model ServiceRegistry {
+  id          String   @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  baseUrl     String?
+  status      String   @default("up")
+  enabled     Boolean  @default(true)
+  healthPath  String?
+  metaJson    String?
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, code])
+}
+
+/// API 元数据：启停、文档、扩展点
+model ApiEndpointMeta {
+  id          String   @id @default(cuid())
+  tenantId    String
+  method      String
+  path        String
+  module      String
+  audience    String   @default("admin")
+  enabled     Boolean  @default(true)
+  description String?
+  version     String   @default("v1")
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, method, path])
+}
+
+/// 3D / 全景房态导览
+model RoomTour {
+  id          String   @id @default(cuid())
+  tenantId    String
+  buildingId  String?
+  floorId     String?
+  roomId      String?
+  title       String
+  coverUrl    String?
+  sceneType   String   @default("panorama")
+  sceneUrl    String?
+  modelUrl    String?
+  yaw         Float    @default(0)
+  pitch       Float    @default(0)
+  fov         Float    @default(75)
+  published   Boolean  @default(false)
+  metaJson    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  hotspots    RoomTourHotspot[]
+}
+
+model RoomTourHotspot {
+  id          String   @id @default(cuid())
+  tourId      String
+  label       String
+  kind        String   @default("info")
+  yaw         Float    @default(0)
+  pitch       Float    @default(0)
+  targetTourId String?
+  payloadJson String?
+  tour        RoomTour @relation(fields: [tourId], references: [id], onDelete: Cascade)
 }

@@ -214,6 +214,28 @@ export const FEATURE_REGISTRY: FeatureEntry[] = [
     apiPrefix: '/api/extensions',
     extensible: true,
   },
+  {
+    id: 'control_plane',
+    title: '变量/API/服务总控',
+    group: 'system',
+    path: '/control-plane',
+    keywords: ['变量', '服务', 'API', '总控', 'control', 'config', '敏捷'],
+    description: '主管理员修改全部运行变量、服务启停与 API 元数据',
+    apiPrefix: '/api/control',
+    extensible: true,
+    settingsKeys: ['app.name', 'agent.base_url', 'mobile.wechat_oa_enabled', 'tour.default_fov'],
+  },
+  {
+    id: 'room_tours',
+    title: '3D 房态导览',
+    group: 'ops',
+    path: '/room-tours',
+    keywords: ['3D', '全景', '导览', '房态', 'tour', 'panorama', '微信'],
+    description: '全景/3D 房态导览与热点，用户端公开接口',
+    apiPrefix: '/api/tours',
+    extensible: true,
+    settingsKeys: ['tour.default_fov'],
+  },
 ]
 
 /** 简易模糊匹配：子串 + 字符序 + 关键词 */

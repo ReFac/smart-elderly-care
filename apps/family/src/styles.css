@@ -4,17 +4,26 @@
   --primary: #2f6b4f;
   --text: #1c2b22;
   --muted: #6a7b71;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
 }
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
-  font-family: "Noto Sans SC", "PingFang SC", sans-serif;
+  font-family: "Noto Sans SC", "PingFang SC", "Helvetica Neue", sans-serif;
   background: var(--bg);
   color: var(--text);
+  overscroll-behavior-y: none;
 }
 
 button,
@@ -26,8 +35,15 @@ input {
   max-width: 480px;
   margin: 0 auto;
   min-height: 100vh;
+  min-height: 100dvh;
   background: linear-gradient(180deg, #e7f2eb 0%, var(--bg) 180px);
-  padding-bottom: 72px;
+  padding-top: var(--safe-top);
+  padding-bottom: calc(72px + var(--safe-bottom));
+}
+
+.app-shell.is-wechat {
+  /* 微信内置浏览器：避免底部菜单遮挡 */
+  padding-bottom: calc(78px + var(--safe-bottom));
 }
 
 .topbar {
@@ -109,10 +125,19 @@ input {
   bottom: 0;
   width: min(480px, 100%);
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   background: #fff;
   border-top: 1px solid #e5eee8;
-  padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+  padding: 8px 0 calc(8px + var(--safe-bottom));
+  z-index: 20;
+}
+
+@supports (-webkit-touch-callout: none) {
+  /* Safari / iOS Chrome */
+  .stage,
+  .app-shell {
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 .tabbar a {

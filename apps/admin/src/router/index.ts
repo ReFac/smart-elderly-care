@@ -30,6 +30,8 @@ const router = createRouter({
         { path: 'caregiver-portal', component: () => import('../views/CaregiverPortal.vue') },
         { path: 'learning', component: () => import('../views/Learning.vue') },
         { path: 'extensions', component: () => import('../views/Extensions.vue') },
+        { path: 'control-plane', component: () => import('../views/ControlPlane.vue') },
+        { path: 'room-tours', component: () => import('../views/RoomTours.vue') },
       ],
     },
   ],
