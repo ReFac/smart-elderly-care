@@ -103,6 +103,13 @@ def alert_feedback(req: FeedbackRequest) -> dict[str, Any]:
     return _o().feedback.run(req)
 
 
+@app.get("/v1/learning/noise")
+def learning_noise(limit: int = 30) -> dict[str, Any]:
+    from app.skills.alert_feedback.skill import _NOISE_BANK
+
+    return {"size": len(_NOISE_BANK), "samples": _NOISE_BANK[-limit:]}
+
+
 @app.post("/v1/routing/push")
 def routing_push(payload: dict[str, Any]) -> dict[str, Any]:
     return _o().routing.route(

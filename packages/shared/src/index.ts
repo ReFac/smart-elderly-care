@@ -71,3 +71,5 @@ export const BED_STATUS_LABELS: Record<BedStatus, string> = {
   [BedStatus.RESERVED]: '预占',
   [BedStatus.MAINTENANCE]: '维修',
 }
+
+export * from './registry'

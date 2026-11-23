@@ -72,7 +72,8 @@ pnpm dev:desktop
 - Harness 护栏 + 全链路审计 + 人工复核队列
 - MCP 工具底座；Typeless 全语音入口；DeepSeek OpenAI 兼容
 - 启动：`pnpm dev:agent` → http://localhost:8100/v1/manifest
-- 管理端侧栏「Agent智能体」联调
+- **统一主控台**（管理端 :5173）：运营 / 医护 / 家属视角 / 护理视角 / Agent / 学习噪声 / 扩展注册合一
+- 顶部支持功能与设置**模糊搜索**；`/api/extensions/*` 预留新接口扩展；人工修正后自动加噪声学习
 
 **接口预留：** `POST /api/ai/ocr`、`POST /api/ai/extract-form`、`POST /api/payment/checkout`、`POST /api/gps/webhook`、`POST /api/security/hardware/webhook`
 

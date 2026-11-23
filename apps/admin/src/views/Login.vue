@@ -1,8 +1,8 @@
 <template>
   <div class="login-page">
     <div class="panel">
-      <h1>阳光养老</h1>
-      <p>养老院管理平台 · MVP</p>
+      <h1>智能养老主控台</h1>
+      <p>管理端 · 家属/护理视角 · Agent 合一</p>
       <el-form @submit.prevent="onSubmit">
         <el-form-item label="账号">
           <el-input v-model="username" placeholder="admin" />

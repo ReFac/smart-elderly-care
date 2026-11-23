@@ -21,6 +21,7 @@ import { HrModule } from './hr/hr.module';
 import { SecurityModule } from './security/security.module';
 import { ReportsModule } from './reports/reports.module';
 import { AgentBridgeModule } from './agent-bridge/agent-bridge.module';
+import { ExtensionsModule } from './extensions/extensions.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { AgentBridgeModule } from './agent-bridge/agent-bridge.module';
     SecurityModule,
     ReportsModule,
     AgentBridgeModule,
+    ExtensionsModule,
   ],
 })
 export class AppModule {}
