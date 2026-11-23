@@ -1,11 +1,27 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AgentBridgeService } from './agent-bridge.service';
+import { AgentConsoleService } from './console.service';
 
 @Controller('agent')
 @UseGuards(JwtAuthGuard)
 export class AgentBridgeController {
-  constructor(private agent: AgentBridgeService) {}
+  constructor(
+    private agent: AgentBridgeService,
+    private console: AgentConsoleService,
+  ) {}
+
+  /** Codex 风格侧栏对话 */
+  @Post('console/chat')
+  consoleChat(@Body() body: any, @Req() req: any) {
+    return this.console.chat(req.user.tenantId, req.user, body.message, body.contextPath);
+  }
+
+  /** 高权限执行：需密码 + 变更甄别后的 action 草案 */
+  @Post('console/execute')
+  consoleExecute(@Body() body: any, @Req() req: any) {
+    return this.console.execute(req.user.tenantId, req.user, body);
+  }
 
   @Get('manifest')
   manifest() {

@@ -1,10 +1,15 @@
 <template>
-  <div class="page-card">
-    <h2 class="page-title">声学异常与 AI 预诊</h2>
-    <p class="hint">
-      床头麦克风可选接入；识别敏捷度在此配置。当前为接口预留 + stub 规则，SOTA 模型见
-      <code>docs/clinical-intel-sota.md</code>。
-    </p>
+  <div class="nh-page">
+    <header class="nh-page-header">
+      <div>
+        <p class="nh-kicker">Clinical Intel</p>
+        <h1 class="nh-title">声学异常与 AI 预诊</h1>
+        <p class="nh-subtitle">
+          床头麦克风可选接入；敏捷度可调。Stub + 接口预留，SOTA 见 docs/clinical-intel-sota.md。
+        </p>
+      </div>
+    </header>
+    <div class="page-card">
 
     <el-tabs v-model="tab">
       <el-tab-pane label="识别敏捷度" name="cfg">
@@ -134,6 +139,7 @@
         </el-table>
       </el-tab-pane>
     </el-tabs>
+    </div>
   </div>
 </template>
 

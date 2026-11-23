@@ -1,30 +1,38 @@
 <template>
-  <div class="page-card">
-    <h2 class="page-title">运营看板</h2>
-    <div class="stat-grid">
+  <div class="nh-page">
+    <header class="nh-page-header">
+      <div>
+        <p class="nh-kicker">Operations</p>
+        <h1 class="nh-title">运营看板</h1>
+        <p class="nh-subtitle">入住、照护与营收一屏总览。右侧 Agent 可直接帮你跳转或起草高权限变更。</p>
+      </div>
+    </header>
+
+    <section class="stat-grid">
       <div class="stat-item" v-for="s in stats" :key="s.label">
         <div class="label">{{ s.label }}</div>
         <div class="value">{{ s.value }}</div>
       </div>
-    </div>
-    <el-row :gutter="16">
-      <el-col :xs="24" :md="12">
-        <h3>老人自理结构</h3>
+    </section>
+
+    <div class="dash-grid">
+      <section class="page-card">
+        <h3 class="sec-title">老人自理结构</h3>
         <el-table :data="overview?.careLevelGroups || []" size="small">
           <el-table-column prop="careLevel" label="等级" :formatter="(_, __, v) => levelLabel(v)" />
           <el-table-column prop="_count" label="人数" />
         </el-table>
-      </el-col>
-      <el-col :xs="24" :md="12">
-        <h3>今日待办</h3>
+      </section>
+      <section class="page-card">
+        <h3 class="sec-title">今日待办</h3>
         <ul class="todo">
-          <li>待执行照护任务：{{ overview?.pendingTasks ?? '-' }}</li>
-          <li>欠费/未结清账单：{{ overview?.unpaidBills ?? '-' }}</li>
-          <li>30 日内合同到期：{{ overview?.expiringContracts ?? '-' }}</li>
-          <li>本月已收：¥{{ overview?.monthRevenue ?? 0 }}</li>
+          <li><span>待执行照护任务</span><b>{{ overview?.pendingTasks ?? '-' }}</b></li>
+          <li><span>欠费 / 未结清</span><b>{{ overview?.unpaidBills ?? '-' }}</b></li>
+          <li><span>30 日内合同到期</span><b>{{ overview?.expiringContracts ?? '-' }}</b></li>
+          <li><span>本月已收</span><b>¥{{ overview?.monthRevenue ?? 0 }}</b></li>
         </ul>
-      </el-col>
-    </el-row>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -54,8 +62,41 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.sec-title {
+  margin: 0 0 12px;
+  font-family: var(--nh-display);
+  font-size: 1rem;
+  font-weight: 700;
+}
 .todo {
-  line-height: 2;
-  color: #405548;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.todo li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--nh-line);
+  color: var(--nh-ink-soft);
+  font-size: 14px;
+}
+.todo li:last-child {
+  border-bottom: none;
+}
+.todo b {
+  font-family: var(--nh-display);
+  color: var(--nh-ink);
+}
+@media (max-width: 900px) {
+  .dash-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

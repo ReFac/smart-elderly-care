@@ -26,4 +26,10 @@ export class AuthController {
   me(@Req() req: any) {
     return this.auth.me(req.user.userId);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('reauth')
+  reauth(@Body() body: { password: string }, @Req() req: any) {
+    return this.auth.reauth(req.user.userId, body.password);
+  }
 }

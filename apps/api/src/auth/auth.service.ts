@@ -57,4 +57,44 @@ export class AuthService {
       elders: bindings.map((b) => ({ ...b.elder, relation: b.relation })),
     };
   }
+
+  /** 高权限操作前复核管理员密码，签发短时 elevate token */
+  async reauth(userId: string, password: string) {
+    const user = await this.prisma.employee.findUnique({ where: { id: userId } });
+    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      throw new UnauthorizedException('管理员密码错误');
+    }
+    if (user.role !== 'admin') {
+      throw new UnauthorizedException('仅管理员可提升权限');
+    }
+    const elevateToken = await this.jwt.signAsync(
+      {
+        sub: user.id,
+        tenantId: user.tenantId,
+        role: user.role,
+        username: user.username,
+        elevate: true,
+        purpose: 'privileged_confirm',
+      },
+      { expiresIn: '120s' },
+    );
+    return {
+      ok: true,
+      elevateToken,
+      expiresInSec: 120,
+      user: { id: user.id, username: user.username, role: user.role },
+    };
+  }
+
+  async verifyElevate(elevateToken: string, userId: string) {
+    try {
+      const payload = await this.jwt.verifyAsync(elevateToken);
+      if (!payload?.elevate || payload.sub !== userId || payload.purpose !== 'privileged_confirm') {
+        throw new UnauthorizedException('提升令牌无效');
+      }
+      return payload;
+    } catch {
+      throw new UnauthorizedException('提升令牌无效或已过期，请重新输入密码');
+    }
+  }
 }
