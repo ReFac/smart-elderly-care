@@ -24,6 +24,26 @@ async function main() {
   await prisma.waiver.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.deviceLocation.deleteMany();
+  await prisma.medicationDose.deleteMany();
+  await prisma.medicationPlan.deleteMany();
+  await prisma.drugStockLog.deleteMany();
+  await prisma.adverseReaction.deleteMany();
+  await prisma.vitalSign.deleteMany();
+  await prisma.healthExam.deleteMany();
+  await prisma.chronicFollowUp.deleteMany();
+  await prisma.medicalOrder.deleteMany();
+  await prisma.referralRecord.deleteMany();
+  await prisma.ltcServiceRecord.deleteMany();
+  await prisma.ltcReconciliation.deleteMany();
+  await prisma.ltcAssessment.deleteMany();
+  await prisma.ltcServiceItem.deleteMany();
+  await prisma.drug.deleteMany();
+  await prisma.inventoryStockLog.deleteMany();
+  await prisma.maintenanceOrder.deleteMany();
+  await prisma.attendance.deleteMany();
+  await prisma.performanceRecord.deleteMany();
+  await prisma.accessLog.deleteMany();
+  await prisma.reportSubmission.deleteMany();
   await prisma.elder.deleteMany();
   await prisma.bed.deleteMany();
   await prisma.room.deleteMany();
@@ -103,7 +123,7 @@ async function main() {
       data: {
         tenantId: tenant.id,
         key,
-        enabled: key === FeatureFlagKey.OCR_LLM,
+        enabled: true,
       },
     });
   }
@@ -392,10 +412,181 @@ async function main() {
     }
   }
 
+  // ---- Medical / LTC / Inventory / HR / Security / Reports samples ----
+  const drug = await prisma.drug.create({
+    data: {
+      tenantId: tenant.id,
+      name: '氨氯地平',
+      spec: '5mg*28片',
+      quantity: 40,
+      isHighRisk: false,
+      expireAt: new Date(Date.now() + 180 * 86400000),
+    },
+  });
+  await prisma.drug.create({
+    data: {
+      tenantId: tenant.id,
+      name: '胰岛素注射液',
+      spec: '300IU',
+      quantity: 8,
+      isHighRisk: true,
+      lowStock: 5,
+      expireAt: new Date(Date.now() + 90 * 86400000),
+    },
+  });
+  await prisma.vitalSign.create({
+    data: {
+      elderId: elders[0].id,
+      systolic: 138,
+      diastolic: 86,
+      glucose: 6.2,
+      temperature: 36.6,
+      spo2: 97,
+      pulse: 72,
+    },
+  });
+  const medPlan = await prisma.medicationPlan.create({
+    data: {
+      elderId: elders[0].id,
+      drugId: drug.id,
+      dosage: '1片',
+      schedule: '每日一次',
+      startDate: new Date(),
+      active: true,
+    },
+  });
+  await prisma.medicationDose.create({
+    data: { planId: medPlan.id, scheduledAt: new Date(), status: 'pending' },
+  });
+  await prisma.healthExam.create({
+    data: {
+      elderId: elders[0].id,
+      examDate: new Date(),
+      examType: 'regular',
+      summary: '血压偏高，其余大致正常',
+      nextDueAt: new Date(Date.now() + 90 * 86400000),
+    },
+  });
+  await prisma.chronicFollowUp.create({
+    data: {
+      elderId: elders[0].id,
+      disease: '高血压',
+      followDate: new Date(),
+      result: '规律服药，血压可控',
+    },
+  });
+  await prisma.medicalOrder.create({
+    data: {
+      elderId: elders[0].id,
+      source: 'clinic',
+      content: '监测血压 BID，低盐饮食',
+      doctorName: '王医生',
+    },
+  });
+
+  for (const item of [
+    { code: 'LTC-FEED', name: '协助进食', unitPrice: 40 },
+    { code: 'LTC-TURN', name: '翻身叩背', unitPrice: 35 },
+    { code: 'LTC-BATH', name: '协助沐浴', unitPrice: 60 },
+  ]) {
+    await prisma.ltcServiceItem.create({ data: { tenantId: tenant.id, ...item } });
+  }
+  await prisma.ltcAssessment.create({
+    data: {
+      elderId: elders[1].id,
+      level: 'L2',
+      assessDate: new Date(),
+      assessor: '评估员周某',
+      resultSummary: '中度失能，符合长护险待遇',
+      status: 'submitted',
+    },
+  });
+  await prisma.ltcServiceRecord.create({
+    data: {
+      elderId: elders[1].id,
+      itemCode: 'LTC-FEED',
+      itemName: '协助进食',
+      quantity: 1,
+      amount: 40,
+      caregiver: '王护理',
+    },
+  });
+  await prisma.ltcReconciliation.create({
+    data: {
+      elderId: elders[1].id,
+      period: new Date().toISOString().slice(0, 7),
+      claimAmount: 1200,
+      approvedAmount: 0,
+      status: 'pending',
+    },
+  });
+
+  await prisma.inventoryItem.createMany({
+    data: [
+      { tenantId: tenant.id, name: '成人纸尿裤', sku: 'DP-L', category: 'diaper', quantity: 120, unit: '包', lowStock: 30 },
+      { tenantId: tenant.id, name: '一次性手套', sku: 'GL-M', category: 'consumable', quantity: 8, unit: '盒', lowStock: 10 },
+      { tenantId: tenant.id, name: '护理垫', sku: 'PD-01', category: 'care', quantity: 50, unit: '包', lowStock: 15 },
+    ],
+  });
+  await prisma.maintenanceOrder.create({
+    data: {
+      tenantId: tenant.id,
+      title: 'A栋201卫生间漏水',
+      location: 'A201',
+      description: '地漏堵塞',
+      status: 'pending',
+    },
+  });
+
+  await prisma.shift.create({
+    data: {
+      tenantId: tenant.id,
+      employeeId: caregiver.id,
+      shiftDate: new Date(),
+      shiftType: 'day',
+    },
+  });
+  await prisma.attendance.create({
+    data: { employeeId: caregiver.id, checkInAt: new Date(), note: '正常到岗' },
+  });
+
+  await prisma.alert.create({
+    data: {
+      tenantId: tenant.id,
+      type: 'sos',
+      title: '床头SOS测试告警',
+      message: '硬件对接预留演示',
+      elderId: elders[2].id,
+      source: 'hardware',
+      severity: 'high',
+      status: 'open',
+    },
+  });
+  await prisma.accessLog.create({
+    data: {
+      tenantId: tenant.id,
+      person: '张家属',
+      direction: 'in',
+      gate: '正门',
+      relatedElderId: elders[0].id,
+    },
+  });
+
+  await prisma.reportSubmission.create({
+    data: {
+      tenantId: tenant.id,
+      reportType: 'civil_monthly',
+      period: new Date().toISOString().slice(0, 7),
+      status: 'draft',
+      payloadJson: JSON.stringify({ note: '可由报表页一键重新生成' }),
+    },
+  });
+
   console.log('Seed complete');
   console.log(`Beds: ${allBeds.length}`);
   console.log('Accounts (password 123456): admin / nurse / caregiver / finance / family');
   console.log(`Family bound to elder: ${elders[0].name}`);
+  console.log('Domains seeded: medical/ltc/inventory/hr/security/reports');
   void nurse;
   void caregiver;
   void finance;

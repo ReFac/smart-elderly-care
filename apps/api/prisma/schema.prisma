@@ -25,6 +25,11 @@ model Tenant {
   alerts         Alert[]
   inventoryItems InventoryItem[]
   shifts         Shift[]
+  drugs          Drug[]
+  ltcServiceItems LtcServiceItem[]
+  reportSubmissions ReportSubmission[]
+  accessLogs     AccessLog[]
+  maintenanceOrders MaintenanceOrder[]
 }
 
 model Building {
@@ -87,6 +92,9 @@ model Employee {
   createdOrders  ServiceOrder[]  @relation("CreatedOrders")
   familyBindings FamilyBinding[]
   shifts         Shift[]
+  attendances    Attendance[]
+  performances   PerformanceRecord[]
+  medicationDoses MedicationDose[]
 
   @@unique([tenantId, username])
 }
@@ -129,6 +137,16 @@ model Elder {
   familyBindings FamilyBinding[]
   attachments    Attachment[]
   deviceLocations DeviceLocation[]
+  vitalSigns     VitalSign[]
+  medicationPlans MedicationPlan[]
+  adverseReactions AdverseReaction[]
+  healthExams    HealthExam[]
+  chronicFollowUps ChronicFollowUp[]
+  medicalOrders  MedicalOrder[]
+  referralRecords ReferralRecord[]
+  ltcAssessments LtcAssessment[]
+  ltcServiceRecords LtcServiceRecord[]
+  ltcReconciliations LtcReconciliation[]
 }
 
 model ElderHealth {
@@ -397,15 +415,19 @@ model SystemAiConfig {
 }
 
 model Alert {
-  id        String   @id @default(cuid())
-  tenantId  String
-  type      String
-  title     String
-  message   String?
-  elderId   String?
-  status    String   @default("open")
-  createdAt DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  id         String   @id @default(cuid())
+  tenantId   String
+  type       String
+  title      String
+  message    String?
+  elderId    String?
+  source     String   @default("system")
+  severity   String   @default("medium")
+  status     String   @default("open")
+  handledBy  String?
+  handledAt  DateTime?
+  createdAt  DateTime @default(now())
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
 }
 
 model InventoryItem {
@@ -413,10 +435,36 @@ model InventoryItem {
   tenantId  String
   name      String
   sku       String?
+  category  String @default("consumable")
   quantity  Float  @default(0)
   unit      String @default("件")
   lowStock  Float  @default(10)
+  expireAt  DateTime?
   tenant    Tenant @relation(fields: [tenantId], references: [id])
+  stockLogs InventoryStockLog[]
+}
+
+model InventoryStockLog {
+  id        String   @id @default(cuid())
+  itemId    String
+  type      String
+  quantity  Float
+  remark    String?
+  createdAt DateTime @default(now())
+  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+}
+
+model MaintenanceOrder {
+  id          String    @id @default(cuid())
+  tenantId    String
+  title       String
+  location    String?
+  description String?
+  status      String    @default("pending")
+  assignee    String?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
 }
 
 model Shift {
@@ -426,8 +474,31 @@ model Shift {
   shiftDate  DateTime
   shiftType  String
   floorId    String?
+  elderIds   String?
   tenant     Tenant   @relation(fields: [tenantId], references: [id])
   employee   Employee @relation(fields: [employeeId], references: [id])
+}
+
+model Attendance {
+  id         String   @id @default(cuid())
+  employeeId String
+  checkInAt  DateTime @default(now())
+  checkOutAt DateTime?
+  note       String?
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model PerformanceRecord {
+  id           String   @id @default(cuid())
+  employeeId   String
+  period       String
+  taskCount    Int      @default(0)
+  doneCount    Int      @default(0)
+  score        Float    @default(0)
+  bonusAmount  Float    @default(0)
+  remark       String?
+  createdAt    DateTime @default(now())
+  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 }
 
 model DeviceLocation {
@@ -438,4 +509,203 @@ model DeviceLocation {
   lng        Float
   recordedAt DateTime @default(now())
   elder      Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model AccessLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  person    String
+  direction String
+  gate      String?
+  relatedElderId String?
+  recordedAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+}
+
+model VitalSign {
+  id         String   @id @default(cuid())
+  elderId    String
+  recordedAt DateTime @default(now())
+  systolic   Float?
+  diastolic  Float?
+  glucose    Float?
+  temperature Float?
+  spo2       Float?
+  pulse      Float?
+  note       String?
+  elder      Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model Drug {
+  id           String   @id @default(cuid())
+  tenantId     String
+  name         String
+  spec         String?
+  unit         String   @default("盒")
+  quantity     Float    @default(0)
+  lowStock     Float    @default(5)
+  expireAt     DateTime?
+  isHighRisk   Boolean  @default(false)
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  stockLogs    DrugStockLog[]
+  plans        MedicationPlan[]
+}
+
+model DrugStockLog {
+  id        String   @id @default(cuid())
+  drugId    String
+  type      String
+  quantity  Float
+  remark    String?
+  createdAt DateTime @default(now())
+  drug      Drug     @relation(fields: [drugId], references: [id], onDelete: Cascade)
+}
+
+model MedicationPlan {
+  id        String   @id @default(cuid())
+  elderId   String
+  drugId    String
+  dosage    String
+  schedule  String
+  startDate DateTime?
+  endDate   DateTime?
+  active    Boolean  @default(true)
+  note      String?
+  elder     Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+  drug      Drug     @relation(fields: [drugId], references: [id])
+  doses     MedicationDose[]
+}
+
+model MedicationDose {
+  id        String   @id @default(cuid())
+  planId    String
+  nurseId   String?
+  scheduledAt DateTime
+  givenAt   DateTime?
+  status    String   @default("pending")
+  missedReason String?
+  note      String?
+  plan      MedicationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  nurse     Employee? @relation(fields: [nurseId], references: [id])
+}
+
+model AdverseReaction {
+  id          String   @id @default(cuid())
+  elderId     String
+  drugName    String
+  reaction    String
+  severity    String   @default("mild")
+  recordedAt  DateTime @default(now())
+  note        String?
+  elder       Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model HealthExam {
+  id          String   @id @default(cuid())
+  elderId     String
+  examDate    DateTime
+  examType    String   @default("regular")
+  summary     String?
+  reportUrl   String?
+  nextDueAt   DateTime?
+  elder       Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model ChronicFollowUp {
+  id          String   @id @default(cuid())
+  elderId     String
+  disease     String
+  followDate  DateTime
+  result      String?
+  nextDate    DateTime?
+  note        String?
+  elder       Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model MedicalOrder {
+  id          String   @id @default(cuid())
+  elderId     String
+  source      String   @default("clinic")
+  content     String
+  orderedAt   DateTime @default(now())
+  status      String   @default("active")
+  doctorName  String?
+  elder       Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model ReferralRecord {
+  id            String   @id @default(cuid())
+  elderId       String
+  hospital      String?
+  reason        String?
+  departAt      DateTime?
+  returnAt      DateTime?
+  escort        String?
+  ambulance120  Boolean  @default(false)
+  handoverNote  String?
+  elder         Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model LtcAssessment {
+  id            String   @id @default(cuid())
+  elderId       String
+  level         String
+  assessDate    DateTime
+  assessor      String?
+  resultSummary String?
+  fileUrl       String?
+  status        String   @default("draft")
+  elder         Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model LtcServiceItem {
+  id          String @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  unitPrice   Float  @default(0)
+  unit        String @default("次")
+  active      Boolean @default(true)
+  tenant      Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, code])
+}
+
+model LtcServiceRecord {
+  id          String   @id @default(cuid())
+  elderId     String
+  itemCode    String
+  itemName    String
+  quantity    Float    @default(1)
+  amount      Float    @default(0)
+  serviceAt   DateTime @default(now())
+  caregiver   String?
+  evidenceUrl String?
+  elder       Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model LtcReconciliation {
+  id          String   @id @default(cuid())
+  elderId     String
+  period      String
+  claimAmount Float    @default(0)
+  approvedAmount Float @default(0)
+  status      String   @default("pending")
+  exportUrl   String?
+  remark      String?
+  createdAt   DateTime @default(now())
+  elder       Elder    @relation(fields: [elderId], references: [id], onDelete: Cascade)
+}
+
+model ReportSubmission {
+  id          String   @id @default(cuid())
+  tenantId    String
+  reportType  String
+  period      String
+  status      String   @default("draft")
+  payloadJson String?
+  fileUrl     String?
+  submittedAt DateTime?
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
 }

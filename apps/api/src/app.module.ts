@@ -13,8 +13,13 @@ import { SettingsModule } from './settings/settings.module';
 import { AiModule } from './ai/ai.module';
 import { PaymentModule } from './payment/payment.module';
 import { GpsModule } from './gps/gps.module';
-import { PlaceholdersModule } from './placeholders/placeholders.module';
 import { UploadModule } from './upload/upload.module';
+import { MedicalModule } from './medical/medical.module';
+import { LtcModule } from './ltc/ltc.module';
+import { InventoryModule } from './inventory/inventory.module';
+import { HrModule } from './hr/hr.module';
+import { SecurityModule } from './security/security.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -32,8 +37,13 @@ import { UploadModule } from './upload/upload.module';
     AiModule,
     PaymentModule,
     GpsModule,
-    PlaceholdersModule,
     UploadModule,
+    MedicalModule,
+    LtcModule,
+    InventoryModule,
+    HrModule,
+    SecurityModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}

@@ -52,11 +52,21 @@ pnpm dev:desktop
 
 ## 模块地图
 
-**已实现：** 组织床位、老人档案/健康/合同/调床、照护计划与打卡、临时工单、探视、账单计费与押金、食堂、看板、功能开关、AI 配置  
+**九大业务域（脚手架 + CRUD，核心流程加深）：**
 
-**占位预留：** 医护发药、长护险、后勤物资、人事排班、安防告警、民政报表  
+| 域 | 能力 |
+|---|---|
+| 老人档案 | 建档/健康/合同/调床 |
+| 照护服务 | 计划/打卡/工单/探视 |
+| 医护健康 | 体征、药品、发药、体检随访、医嘱转诊 |
+| 长护险 | 评估、服务项目、留痕、对账、申报导出 |
+| 收费财务 | 计费/账单/缴费/押金 |
+| 后勤物资 | 库存出入库、低库存、报修 |
+| 人事排班 | 员工、排班、考勤、绩效统计 |
+| 安防告警 | 告警中心、风险扫描、门禁、硬件 webhook |
+| 报表看板 | 运营看板、民政月报表生成/导出 |
 
-**接口骨架：** `POST /api/ai/ocr`、`POST /api/ai/extract-form`、`POST /api/payment/checkout`、`POST /api/gps/webhook`
+**接口预留：** `POST /api/ai/ocr`、`POST /api/ai/extract-form`、`POST /api/payment/checkout`、`POST /api/gps/webhook`、`POST /api/security/hardware/webhook`
 
 ## 切换 PostgreSQL（可选）
 
