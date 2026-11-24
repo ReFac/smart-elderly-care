@@ -1,3 +1,4 @@
+import { residentLabel } from './people-labels.js';
 import { btn, facts, hasGrant, node, section } from './shared.js';
 import { originalViewer } from './document-original.js';
 
@@ -69,7 +70,7 @@ export async function reviewOcr(ctx, doc) {
   const mismatch = observed.some((name) => name !== resident.name);
   form.append(
     facts([
-      ['当前长者', resident.name],
+      ['当前长者', residentLabel(ctx, resident)],
       ['原件识别姓名', observed.join('、') || '请核对原件']
     ]),
     input('对照原件后输入长者姓名', identity)

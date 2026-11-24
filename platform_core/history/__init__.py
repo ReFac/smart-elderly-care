@@ -92,7 +92,7 @@ def record(
         "agent"
         if action.startswith("agent.") or actor["id"] == "rounds-agent"
         else "system"
-        if actor["id"] in ("platform-operator", "archive-service")
+        if actor["id"] in ("platform-operator", "archive-service", "trial-service")
         or actor["id"].startswith("channel-")
         else "human"
     )
@@ -164,7 +164,7 @@ def record(
     ][:16]
 
 
-SELECT = """SELECT a.revision,a.at,a.action,a.summary,a.actorId,a.actorName,a.room,a.previousRoom,a.residentId,a.agentRunId,
+SELECT = """SELECT a.revision,a.at,a.action,a.summary,a.actorId,a.actorName,a.actorPosition,a.room,a.previousRoom,a.residentId,a.agentRunId,
  h.comment,h.source,h.undoOf,h.rooms,h.people,
  (SELECT json_group_array(t.entity) FROM history_targets t WHERE t.revision=a.revision AND t.kind='campus') AS campuses,
  (SELECT u.revision FROM history_commits u WHERE u.undoOf=a.revision) AS undoneBy,
@@ -238,7 +238,7 @@ class Reader:
             from ..provider.speech import can_read_agent_history
 
             return own and can_read_agent_history(self.db, self.user, row["revision"])
-        if action == "leads.public":
+        if action in ("leads.public", "trial.expire"):
             return policy.has(self.user, "intake")
         if action == "family.consent":
             return policy.has(self.user, "relatives") and policy.has(
@@ -271,6 +271,7 @@ class Reader:
         if action in (
             "dossier.signSummary",
             "dossier.reviewDocument",
+            "dossier.confirmVisit",
         ) and not policy.has(self.user, "clinical"):
             return False
         return True
@@ -310,6 +311,8 @@ class Reader:
             "dossier_documents",
             "dossier_ocr_jobs",
             "dossier_document_reviews",
+            "dossier_visit_records",
+            "dossier_visit_originals",
         ):
             return policy.has(self.user, "medical")
         if name in policy.COLLECTION_GRANTS and name != "handovers":
@@ -370,6 +373,7 @@ class Reader:
                     "summary",
                     "actorId",
                     "actorName",
+                    "actorPosition",
                     "room",
                     "previousRoom",
                     "undoneBy",

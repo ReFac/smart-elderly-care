@@ -1,3 +1,4 @@
+import { residentAnchor } from './people-labels.js';
 import {
   hasGrant,
   kpis,
@@ -157,7 +158,7 @@ export function monthlyPanel(ctx) {
                       },
                       {
                         label: '长者',
-                        view: (t) => residentName(ctx, t.residentId),
+                        view: (t) => residentAnchor(ctx, t.residentId),
                       },
                       {
                         label: '工单',

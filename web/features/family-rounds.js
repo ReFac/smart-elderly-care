@@ -1,3 +1,4 @@
+import { residentLabel } from './people-labels.js';
 import { node, choose, btn, badge, facts, named, disclosure, section } from './shared.js';
 
 const sharing = '站内简报包含当日照护工单数量、咳嗽观察是否提示增加，以及复核建议。';
@@ -7,7 +8,7 @@ function consent(ctx, resident, recipient) {
   const enabled = !recipient.allowed;
   const title = enabled ? '同意分享巡查简报' : '撤回简报分享';
   const fields = [
-    ['长者', resident.name],
+    ['长者', residentLabel(ctx, resident)],
     ['接收家属', recipient.name],
     ['站内简报', enabled ? '允许分享' : '撤回授权'],
   ];
@@ -36,7 +37,7 @@ function consent(ctx, resident, recipient) {
   if (ctx.state.user.portalSelf) return submit();
   ctx.dialog({
     title: '登记长者意愿',
-    description: resident.name + ' → ' + recipient.name + ' · ' + title + '。' + sharing,
+    description: residentLabel(ctx, resident) + ' → ' + recipient.name + ' · ' + title + '。' + sharing,
     fields: [
       {
         name: 'method',
@@ -113,7 +114,7 @@ export function familyInbox(ctx, resident) {
           {
             title: subscribed ? '取消家属简报订阅' : '订阅每日巡查简报',
             fields: [
-              ['长者', resident.name],
+              ['长者', residentLabel(ctx, resident)],
               ['接收渠道', '本账号的站内收件箱'],
               ['订阅', subscribed ? '取消' : '开启'],
             ],
@@ -166,7 +167,7 @@ export function familyInbox(ctx, resident) {
               {
                 title: '将巡查简报标为已读',
                 fields: [
-                  ['长者', resident.name],
+                  ['长者', residentLabel(ctx, resident)],
                   ['简报日期', message.day],
                 ],
               },

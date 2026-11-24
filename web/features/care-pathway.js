@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { downloadDocument, openDocumentButton } from './secure-documents.js';
 import {
   choose,
@@ -92,7 +93,7 @@ function showFollowup(ctx, r) {
         ['分级人', r.gradedBy],
         ['干预计划', r.intervention],
         ['预约', r.dueDate],
-        ['责任人', r.assignee],
+        ['责任人', staffLabel(ctx, r.assignee, r.assigneeId)],
         ['实际干预', r.actual],
         ['效果评价', r.outcome],
         ['完成人', r.finishedBy],
@@ -119,10 +120,10 @@ export function followups(ctx) {
     filter: status,
     action: btn(ctx, '登记筛查', () => createScreen(ctx)),
     cols: [
-      { label: '长者', view: (r) => residentName(ctx, r.residentId) },
+      { label: '长者', view: (r) => residentAnchor(ctx, r.residentId) },
       { label: '筛查项目', view: (r) => named(r.subject, r.finding) },
       { label: '跟进级别', view: (r) => r.priority || '待分级' },
-      { label: '预约随访', view: (r) => named(r.dueDate || '待安排', r.assignee) },
+      { label: '预约随访', view: (r) => named(r.dueDate || '待安排', staffLabel(ctx, r.assignee, r.assigneeId)) },
       {
         label: '状态',
         view: (r) =>
@@ -138,7 +139,7 @@ export function followups(ctx) {
 function createReferral(ctx, residentId) {
   const choices = byRecent(ctx.state.residents).map((r) => ({
     value: r.id,
-    label: r.name + ' · ' + r.status,
+    label: residentLabel(ctx, r) + ' · ' + r.status,
   }));
   const fields = residentId
     ? [select('assessmentId', '依据评估', assessmentChoices(ctx, residentId), { required: false })]
@@ -208,12 +209,12 @@ function showReferral(ctx, r) {
         ['当时的过敏记录', r.allergies],
         ['当时的关注项', r.risk],
         ['依据评估编号', r.assessmentId],
-        ['经办人', r.operator],
+        ['经办人', staffLabel(ctx, r.operator, r.operatorId)],
         ['日期', r.date],
         ['状态', r.status],
         ['接收人', r.receivedBy],
         ['核实依据', r.receipt],
-        ['本院回执登记人', r.recordedBy],
+        ['本院回执登记人', staffLabel(ctx, r.recordedBy)],
         ['登记回执日期', r.receivedAt],
       ].filter(([, value]) => value)
     )
@@ -229,7 +230,7 @@ function showReferral(ctx, r) {
         (entry) =>
           named(
             entry.decision + (entry.scope ? ' · ' + entry.scope : ''),
-            [entry.date, entry.operator, entry.basis].join(' · ')
+            [entry.date, staffLabel(ctx, entry.operator), entry.basis].join(' · ')
           ),
         '尚未登记本人授权'
       )
@@ -240,7 +241,7 @@ function showReferral(ctx, r) {
         r.exports || [],
         (e) =>
           node('div', 'fx-profile', [
-            named(e.date + ' · ' + e.operator, e.id + ' · 授权记录 ' + e.consentNumber),
+            named(e.date + ' · ' + staffLabel(ctx, e.operator), e.id + ' · 授权记录 ' + e.consentNumber),
             granted && e.consentNumber === history.length
               ? link(ctx, '下载加密包', () =>
                   downloadDocument(ctx, { kind: 'referral', id: r.id, exportId: e.id })
@@ -294,7 +295,7 @@ export function referrals(ctx) {
       value: (r) => residentName(ctx, r.residentId) + r.destination,
     },
     cols: [
-      { label: '长者', view: (r) => residentName(ctx, r.residentId) },
+      { label: '长者', view: (r) => residentAnchor(ctx, r.residentId) },
       { label: '交接类型', view: (r) => r.kind },
       { label: '接收单位', view: (r) => named(r.destination, r.date) },
       { label: '状态', view: (r) => badge(ctx, r.status) },

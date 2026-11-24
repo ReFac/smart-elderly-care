@@ -1,3 +1,4 @@
+import { residentAnchor, staffLabel } from './people-labels.js';
 import {
   badge,
   btn,
@@ -23,7 +24,7 @@ const mine = (ctx, row) => row.status === '待签收' && row.assigneeId === ctx.
 async function create(ctx, button) {
   button.disabled = true;
   try {
-    const { recipients } = await ctx.get('/api/care/handover-recipients');
+    const { recipients, positions = {} } = await ctx.get('/api/care/handover-recipients');
     if (!button.isConnected) return;
     if (!recipients.length) {
       const body = node(
@@ -45,7 +46,7 @@ async function create(ctx, button) {
     resident.options.unshift({ value: 'personal', label: '本人当班照护' }, { value: '', label: '全院交班（手工填写）' });
     const accounts = recipients.map((r) => ({
       value: r.id,
-      label: r.displayName + ' · ' + r.username,
+      label: staffLabel(ctx, { ...r, role: positions[r.id] }) + ' · ' + r.username,
     }));
     accounts.unshift({ value: '', label: '请选择接班人员' });
     let draftStamp = '';
@@ -78,7 +79,7 @@ async function create(ctx, button) {
     });
     const dialog = ctx.dialog({
       title: '登记交班',
-      description: '交班人 ' + ctx.state.user.displayName + '。初稿可编辑，提交后交由所选账号签收。',
+      description: '交班人 ' + staffLabel(ctx, ctx.state.user) + '。初稿可编辑，提交后交由所选账号签收。',
       fields: [
         resident,
         select('assigneeId', '接班人员', accounts),
@@ -119,11 +120,11 @@ async function create(ctx, button) {
 export function showHandover(ctx, row) {
   const body = node('div', 'fx-profile', [
     facts([
-      ['交接范围', subject(ctx, row)],
+      ['交接范围', row.residentId ? residentAnchor(ctx, row.residentId) : subject(ctx, row)],
       ['状态', statusOf(row)],
-      ['交班人', row.senderName],
+      ['交班人', staffLabel(ctx, row.senderName, row.senderId)],
       ['交班时间', stamp(row.createdAt) || row.date],
-      ['接班人', row.assignee],
+      ['接班人', staffLabel(ctx, row.assignee, row.assigneeId)],
     ]),
     section('交接要点', node('p', '', row.note || '未填写')),
   ]);
@@ -220,9 +221,9 @@ export function handovers(ctx) {
     },
     cols: [
       { label: '交班时间', view: (r) => named(r.date, r.createdAt?.slice(11, 16)) },
-      { label: '交接范围', view: (r) => subject(ctx, r) },
-      { label: '交班人', view: (r) => r.senderName || '—' },
-      { label: '接班人', view: (r) => r.assignee },
+      { label: '交接范围', view: (r) => r.residentId ? residentAnchor(ctx, r.residentId) : subject(ctx, r) },
+      { label: '交班人', view: (r) => staffLabel(ctx, r.senderName, r.senderId) },
+      { label: '接班人', view: (r) => staffLabel(ctx, r.assignee, r.assigneeId) },
       {
         label: '交接要点',
         view: (r) => (r.note?.length > 36 ? r.note.slice(0, 36) + '…' : r.note || '—'),

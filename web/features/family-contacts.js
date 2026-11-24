@@ -1,3 +1,4 @@
+import { residentLabel } from './people-labels.js';
 import { node, choose, btn, badge, disclosure, facts, named, today, hasGrant } from './shared.js';
 
 import {
@@ -96,7 +97,7 @@ async function edit(ctx, resident, member = {}) {
   });
   ctx.dialog({
     title: member.id ? '编辑家庭成员' : '添加家庭成员',
-    description: resident.name + ' · 添加配偶、每一位子女或其他联系人。',
+    description: residentLabel(ctx, resident) + ' · 添加配偶、每一位子女或其他联系人。',
     content: node('div', 'dossier-form', [
       kind.element,
       relation.element,
@@ -242,7 +243,7 @@ export function contactBook(ctx, resident, profile, readOnly = false) {
                 {
                   title: '移除家庭成员',
                   fields: [
-                    ['档案', resident.name],
+                    ['档案', residentLabel(ctx, resident)],
                     ['移除成员', m.name + ' · ' + m.kind],
                   ],
                 },

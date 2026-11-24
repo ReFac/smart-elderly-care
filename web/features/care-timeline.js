@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { btn, canAct, choose, facts, node, today } from './shared.js';
 
 function clock(stamp) {
@@ -12,8 +13,8 @@ function entryCard(ctx, row, openProof) {
   const receipt = node('article', 'ct-receipt', [
     heading,
     facts([
-      ['长者', row.resident],
-      ['执行人', row.operator || '未登记'],
+      ['长者', residentAnchor(ctx, row.residentId)],
+      ['执行人', row.operator ? staffLabel(ctx, row.operator, row.operatorId) : '未登记'],
       ['执行记录', row.note || '未填'],
       ['执行时房间', row.roomLabel || '未登记'],
       ['原始工单', row.taskId],
@@ -28,7 +29,7 @@ function entryCard(ctx, row, openProof) {
 function groupCard(ctx, group, openProof, focusedIds) {
   const entries = group.entries;
   const labels = (idKey, nameKey, fallback) => {
-    const people = new Map(entries.map((e) => [e[idKey] || e[nameKey], e[nameKey] || fallback]));
+    const people = new Map(entries.map((e) => [e[idKey] || e[nameKey], (idKey === 'residentId' ? residentLabel(ctx, e.residentId) : staffLabel(ctx, e[nameKey], e[idKey])) || fallback]));
     const counts = new Map();
     for (const name of people.values()) counts.set(name, (counts.get(name) || 0) + 1);
     return [...people]

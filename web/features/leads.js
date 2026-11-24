@@ -1,3 +1,4 @@
+import { staffLabel } from './people-labels.js';
 import {
   badge, btn, canAct, choose, facts, field, link, memo, named, node, page, section, select, table, tabs, today,
 } from './shared.js';
@@ -121,7 +122,7 @@ function detail(ctx, row) {
   const entries = history.map(e => node('li', '', [
     node('time', '', stamp(e.occurredAt)),
     node('div', '', [
-      node('strong', '', e.kind), e.actorName ? node('small', 'fx-muted', ' · ' + e.actorName) : null,
+      node('strong', '', e.kind), e.actorName ? node('small', 'fx-muted', ' · ' + staffLabel(ctx, e.actorName, e.actorId)) : null,
       e.preferredAt ? node('p', '', '期望到访 ' + stamp(e.preferredAt)) : null,
       e.date && e.start && e.end ? node('p', '', (e.bookingKind === 'callback' ? '电话回访' : '参观接待') + ' · ' + e.date + ' ' + e.start + '–' + e.end + ' · 席位 ' + e.seat) : null,
       e.outcome ? node('div', 'lead-event-outcome', e.outcome) : null,
@@ -186,7 +187,7 @@ function incomingList(ctx, campusId, date) {
     cols: [
       { label: '来电时间', view: e => stamp(e.occurredAt).slice(11) },
       { label: '客户', view: e => named(leadName(inBranch.get(e.leadId)), inBranch.get(e.leadId).phone) },
-      { label: '沟通反馈', view: e => e.feedback || '—' }, { label: '记录人员', view: e => e.actorName || '—' },
+      { label: '沟通反馈', view: e => e.feedback || '—' }, { label: '记录人员', view: e => staffLabel(ctx, e.actorName, e.actorId) },
       { label: '操作', view: e => link(ctx, '查看记录', () => detail(ctx, inBranch.get(e.leadId))) },
     ],
   });

@@ -1,4 +1,6 @@
+import { residentLabel } from './people-labels.js';
 import { node, today, hasGrant } from './shared.js';
+import { openVisitEditor } from './medical-visit-intake.js';
 import {
   loadProfileChoices,
   picker,
@@ -13,6 +15,12 @@ export async function editResident(ctx, resident, profile) {
     const { choices, regions } = await loadProfileChoices();
     const value = { ...resident, ...profile };
     const form = node('div', 'dossier-form');
+    if (ctx.state.allowedActions?.includes('dossier.confirmVisit')) {
+      form.append(group('病例与过往就诊', [
+        ctx.ui.button('手动录入病例', () => openVisitEditor(ctx.current?.() || ctx, resident, 'manual')),
+        ctx.ui.button('上传一组就诊资料', () => openVisitEditor(ctx.current?.() || ctx, resident, 'ai')),
+      ]));
+    }
     const name = textControl('姓名', value.name, 'text', { required: true, maxLength: 60 });
     const phone = textControl('长者本人手机号（选填）', value.phone, 'tel', {
       maxLength: 40,
@@ -148,7 +156,7 @@ export async function editResident(ctx, resident, profile) {
           ctx.toast('登记内容没有变化');
           return true;
         }
-        return ctx.command('dossier.profile', payload, { target: resident.name, fields: details });
+        return ctx.command('dossier.profile', payload, { target: residentLabel(ctx, resident), fields: details });
       },
     });
   } catch (err) {

@@ -4,6 +4,7 @@ import { node } from './shared.js';
 import { holdToSpeak, voiceServiceReason } from './agent-voice.js';
 import { openPriorReports } from './assistants.js';
 import { assistantCommand, assistantPageLinks, openAssistantAction } from './assistant-actions.js';
+import { openVisitEditor } from './medical-visit-intake.js';
 
 const path = '/api/assistant/chat';
 const dayLabel = new Intl.DateTimeFormat('zh-CN', {
@@ -222,7 +223,13 @@ function buildChat(getContext, actor, area, region, label) {
     },
   });
   const sendActions = node('div', 'assistant-send-actions', [keys, send]);
-  const tools = node('div', 'assistant-compose-tools', [voice.control, sendActions]);
+  const visit = !area && ctx.state.allowedActions?.includes('dossier.confirmVisit')
+    ? control('传就诊资料', 'folder', 'assistant-visit', () => openVisitEditor(getContext()))
+    : null;
+  if (visit) visit.title = '上传一位长者的一组就诊图片或 PDF';
+  const tools = node('div', 'assistant-compose-tools', [
+    node('div', 'assistant-compose-inputs', [voice.control, visit]), sendActions,
+  ]);
   const composeBox = node('div', 'assistant-compose-box', [input, tools]);
   composer.append(
     error,
@@ -250,6 +257,7 @@ function buildChat(getContext, actor, area, region, label) {
       voicePhase !== 'idle';
     reset.disabled = !loaded || waiting || sending || voicePhase !== 'idle' || !messages.length;
     if (voice) voice.control.disabled = blocked;
+    if (visit) visit.disabled = sending || network.probing || voicePhase !== 'idle';
   }
   function adjustInput() {
     input.style.height = 'auto';

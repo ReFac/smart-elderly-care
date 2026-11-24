@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor, staffLabel } from './features/people-labels.js';
 import { inquiryForm } from './features/residency.js';
 import { completeTask } from './features/care.js';
 import { badge, button, el, empty, icon } from './lib/ui.js';
@@ -471,10 +472,10 @@ function workQueue(ctx) {
 function taskDetails(ctx, t) {
   const r = ctx.state.residents.find((r) => r.id === t.residentId);
   const fields = [
-    ['服务长者', r?.name],
+    ['服务长者', residentLabel(ctx, r)],
     ['工单编号', t.id],
     ['计划时间', t.date + ' ' + t.time],
-    ['责任人', t.assignee],
+    ['责任人', staffLabel(ctx, t.assignee, t.assigneeId)],
     ['状态', t.status],
     ['执行记录', t.note],
   ];
@@ -517,9 +518,9 @@ function tasksPanel(ctx, tasks) {
           '',
           action(t.title, () => taskDetails(ctx, t), 'op-task-open')
         ),
-        el('td', '', p?.name || '—'),
+        group('td', '', residentAnchor(ctx, p)),
         el('td', 'op-time', t.time),
-        el('td', 'op-assignee', t.assignee),
+        el('td', 'op-assignee', staffLabel(ctx, t.assignee, t.assigneeId)),
         group('td', '', badge(t.status, t.status === '已完成' ? 'blue' : 'amber'))
       )
     );

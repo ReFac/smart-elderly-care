@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { node, page, table, btn, badge, facts, records, section, named, today } from './shared.js';
 import {
   loadProfileChoices,
@@ -9,7 +10,7 @@ import {
 
 function history(ctx, person, rows) {
   ctx.detail(
-    person.name + ' · 长护险办理凭证',
+    residentLabel(ctx, person) + ' · 长护险办理凭证',
     records([...rows].reverse(), (e) =>
       section(
         e.date + ' · ' + e.event,
@@ -22,7 +23,7 @@ function history(ctx, person, rows) {
             ['核定服务方式', e.service],
             ['待遇起止', e.startsOn ? [e.startsOn, e.endsOn || '文书未列截止日'].join(' 至 ') : ''],
             ['文书补充', e.note],
-            ['登记者', e.operator],
+            ['登记者', staffLabel(ctx, e.operator)],
           ].filter(([, v]) => v),
         ),
       ),
@@ -42,7 +43,7 @@ async function register(ctx, people, initial) {
   const roster = node('select');
   roster.required = true;
   roster.add(new Option('选择已建档的长者', ''));
-  for (const r of people) roster.add(new Option(r.name + ' · ' + r.id, r.id));
+  for (const r of people) roster.add(new Option(residentLabel(ctx, r) + ' · ' + r.id, r.id));
   roster.value = initial || '';
   const stage = picker('办理事项', [], '', true);
   const day = textControl('经办日期', today(ctx), 'date', { required: true, max: today(ctx) });
@@ -173,7 +174,7 @@ export function longCare(ctx) {
       filter: { label: '经办阶段', value: (r) => r.last.displayStatus },
       empty: '尚无长护险经办记录。可选择已有长者档案，登记参保或补录已核定待遇。',
       cols: [
-        { label: '长者', view: (r) => named(r.person.name, r.person.id) },
+        { label: '长者', view: (r) => named(residentAnchor(ctx, r.person), r.person.id) },
         { label: '统筹地区', view: (r) => r.last.regionLabel },
         { label: '最新阶段', view: (r) => badge(ctx, r.last.displayStatus) },
         { label: '最近办理', view: (r) => r.last.date },

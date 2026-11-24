@@ -1,3 +1,4 @@
+import { staffLabel } from './people-labels.js';
 import { badge, canAct, field, memo, node, select, table, today } from './shared.js';
 import { taskForm } from './care.js';
 import { routes } from '../lib/navigation.js';
@@ -124,7 +125,7 @@ export function openAssistantAction(ctx, action) {
         { value: '', label: '选择负责员工' },
         ...(ctx.state.supplyAssignees || []).map((user) => ({
           value: user.id,
-          label: user.label + ' · ' + user.role,
+          label: staffLabel(ctx, {displayName:user.label, role:user.role, id:user.id}),
         })),
       ]),
       field('dueDate', '执行日期', { type: 'date', min: today(ctx), value: today(ctx) }),
@@ -154,7 +155,7 @@ function finishButton(ctx, row) {
       {
         title: '完成物资工单',
         target: row.title,
-        fields: [['执行人', row.assignee]],
+        fields: [['执行人', staffLabel(ctx, row.assignee, row.assigneeId)]],
       },
     ),
   );
@@ -178,7 +179,7 @@ export function supplyOrders(ctx, mine = false) {
             node('small', '', row.description),
           ]),
       },
-      { label: '执行人', view: (row) => row.assignee },
+      { label: '执行人', view: (row) => staffLabel(ctx, row.assignee, row.assigneeId) },
       { label: '执行日期', view: (row) => row.dueDate },
       {
         label: '进度',
@@ -222,7 +223,7 @@ export function staffNotices(ctx) {
             node('span', '', row.description),
           ]),
       },
-      { label: '发布人', view: (row) => row.publisher },
+      { label: '发布人', view: (row) => staffLabel(ctx, row.publisher, row.publisherId) },
       { label: '发布时间', view: (row) => row.createdAt.slice(0, 16).replace('T', ' ') },
     ],
   });

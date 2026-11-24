@@ -151,6 +151,7 @@ ACTION_GRANTS = {
     "dossier.document": "medical.write",
     "dossier.ocr": "medical.write",
     "dossier.reviewDocument": "medical.write",
+    "dossier.confirmVisit": "medical.write",
     "dossier.signSummary": "medical",
     "agent.start": "assistants",
     "agent.publish": "assistants",
@@ -343,7 +344,7 @@ def authorize(user, action, payload, state):
         require(user, "staff.manage")
     if action == "care.assess" and "scale" in payload and not can_record_scale(user):
         raise PermissionError("标准量表原表录入需要照护及临床或医疗档案权限")
-    if action == "dossier.reviewDocument":
+    if action in ("dossier.reviewDocument", "dossier.confirmVisit"):
         require(user, "clinical")
         require(user, "medical")
     if action == "dossier.signSummary":
@@ -390,7 +391,7 @@ def allowed_actions(user):
         actions = [
             a
             for a in actions
-            if a not in ("dossier.reviewDocument", "dossier.signSummary")
+            if a not in ("dossier.reviewDocument", "dossier.signSummary", "dossier.confirmVisit")
         ]
     if not has(user, "clinical"):
         actions = [a for a in actions if ACTION_GRANTS.get(a) != "clinical.rules"]
@@ -425,7 +426,7 @@ def can_view_audit(user, action, *, agent_initiator=None, agent_grants=()):
         return False
     if user["kind"] == "owner":
         return True
-    if action == "leads.public":
+    if action in ("leads.public", "trial.expire"):
         return has(user, "intake")
     if action == "family.consent":
         return has(user, "relatives") and has(user, "family.share")
@@ -525,6 +526,7 @@ def visible_data(state, user):
                     "formalizedAt",
                     "trialDays",
                     "trialEndsAt",
+                    "trialReleasedOn",
                     "dischargedAt",
                     "archiveUntil",
                     "registeredAt",

@@ -143,6 +143,10 @@ def authorize_command(db, user, action, payload, state):
         return
     if action in ("care.confirmStay", "care.endTrial", "care.renew") and user.get("facilityScope"):
         require_resident(db, user, payload.get("residentId"), state)
+        if action == "care.confirmStay" and payload.get("bedId"):
+            beds = allowed_beds(db, user, include_rooms=True)
+            if beds is not None and payload["bedId"] not in beds:
+                raise PermissionError("请选择获授权的床位")
     if action in ("care.register", "care.admit", "care.transfer") and user.get(
         "facilityScope"
     ):

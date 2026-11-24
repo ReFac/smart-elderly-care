@@ -1,3 +1,4 @@
+import { auditActorLabel } from './people-labels.js';
 import { node, page, table, named } from './shared.js';
 
 export function activityPage(ctx) {
@@ -51,7 +52,7 @@ export function activityPage(ctx) {
           rows,
           cols: [
             { label: '时间', view: (r) => named(r.at.slice(0, 10), r.at.slice(11, 19)) },
-            { label: '操作人', view: (r) => named(r.actorName || '早期记录', r.actorLogin || '') },
+            { label: '操作人', view: (r) => named(auditActorLabel(ctx, r, '早期记录'), r.actorLogin || '') },
             {
               label: '房间',
               view: (r) =>

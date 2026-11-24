@@ -137,7 +137,13 @@ def after_restore(db, now):
     state = json.loads(
         db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
     )
-    if clear_due(db, state, now.date().isoformat()):
+    from . import trial_expiry
+
+    day = now.date().isoformat()
+    overdue = trial_expiry.due(state, day)
+    for person in overdue:
+        trial_expiry.release(state, person)
+    if clear_due(db, state, day) or overdue:
         db.execute(
             "UPDATE workspace SET data=? WHERE id=1",
             (json.dumps(state, ensure_ascii=False, separators=(",", ":")),),

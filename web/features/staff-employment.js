@@ -1,3 +1,4 @@
+import { staffLabel } from './people-labels.js';
 import { asBase64 } from './dossier.js';
 import { btn, facts, node, section } from './shared.js';
 
@@ -51,7 +52,7 @@ function contractForm(ctx, person) {
         startsOn:start.value, endsOn:end.disabled ? '' : end.value, filename:file.name,
         mime, imageBase64: await asBase64(file)};
       const saved = await ctx.command('access.staffContract', payload, {
-        title:'留存劳动合同原件', target:person.displayName,
+        title:'留存劳动合同原件', target:staffLabel(ctx, person),
         fields:[['签订日期',payload.signedOn], ['合同期限', payload.startsOn + ' 至 ' + (payload.endsOn || '无固定期限')], ['原件',file.name]],
       });
       if (saved) await openEmployment(ctx, person);
@@ -61,13 +62,13 @@ function contractForm(ctx, person) {
       save.disabled = false;
     }
   };
-  ctx.detail('留存劳动合同 · ' + person.displayName, form).dataset.managedAccountId = person.id;
+  ctx.detail('留存劳动合同 · ' + staffLabel(ctx, person), form).dataset.managedAccountId = person.id;
 }
 
 export async function openEmployment(ctx, person) {
   const path = '/api/staff/' + encodeURIComponent(person.id) + '/employment';
   const content = node('div', 'fx-profile', node('p', 'fx-muted', '正在读取员工资料…'));
-  const dialog = ctx.detail(person.displayName + ' · 劳动合同与工资日', content);
+  const dialog = ctx.detail(staffLabel(ctx, person) + ' · 劳动合同与工资日', content);
   if (person.id !== ctx.state.user.id) dialog.dataset.managedAccountId = person.id;
   let profile;
   try {
@@ -85,14 +86,14 @@ export async function openEmployment(ctx, person) {
   ]);
   if (profile.canEdit) {
     payroll.append(btn(ctx, '设置工资日', () => ctx.dialog({
-      title:'设置工资日 · ' + person.displayName,
+      title:'设置工资日 · ' + staffLabel(ctx, person),
       description:'当月没有约定日期时，工资日按当月最后一天显示。',
       fields:[{name:'payday', label:'每月工资日', type:'select', required:true, value:profile.payday ? String(profile.payday) : '',
         options:[{value:'',label:'选择日期'},...Array.from({length:31},(_,i)=>({value:String(i+1),label:'每月 '+(i+1)+' 日'}))]}],
       submitLabel:'保存工资日',
       onSubmit: async ({payday}) => {
         const saved = await ctx.command('access.staffPayday',{id:person.id,payday:Number(payday)}, {
-          title:'保存工资日', target:person.displayName, fields:[['每月工资日',payday+' 日']],
+          title:'保存工资日', target:staffLabel(ctx, person), fields:[['每月工资日',payday+' 日']],
         });
         if (saved) await openEmployment(ctx, person);
         return saved;
@@ -109,7 +110,7 @@ export async function openEmployment(ctx, person) {
     original.rel = 'noopener noreferrer';
     versions.append(section('第 ' + contract.version + ' 版 · ' + contract.signedOn + ' 签订', [
       facts([['合同编号',contract.number || '未登记'], ['合同期限',contract.endsOn ? contract.startsOn + ' 至 ' + contract.endsOn : contract.startsOn + ' 起 · 无固定期限'],
-        ['留存人',contract.recordedBy], ['原件名称',contract.filename]]), original,
+        ['留存人',staffLabel(ctx, contract.recordedBy)], ['原件名称',contract.filename]]), original,
     ]));
   }
   content.replaceChildren(section('工资日',payroll),section('劳动合同',versions));

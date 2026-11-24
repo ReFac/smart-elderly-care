@@ -1,15 +1,16 @@
+import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { badge, canAct, facts, link, memo, named, node, select, table } from './shared.js';
 
 const mine = (ctx, row) => row.status === '待回访' && row.assigneeId === ctx.state.user.id;
-const personName = (ctx, row) => ctx.state.residents.find(r => r.id === row.residentId)?.name || row.residentId;
+const personName = (ctx, row) => residentLabel(ctx, row.residentId);
 
 function show(ctx, row) {
   const target = personName(ctx, row);
   const details = facts([
     ['长者', target],
     ['未入住原因', row.reason],
-    ['回访人员', row.assignee],
-    ['派发人', row.assignedByName],
+    ['回访人员', staffLabel(ctx, row.assignee, row.assigneeId)],
+    ['派发人', staffLabel(ctx, row.assignedByName, row.assignedBy)],
     ['计划回访日', row.dueDate],
   ]);
   if (mine(ctx, row) && canAct(ctx, 'care.finishTrialFollowup')) {
@@ -35,7 +36,7 @@ function show(ctx, row) {
   if (row.report) body.append(facts([
     ['回访方式', row.report.method], ['回访结果', row.report.outcome],
     ['沟通经过与反馈', row.report.feedback], ['后续安排', row.report.nextSteps],
-    ['报告人', row.reportedByName], ['提交时间', row.reportedAt.slice(0, 16).replace('T', ' ')],
+    ['报告人', staffLabel(ctx, row.reportedByName, row.reportedBy)], ['提交时间', row.reportedAt.slice(0, 16).replace('T', ' ')],
   ]));
   return ctx.detail('试住回访记录', body);
 }
@@ -43,9 +44,9 @@ function show(ctx, row) {
 async function reassign(ctx, row) {
   try {
     const query = new URLSearchParams({ residentId: row.residentId });
-    const { recipients } = await ctx.get('/api/care/trial-assignees?' + query);
+    const { recipients, positions = {} } = await ctx.get('/api/care/trial-assignees?' + query);
     const choices = recipients.filter(a => a.id !== row.assigneeId).map(a => ({
-      value: a.id, label: a.displayName + ' · ' + a.username,
+      value: a.id, label: staffLabel(ctx, { ...a, role: positions[a.id] }) + ' · ' + a.username,
     }));
     if (!choices.length) return ctx.toast('暂无其他有权接手的在岗人员');
     return ctx.dialog({
@@ -54,7 +55,7 @@ async function reassign(ctx, row) {
       submitLabel: '核对改派',
       onSubmit: ({ assigneeId }) => ctx.command('care.reassignTrialFollowup', { taskId: row.id, assigneeId }, {
         title: '改派试住回访', target: personName(ctx, row),
-        fields: [['原负责人', row.assignee], ['新负责人', choices.find(c => c.value === assigneeId).label]],
+        fields: [['原负责人', staffLabel(ctx, row.assignee, row.assigneeId)], ['新负责人', choices.find(c => c.value === assigneeId).label]],
       }),
     });
   } catch (e) {
@@ -72,8 +73,8 @@ export function trialFollowups(ctx) {
       matches: (r, choice) => choice === '待我回访' ? mine(ctx, r) : r.status === choice,
     },
     cols: [
-      { label: '长者', view: r => named(personName(ctx, r), r.reason) },
-      { label: '回访人员', view: r => r.assignee },
+      { label: '长者', view: r => named(residentAnchor(ctx, r.residentId), r.reason) },
+      { label: '回访人员', view: r => staffLabel(ctx, r.assignee, r.assigneeId) },
       { label: '计划回访日', view: r => r.dueDate },
       { label: '进度', view: r => badge(ctx, r.status, r.report ? 'green' : 'amber') },
       {

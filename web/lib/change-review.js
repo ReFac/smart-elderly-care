@@ -1,3 +1,4 @@
+import { residentLabel } from '../features/people-labels.js';
 import { button, el, icon } from './ui.js';
 import { detail } from './dialogs.js';
 
@@ -236,10 +237,10 @@ export function changePreview(state, action, payload, options = {}) {
   const person = state.residents?.find(
     (r) => r.id === (payload.residentId || targetTask?.residentId),
   );
-  const bed = state.beds?.find((r) => r.id === person?.bedId);
+
   const target =
     options.target ||
-    [person?.name, bed?.label, targetTask?.title].filter(Boolean).join(' · ') ||
+    [person && residentLabel({ state }, person), targetTask?.title].filter(Boolean).join(' · ') ||
     payload.name ||
     dialog?.getAttribute('aria-label') ||
     state.uiSettings.institutionName;
@@ -255,7 +256,7 @@ export function changePreview(state, action, payload, options = {}) {
       text = '••••••（已填写）';
     else if (input?.tagName === 'SELECT')
       text = [...input.selectedOptions].map((o) => o.textContent).join('、');
-    else if (key === 'residentId' && person) text = person.name;
+    else if (key === 'residentId' && person) text = residentLabel({ state }, person);
     else if (key === 'taskId' && targetTask) text = targetTask.title;
     else if (key === 'targetAction') text = actionTitle(value);
     else text = printable(value);

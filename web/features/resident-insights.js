@@ -1,3 +1,4 @@
+import { residentLabel } from './people-labels.js';
 import { node, choose, btn, badge, field, select, hasGrant, today } from './shared.js';
 
 const modes = { inherit: '跟随机构', auto: '定时生成', manual: '手动生成' };
@@ -81,7 +82,7 @@ function evidenceList(items, empty) {
   );
 }
 
-function observationForm(ctx, info, url, submit) {
+function observationForm(ctx, name, url, submit) {
   ctx.dialog({
     title: '登记已核实的咳嗽观察',
     description:
@@ -113,7 +114,7 @@ function observationForm(ctx, info, url, submit) {
       return Boolean(
         await submit(url + '/observations', data, {
           title: '确认个人观察记录',
-          target: info.name,
+          target: name,
           fields: [
             [
               '归属依据',
@@ -133,7 +134,7 @@ export function residentInsights(ctx, residentId) {
   const box = node('section', 'rounds-card');
   box.dataset.roundsResidentId = residentId;
   const url = '/api/rounds/residents/' + encodeURIComponent(residentId);
-  const name = ctx.state.residents?.find((r) => r.id === residentId)?.name || '该长者';
+  const name = residentLabel(ctx, residentId);
   let info,
     busy = false;
   async function load() {
@@ -224,7 +225,7 @@ export function residentInsights(ctx, residentId) {
         : null,
       info.canConfigure ? btn(ctx, '生成设置', configure) : null,
       info.canObserve
-        ? btn(ctx, '登记观察', () => observationForm(ctx, { name }, url, submit))
+        ? btn(ctx, '登记观察', () => observationForm(ctx, name, url, submit))
         : null,
     );
     const contents = report

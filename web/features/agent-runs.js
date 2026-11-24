@@ -1,3 +1,4 @@
+import { staffLabel } from './people-labels.js';
 import { commentInput } from '../lib/change-review.js';
 import { node, table, named, badge, btn, link, choose } from './shared.js';
 import { showHandover } from './handovers.js';
@@ -39,7 +40,7 @@ export async function showRun(ctx, row) {
             entry.append(node('small', '', id));
             continue;
           }
-          const label = ['核对交班', handover.date, handover.senderName, id.slice(-6)].join(' · ');
+          const label = ['核对交班', handover.date, staffLabel(ctx, handover.senderName, handover.senderId), id.slice(-6)].join(' · ');
           entry.append(
             link(ctx, label, async () => {
               try {
@@ -74,7 +75,7 @@ export async function showRun(ctx, row) {
     node(
       'p',
       'fx-muted',
-      data.actorName +
+      staffLabel(ctx, data.actorName, data.actorId) +
         ' · ' +
         data.started.slice(0, 16).replace('T', ' ') +
         ' · 来源数据版本 ' +
@@ -201,7 +202,7 @@ export function priorReports(ctx) {
         label: '任务目标',
         view: (r) => named(r.goal, r.agents.map((a) => names[a]).join('、')),
       },
-      { label: '发起人', view: (r) => r.actorName },
+      { label: '发起人', view: (r) => staffLabel(ctx, r.actorName, r.actorId) },
       {
         label: '发起时间',
         view: (r) => r.started.slice(0, 16).replace('T', ' '),

@@ -13,6 +13,7 @@ def init(db):
     for name in (
         "actorId",
         "actorName",
+        "actorPosition",
         "actorLogin",
         "residentId",
         "room",
@@ -74,6 +75,7 @@ PERSON_ACTIONS = {
     "care.refer",
     "dossier.ocr",
     "dossier.reviewDocument",
+    "dossier.confirmVisit",
     "dossier.signSummary",
     "dossier.profile",
     "family.consent",
@@ -138,9 +140,12 @@ def write(
     comment="",
     undo_of=None,
 ):
+    position = actor.get("role", "")
+    if position == "自定义":
+        position = "、".join(actor.get("staffDuties", []))
     db.execute(
-        """INSERT INTO audit(revision,at,action,summary,actorId,actorName,actorLogin,residentId,room,previousRoom,agentRunId)
-                  VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        """INSERT INTO audit(revision,at,action,summary,actorId,actorName,actorLogin,residentId,room,previousRoom,agentRunId,actorPosition)
+                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             revision,
             timestamp,
@@ -153,6 +158,7 @@ def write(
             current.get("room") or previous.get("room") or "",
             previous.get("room") or "",
             current.get("agentRunId", ""),
+            position,
         ),
     )
     return history.record(

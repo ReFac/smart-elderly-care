@@ -1,3 +1,4 @@
+import { residentAnchor, staffLabel } from './people-labels.js';
 import {
   badge,
   btn,
@@ -58,9 +59,9 @@ export function medicationReminders(ctx, execute) {
         },
         cols: [
           { label: '给药时间（上海）', view: (r) => r.scheduledAt.replace('T', ' ') },
-          { label: '长者', view: (r) => residentName(ctx, r.residentId) },
+          { label: '长者', view: (r) => residentAnchor(ctx, r.residentId) },
           { label: '药品', view: (r) => r.name },
-          { label: '负责人员', view: (r) => r.assignee || '—' },
+          { label: '负责人员', view: (r) => staffLabel(ctx, r.assignee, r.assigneeId) },
           {
             label: '提醒',
             view: (r) =>
@@ -103,7 +104,7 @@ export function drugRules(ctx) {
           ['版本', r.version],
           ['核准资料', r.source],
           ['核查提醒', r.message],
-          ['发布人', r.reviewer],
+          ['发布人', staffLabel(ctx, r.reviewer)],
           ['发布日期', r.date],
           ['状态', r.status],
           ['停用人', r.retiredBy],
@@ -138,7 +139,7 @@ export function drugRules(ctx) {
     cols: [
       { label: '药品组合', view: (r) => named(r.drugA + ' / ' + r.drugB, r.version) },
       { label: '提醒', view: (r) => r.message },
-      { label: '发布人', view: (r) => r.reviewer },
+      { label: '发布人', view: (r) => staffLabel(ctx, r.reviewer) },
       { label: '状态', view: (r) => badge(ctx, r.status) },
       { label: '依据', view: (r) => link(ctx, '查看规则', () => show(r)) },
     ],

@@ -21,6 +21,8 @@ MUTABLE = {
     "rounds_policy": "机构巡查排程设置",
 }
 ORIGINALS = {
+    "dossier_visit_records": "已签认就诊病例",
+    "dossier_visit_originals": "就诊附件原件",
     "staff_contract_originals": "劳动合同原件",
     "staff_contract_versions": "员工合同留存版本",
     "dossier_documents": "医疗原件",
@@ -119,6 +121,8 @@ def completed(rows):
 
 
 OPTIONAL_TABLES = {
+    "dossier_visit_records",
+    "dossier_visit_originals",
     "staff_paydays",
     "staff_contract_originals",
     "staff_contract_versions",

@@ -1,3 +1,4 @@
+import { staffLabel } from './people-labels.js';
 import {
   canAct,
   hasGrant,
@@ -249,7 +250,7 @@ export function shifts(ctx) {
         },
         {
           label: '值班人员',
-          view: (s) => s.staff,
+          view: (s) => staffLabel(ctx, s.staff),
         },
         {
           label: '班次',
@@ -277,7 +278,7 @@ export function shifts(ctx) {
                 view: (s) =>
                   link(ctx, '查看工作量', () =>
                     ctx.detail(
-                      s.staff + ' · ' + s.date,
+                      staffLabel(ctx, s.staff) + ' · ' + s.date,
                       records(
                         workload(s.staff, s.date),
                         (t) =>

@@ -1,0 +1,48 @@
+.assistant-compose-inputs { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.assistant-visit { display:inline-flex; align-items:center; gap:5px; padding:6px 9px; border:1px solid var(--line); border-radius:20px; background:#fff; color:var(--accent); font-size:12px; font-weight:650; cursor:pointer; }
+.assistant-visit:hover,.assistant-visit:focus-visible { background:var(--soft); border-color:var(--accent); }
+.dialog.medical-visit-dialog { width:min(870px,calc(100% - 32px)); }
+.medical-visit-form,.medical-visit-inputs,.medical-visit-fields,.medical-visit-detail { display:grid; gap:14px; min-width:0; }
+.medical-visit-form .field { min-width:0; }
+.medical-visit-form > button { justify-self:end; }
+.medical-visit-inputs { margin:0; padding:0; border:0; }
+.medical-visit-group { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:11px 14px; min-width:0; margin:0; padding:13px 15px 15px; border:1px solid var(--line); border-radius:8px; }
+.medical-visit-group legend,.medical-visit-detail h3,.medical-visit-originals h3 { margin:0; color:var(--ink); font-size:14px; font-weight:680; }
+.medical-visit-group:has(input[type=file]) { grid-template-columns:1fr; }
+.medical-visit-fields .medical-visit-group:first-child { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.medical-visit-group textarea { resize:vertical; }
+.medical-visit-group:has([name=tests]) .medical-visit-field:last-child { grid-column:1/-1; }
+.medical-file-list,.medical-visit-evidence ul { padding:0; margin:0; list-style:none; }
+.medical-file-list:empty,.medical-visit-status:empty,.medical-visit-originals:empty { display:none; }
+.medical-file { display:grid; grid-template-columns:minmax(0,1fr) auto 110px auto; align-items:center; gap:10px; border-top:1px solid var(--line); padding:6px 0; }
+.medical-file-name,.medical-visit-target { display:flex; align-items:center; gap:8px; overflow-wrap:anywhere; }
+.medical-file-name svg,.medical-visit-target svg { flex:none; }
+.medical-visit-instruction,.medical-visit-target,.medical-visit-status,.medical-visit-warning { margin:0; padding:10px 13px; font-size:13px; line-height:1.65; border-radius:6px; background:var(--soft); }
+.medical-visit-target { flex-wrap:wrap; color:var(--accent); }
+.medical-visit-warning { background:#fff3d7; color:#795018; }
+.medical-visit-actions,.medical-visit-original-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; }
+.medical-visit-evidence { font-size:12px; margin-top:6px; color:var(--muted); }
+.medical-visit-evidence summary { color:var(--accent); cursor:pointer; }
+.medical-visit-evidence li { border-left:2px solid var(--line); padding:4px 8px; margin:5px 0; overflow-wrap:anywhere; }
+.medical-visit-evidence p,.medical-visit-text p { white-space:pre-wrap; margin:4px 0; }
+.medical-visit-originals { display:grid; gap:8px; background:#f6f8fb; padding:12px; border:1px solid var(--line); border-radius:8px; }
+.medical-visit-image { display:block; max-height:300px; max-width:100%; width:auto; height:auto; margin:auto; object-fit:contain; }
+.medical-visit-image[hidden] { display:none; }
+.medical-visit-original-actions { justify-content:space-between; }
+.medical-visit-review-content { display:grid; gap:16px; min-width:0; align-items:start; }
+.medical-visit-originals select,.medical-file select { max-width:100%; min-width:0; min-height:36px; padding:5px 8px; border-radius:5px; border:1px solid var(--line); background:white; color:var(--ink); }
+@media(min-width:960px) {
+  .dialog.medical-visit-dialog:has(.medical-visit-review-content .medical-visit-originals) { width:min(1190px,calc(100% - 64px)); }
+  .medical-visit-review-content:has(.medical-visit-originals) { grid-template-columns:minmax(250px,.76fr) minmax(0,1.25fr); }
+  .medical-visit-review-content .medical-visit-originals { position:sticky; top:65px; }
+}
+.medical-visit-history { border:1px solid var(--line); border-radius:8px; padding:13px; }
+.medical-visit-history .fx-timeline-head { flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.medical-visit-history .fx-timeline-head .btn { margin-left:auto; }
+.medical-visit-history time { white-space:nowrap; font-size:13px; color:var(--accent); }
+.medical-visit-history .fx-time-row { grid-template-columns:auto minmax(0,1fr) auto; }
+.medical-visit-history .fx-named { overflow-wrap:anywhere; }
+@media(max-width:620px) {
+  .medical-visit-fields .medical-visit-group,.medical-file { grid-template-columns:1fr; }
+  .medical-file { gap:4px; }
+}

@@ -1,25 +1,35 @@
+import { residentAnchor, residentLabel, staffLabel } from './people-labels.js';
 import { allocate, billingSchedule, bindContractFields, contractFields, isTrial, monthlyDayField } from './admission.js';
 import { profile } from './residency.js';
 import { trialLength, trialTermFields } from './trial-terms.js';
 import { bedName, btn, canAct, choose, facts, field, link, memo, money, named, nextDay, node, section, select, table, today } from './shared.js';
 
-export function confirmStay(ctx, person) {
+export function confirmStay(ctx, person, targetBed = null) {
+  const needsBed = !person.bedId;
+  const selectBed = needsBed || (targetBed && targetBed.id !== person.bedId);
+  const free = ctx.state.beds.filter(b => b.status === '空闲' && !b.residentId);
+  if (needsBed && !free.length) return ctx.toast('当前范围暂无空床。可在有空床后确认入住，或登记取消入住。');
   const day = today(ctx);
   const starts = person.trialEndsAt > day ? person.trialEndsAt : day;
   const dialog = ctx.dialog({
     title: '试住转正式入住',
-    description: person.name + ' · ' + bedName(ctx, person.bedId) + ' · 正式月费从 ' + starts + ' 起算。',
+    description: residentLabel(ctx, person) + ' · ' + (needsBed ? '原试住床位已释放，请重新选床' : bedName(ctx, person.bedId)) + ' · 正式月费从 ' + starts + ' 起算。',
     fields: [
+      ...(selectBed ? [select('bedId', '正式入住床位', [
+        { value: '', label: '请选择当前空闲床位' },
+        ...free.map(b => ({ value: b.id, label: [...(ctx.state.bedLocations?.[b.id] || [b.ward]), b.label].join(' / ') })),
+      ], { value: targetBed?.id || '' })] : []),
       monthlyDayField(day, person.billingDay, '转正日'),
       ...contractFields(day, person.endDate || ''),
     ],
     submitLabel: '核对转正',
-    onSubmit: ({ billingDay, contractTerm, endDate }) => {
+    onSubmit: ({ bedId, billingDay, contractTerm, endDate }) => {
       const payload = { residentId: person.id, billingDay: Number(billingDay), endDate: contractTerm === 'fixed' ? endDate : '' };
+      if (selectBed) payload.bedId = bedId;
       return ctx.command('care.confirmStay', payload, {
-        title: '确认试住转正式入住', target: person.name,
+        title: '确认试住转正式入住', target: residentLabel(ctx, person),
         fields: [
-          ['床位', bedName(ctx, person.bedId)], ['月费起算日', starts], ['收费安排', billingSchedule(payload)],
+          ['床位', bedName(ctx, bedId || person.bedId)], ['月费起算日', starts], ['收费安排', billingSchedule(payload)],
           ['合同期限', payload.endDate || '无期限'],
         ], confirmLabel: '确认转正',
       });
@@ -31,22 +41,22 @@ export function confirmStay(ctx, person) {
 export async function endTrial(ctx, person) {
   try {
     const query = new URLSearchParams({ residentId: person.id });
-    const { recipients } = await ctx.get('/api/care/trial-assignees?' + query);
+    const { recipients, positions = {} } = await ctx.get('/api/care/trial-assignees?' + query);
     if (!recipients.length) return ctx.toast('当前分院没有可派发回访的员工，请先安排有权限的负责人。');
     ctx.dialog({
       title: '试住未转正 · 派发回访',
-      description: person.name + ' · 确认后办理离院，释放床位并将回访任务发给所选员工。',
+      description: residentLabel(ctx, person) + ' · ' + (person.bedId ? '确认后释放试住床位' : '试住床位已释放') + '，归档并将回访任务发给所选员工。',
       fields: [
         memo('reason', '未转正原因', true),
         select('assigneeId', '回访负责人', [
           { value: '', label: '选择负责员工' },
-          ...recipients.map((r) => ({ value: r.id, label: r.displayName + ' · ' + r.username })),
+          ...recipients.map((r) => ({ value: r.id, label: staffLabel(ctx, { ...r, role: positions[r.id] }) + ' · ' + r.username })),
         ]),
         field('dueDate', '回访截止日', { type: 'date', min: today(ctx), value: nextDay(today(ctx)) }),
       ],
       submitLabel: '核对离院及回访',
       onSubmit: (v) => ctx.command('care.endTrial', { residentId: person.id, ...v }, {
-        title: '确认试住离院并派发回访', target: person.name, confirmLabel: '确认离院并派发',
+        title: '确认试住离院并派发回访', target: residentLabel(ctx, person), confirmLabel: '确认离院并派发',
       }),
     });
   } catch (error) {
@@ -57,21 +67,21 @@ export async function endTrial(ctx, person) {
 export function trialList(ctx) {
   const rows = ctx.state.residents.filter(isTrial).sort((a, b) => (a.trialEndsAt || '').localeCompare(b.trialEndsAt || ''));
   return table(ctx, {
-    title: '试住中长者', rows,
+    title: '待确认入住的试住档案', rows,
     empty: '当前没有试住中的长者。',
     action: canAct(ctx, 'care.admit')
       ? btn(ctx, '选择档案办理试住', () => allocate(ctx, null, null, 'trial'), 'primary') : null,
-    search: { placeholder: '搜索姓名或档案号', value: (r) => r.name + ' ' + r.id },
+    search: { placeholder: '搜索姓名或档案号', value: (r) => residentLabel(ctx, r) + ' ' + r.id },
     cols: [
-      { label: '长者', view: (r) => named(r.name, r.id) },
-      { label: '床位', view: (r) => bedName(ctx, r.bedId) },
+      { label: '长者', view: (r) => node('div', 'fx-named', [residentAnchor(ctx, r), node('small', '', r.id)]) },
+      { label: '床位', view: (r) => r.bedId ? bedName(ctx, r.bedId) : '已到期退床 · 待决定' },
       { label: '试住安排', view: (r) => named(r.trialDays ? trialLength(r.trialDays) : '试住',
         [r.admittedAt, r.trialEndsAt].filter(Boolean).join(' 至 ')) },
       { label: '一次性试住费', view: (r) => r.trialPrice == null ? '—' : money(r.trialPrice) },
       { label: '操作', align: 'end', view: (r) => choose(
         link(ctx, '档案', () => profile(ctx, r)),
-        canAct(ctx, 'care.confirmStay') ? link(ctx, '转正式', () => confirmStay(ctx, r)) : null,
-        canAct(ctx, 'care.endTrial') ? link(ctx, '未转正离院', () => endTrial(ctx, r)) : null,
+        canAct(ctx, 'care.confirmStay') ? link(ctx, '确认入住', () => confirmStay(ctx, r)) : null,
+        canAct(ctx, 'care.endTrial') ? link(ctx, '取消入住', () => endTrial(ctx, r)) : null,
       ) },
     ],
   });

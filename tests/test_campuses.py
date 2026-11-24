@@ -162,6 +162,70 @@ class CampusTests(unittest.TestCase):
             )
         )
 
+    def test_room_search_preserves_both_charts_for_identically_named_residents(self):
+        for rid in ("r001", "r002"):
+            self.cmd(self.owner, "dossier.profile", residentId=rid, name="同名陈长者")
+        reopened = Store(self.store.path)
+        results = reopened.facility_resource(self.owner, "search", q="同名陈")[
+            "results"
+        ]
+        self.assertEqual([row["number"] for row in results], ["101"])
+        self.assertCountEqual(
+            results[0]["matchedResidents"],
+            [
+                {"id": "r001", "name": "同名陈长者", "bedLabel": "101-01"},
+                {"id": "r002", "name": "同名陈长者", "bedLabel": "101-02"},
+            ],
+        )
+
+    def test_room_and_position_labels_follow_branch_and_family_authorization(self):
+        name = "同名员工"
+        self.cmd(
+            self.owner,
+            "access.update",
+            id=self.employee["id"],
+            displayName=name,
+            staffDuties=["临床护理"],
+        )
+        self.cmd(
+            self.owner,
+            "access.create",
+            kind="staff",
+            username="main-finance",
+            role="财务",
+            campusId=self.main,
+            displayName=name,
+            password=self.password,
+        )
+        _, other = self.store.login("main-finance", self.password)
+        self.cmd(
+            self.owner,
+            "care.addTask",
+            residentId=self.rid,
+            assignee=name,
+            title="院区记录",
+        )
+        data = self.store.snapshot(self.staff)["data"]
+        self.assertEqual(data["residentRooms"], {self.rid: "101"})
+        self.assertEqual(data["staffPositions"]["ids"][self.employee["id"]], "临床护理")
+        self.assertNotIn(other["id"], data["staffPositions"]["ids"])
+        self.assertNotIn(name, data["staffPositions"]["names"])
+        self.cmd(
+            self.owner,
+            "access.create",
+            kind="family",
+            username="bound-relative",
+            displayName="家属",
+            residentId="r001",
+            password=self.password,
+        )
+        family, person = self.store.login("bound-relative", self.password)
+        self.assertEqual(self.store.snapshot(family)["data"]["residentRooms"], {})
+        self.cmd(self.owner, "access.update", id=person["id"], familyServices=True)
+        shared = self.store.snapshot(family)["data"]
+        self.assertEqual(shared["residentRooms"], {"r001": "101"})
+        self.assertNotIn("staffPositions", shared)
+
     def test_document_and_delegated_staff_cannot_cross_branch(self):
         main = "r001"
         self.cmd(

@@ -17,6 +17,8 @@ import { selectTab } from './features/shared.js';
 import { profile, expiringContracts } from './features/residency.js';
 import { dueMedicationCount } from './features/medication-rules.js';
 import { pendingLeadCalls } from './features/leads.js';
+import { residentLabel, residentHref, staffLabel } from './features/people-labels.js';
+import { openDossier } from './features/dossier.js';
 
 const { el, icon, button, toast } = ui;
 
@@ -30,6 +32,7 @@ const seenAlerts = new Set();
 let historyScope = {};
 let focusIds = [];
 let reviewing = false;
+let residentOverlay = null;
 function openChanges(filters = {}) {
   if (!available('history')) return;
   historyScope = { ...filters };
@@ -50,6 +53,7 @@ function permitted(permission) {
 function signedOut() {
   epoch++;
   state = null;
+  residentOverlay = null;
   clearChat();
   revision = null;
   route = null;
@@ -118,6 +122,7 @@ function applySnapshot(snapshot) {
   const pending = (state.gatewayAlerts || []).filter(
     (r) => r.status === '待复核' && !seenAlerts.has(r.id),
   );
+  const trialAlerts = unresolvedTrials().filter(row => !seenAlerts.has('trial-expiry:' + row.id));
   const familyMessage = state.familyRoundInbox?.messages.find((m) => m.day === state.today && !m.readAt);
   const roundsId = familyMessage ? 'family-round:' + familyMessage.id :
     state.roundsNoticeCount && available('inbox') ? 'staff-round:' + state.today + ':' + state.roundsNoticeCount : '';
@@ -131,6 +136,12 @@ function applySnapshot(snapshot) {
         ? '待核实预警 · ' + pending[0].room
         : '有 ' + pending.length + ' 条新设备预警待核实',
     );
+  } else if (trialAlerts.length) {
+    for (const row of trialAlerts) seenAlerts.add('trial-expiry:' + row.id);
+    try {
+      sessionStorage.setItem(bucket, JSON.stringify([...seenAlerts].slice(-500)));
+    } catch {}
+    toast('有 ' + trialAlerts.length + ' 位长者试住期满，床位已释放。请在待处理事项中确认或取消入住。');
   } else if (roundsId && !seenAlerts.has(roundsId)) {
     seenAlerts.add(roundsId);
     try {
@@ -160,7 +171,7 @@ function go(destination, tab, onArrival) {
 }
 
 function getRoute() {
-  const original=location.hash.slice(1);
+  const original=location.hash.slice(1).split('?')[0];
   if (original === 'assistants') {
     const home = landing();
     window.history.replaceState(null, '', '#' + home);
@@ -302,6 +313,7 @@ async function submitChange({ action, url, payload, review = {} }) {
 
 function context() {
   return {
+    current: context,
     state,
     get,
     historyScope,
@@ -414,25 +426,30 @@ function searchDialog() {
         meta: r.group,
         open: () => go(id),
       })),
-    ...(available('residents') ? state.residents : []).map((r) => ({
-      label: r.name,
+    ...state.residents.filter(r => residentHref(context(), r)).map((r) => ({
+      label: residentLabel(context(), r),
       keywords: r.id,
+      href: residentHref(context(), r),
       icon: 'people',
       meta: '长者档案 · ' + r.id,
       open: () => profile(context(), r),
     })),
   ];
   function update() {
-    const q = input.value.trim().toLowerCase();
+    const q = input.value.trim().normalize('NFKC').toLowerCase();
     const subset = data
-      .filter((r) => (r.label + ' ' + r.keywords).toLowerCase().includes(q))
+      .filter((r) => (r.label + ' ' + r.keywords).normalize('NFKC').toLowerCase().includes(q))
       .slice(0, 12);
     list.replaceChildren(
       ...subset.map((r) => {
-        const b = el('button', 'result');
-        b.type = 'button';
+        const b = el(r.href ? 'a' : 'button', 'result');
+        if (r.href) {
+          b.href = r.href;
+          b.classList.add('resident-profile-link');
+        }
+        else b.type = 'button';
         b.append(icon(r.icon), el('span', '', r.label), el('small', '', r.meta));
-        b.addEventListener('click', () => {
+        if (!r.href) b.addEventListener('click', () => {
           modal.close();
           r.open();
         });
@@ -448,6 +465,11 @@ function searchDialog() {
 
 function myPendingHandovers(data = state) {
   return data.handovers.filter((r) => r.status === '待签收' && r.assigneeId === data.user.id);
+}
+
+function unresolvedTrials() {
+  return available('residents') && state.allowedActions.includes('care.confirmStay')
+    ? state.residents.filter(r => r.status === '试住到期待确认') : [];
 }
 
 function myTrialFollowups() {
@@ -506,6 +528,8 @@ function notices() {
   }
   if (permitted('care'))
     items.unshift(['待我签收的交班', myPendingHandovers().length, 'care', 'handover']);
+  if (unresolvedTrials().length)
+    items.unshift(['试住期满待确认入住', unresolvedTrials().length, 'residents', 'trials']);
   if (myTrialFollowups().length)
     items.unshift(['待我办理的试住回访', myTrialFollowups().length, 'residents', 'trials']);
   if (available('leads') && pendingLeadCalls(state))
@@ -557,7 +581,7 @@ function accountMenu() {
   const actor = el('div', 'account-person');
   actor.append(
     el('span', 'header-avatar', state.user.displayName.slice(0, 1)),
-    el('strong', '', state.user.displayName),
+    el('strong', '', staffLabel(context(), state.user)),
   );
   info.append(actor);
   for (const [key, value] of [
@@ -634,6 +658,7 @@ function masthead() {
     if (
       hasNewNotice(context()) ||
       myTrialFollowups().length ||
+      unresolvedTrials().length ||
       (available('leads') && pendingLeadCalls(state)) ||
       state.supplyOrders?.some(row => row.assigneeId === state.user.id && row.status === '待执行') ||
       (available('inbox') && state.roundsNoticeCount > 0) ||
@@ -652,7 +677,7 @@ function masthead() {
   account.setAttribute('aria-label', '账号与退出登录');
   account.append(
     el('span', 'header-avatar', state.user.displayName.slice(0, 1)),
-    el('span', 'account-name', state.user.displayName),
+    el('span', 'account-name', staffLabel(context(), state.user)),
     icon('down', 12),
   );
   account.addEventListener('click', accountMenu);
@@ -725,6 +750,29 @@ function render() {
   shade.setAttribute('aria-label', '收起业务导航');
   shade.addEventListener('click', closeMenu);
   root.replaceChildren(masthead(), sidebar(), shade, wrap);
+  openLinkedResident();
+}
+
+function openLinkedResident() {
+  const destination = location.hash.slice(1).split('?')[0];
+  const params = new URLSearchParams(location.hash.split('?')[1]);
+  const id = params.get('resident');
+  if (!id || !['residents', 'dossier', 'billing', 'longCare', 'family'].includes(destination) || !available(destination)) return;
+  const row = state.residents.find(person => person.id === id);
+  if (!row) {
+    history.replaceState(null, '', '#' + destination);
+    toast('该长者档案未开放或已失效');
+    return;
+  }
+  if (destination === 'family' || document.querySelector('dialog[open][data-linked-resident]')) return;
+  const modal = destination === 'residents' ? profile(context(), row) : openDossier(context(), row);
+  modal.dataset.linkedResident = id;
+  const target = location.hash;
+  modal.addEventListener('close', () => {
+    if (!state || location.hash !== target || document.querySelector('dialog[open][data-linked-resident]')) return;
+    if (history.state?.residentFrom !== undefined) history.back();
+    else history.replaceState(null, '', target.split('?')[0]);
+  }, { once: true });
 }
 
 function failed(error) {
@@ -742,8 +790,34 @@ async function load() {
   }
 }
 
-window.addEventListener('hashchange', () => {
+function rememberResidentOrigin(hash) {
+  residentOverlay = { hash, main: document.getElementById('content'), dialogs: new Set(document.querySelectorAll('dialog[open]')) };
+}
+
+document.addEventListener('click', (event) => {
+  const link = event.target.closest?.('a.resident-profile-link');
+  if (!link || !state || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey ||
+      event.shiftKey || event.altKey || (link.target && link.target !== '_self') || residentOverlay ||
+      link.hash.startsWith('#family?') || location.hash.includes('?resident=')) return;
+  event.preventDefault();
+  rememberResidentOrigin(location.hash);
+  history.pushState({ residentFrom: location.hash }, '', link.href);
+  openLinkedResident();
+});
+
+window.addEventListener('hashchange', (event) => {
   if (state) {
+    const origin = residentOverlay;
+    residentOverlay = null;
+    if (origin?.hash === location.hash && origin.main?.isConnected) {
+      document.querySelectorAll('dialog[open]').forEach(d => { if (!origin.dialogs.has(d)) d.close(); });
+      return;
+    }
+    if (history.state?.residentFrom === new URL(event.oldURL).hash) {
+      rememberResidentOrigin(history.state.residentFrom);
+      openLinkedResident();
+      return;
+    }
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
     render();
     window.scrollTo(0, 0);
@@ -792,8 +866,8 @@ async function refresh() {
     const lostFamilyAccess = state.familyRoundInbox?.messages.some(
       (message) => !inbox?.messages.some((m) => m.id === message.id),
     );
-    const movedResident = [...document.querySelectorAll('[data-rounds-resident-id]')].some((el) => {
-      const id = el.dataset.roundsResidentId;
+    const movedResident = [...document.querySelectorAll('[data-rounds-resident-id], [data-linked-resident]')].some((el) => {
+      const id = el.dataset.roundsResidentId || el.dataset.linkedResident;
       const before = state.residents.find((r) => r.id === id);
       const after = snapshot.data.residents.find((r) => r.id === id);
       return before && (!after || before.bedId !== after.bedId || before.status !== after.status);

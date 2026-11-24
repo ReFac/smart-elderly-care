@@ -1,3 +1,4 @@
+import { staffLabel } from './people-labels.js';
 import {
   disclosure,
   facts,
@@ -144,7 +145,7 @@ export function evaluationDetails(ctx, row) {
         ...(scale.basis ? [['调整凭据', scale.basis]] : []),
         ['机构照护等级', row.level],
         ['下次复评', row.historyOnly ? '历史补录' : row.reviewDate],
-        ['登记人', row.recordedBy],
+        ['登记人', staffLabel(ctx, row.recordedBy)],
         ['登记日期', row.date],
       ])
     );
@@ -161,7 +162,7 @@ export function evaluationDetails(ctx, row) {
         ['评估日期', row.date],
         ['下次复评', row.reviewDate],
         ['采集方式', row.source],
-        ['登记人', row.recordedBy],
+        ['登记人', staffLabel(ctx, row.recordedBy)],
       ])
     );
   }

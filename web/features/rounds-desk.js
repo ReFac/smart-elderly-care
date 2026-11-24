@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor } from './people-labels.js';
 import { node, btn, badge, records } from './shared.js';
 import { localStamp, residentInsights, roundsWrite } from './resident-insights.js';
 
@@ -140,7 +141,7 @@ export function roundsInbox(ctx) {
           (item) =>
             node('div', 'rounds-inbox-row', [
               node('div', '', [
-                node('strong', '', item.residentName),
+                node('strong', '', residentAnchor(ctx, item.residentId)),
                 node(
                   'p',
                   '',
@@ -166,7 +167,7 @@ export function roundsInbox(ctx) {
                 '查看近期简报',
                 () =>
                   ctx.detail(
-                    item.residentName + ' · 巡查简报',
+                    residentLabel(ctx, item.residentId) + ' · 巡查简报',
                     residentInsights(ctx, item.residentId),
                   ),
                 'ghost',

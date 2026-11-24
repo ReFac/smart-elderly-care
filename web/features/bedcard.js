@@ -1,3 +1,4 @@
+import { residentLabel, staffLabel } from './people-labels.js';
 import {
   canAct,
   hasGrant,
@@ -127,7 +128,7 @@ export function bedCard(ctx, resident) {
       node('span', '', '床旁身份核验'),
       node('span', '', bed.ward)
     ]),
-    node('h3', '', resident.name),
+    node('h3', '', residentLabel(ctx, resident)),
     node('p', '', [bed.label + ' 床', resident.level].filter(Boolean).join(' · ')),
     node('div', 'fx-card-barcode', [barcode(assignment.code), node('strong', '', assignment.code)])
   ]);
@@ -189,7 +190,7 @@ export function bedside(ctx) {
     add(
       result,
       facts([
-        ['长者', person.name],
+        ['长者', residentLabel(ctx, person)],
         ['当前床位', `${bed.ward} · ${bed.label}`]
       ]),
       section(
@@ -198,12 +199,12 @@ export function bedside(ctx) {
           tasks,
           (task) =>
             node('div', 'fx-toolbar', [
-              named(task.title, `${task.time} · ${task.assignee}`),
+              named(task.title, `${task.time} · ${staffLabel(ctx, task.assignee, task.assigneeId)}`),
               btn(ctx, '登记执行', () => {
                 runForm(ctx, {
                   title: '床旁执行',
                   action: 'care.completeTask',
-                  description: `${person.name} · ${bed.label} · ${task.title}`,
+                  description: `${residentLabel(ctx, person)} · ${bed.label} · ${task.title}`,
                   fields: [memo('note', '执行记录')],
                   map: (values) => ({
                     ...values,
@@ -249,7 +250,7 @@ export function familyPreview(ctx, resident) {
     node('div', 'fx-profile', [
       node('p', 'fx-muted', '按当前员工的岗位权限展示已完成服务。'),
       section(
-        `${resident.name}的已完成服务`,
+        `${residentLabel(ctx, resident)}的已完成服务`,
         records(
           events,
           (event) => named(event.title, `${event.date} · ${event.kind}`),

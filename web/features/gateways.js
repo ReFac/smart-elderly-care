@@ -1,3 +1,4 @@
+import { staffLabel } from './people-labels.js';
 import { staffNotices } from './assistant-actions.js';
 import { commentInput } from '../lib/change-review.js';
 import { voiceProposal } from './speech-input.js';
@@ -168,9 +169,9 @@ function changePreview(ctx, task, row) {
       '当前工单',
       task?.status || '不可用',
       task?.note || '尚未填写',
-      task?.operator || '待登记',
+      task?.operator ? staffLabel(ctx, task.operator, task.operatorId) : '待登记',
     ),
-    record('确认后写入', '已完成', row.note, ctx.state.user.displayName),
+    record('确认后写入', '已完成', row.note, staffLabel(ctx, ctx.state.user)),
   ]);
 }
 

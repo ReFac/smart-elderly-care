@@ -22,7 +22,15 @@ def fingerprint(value):
 
 
 def generate(
-    store, actor, request_id, instruction, facts, validate, *, output_tokens=640
+    store,
+    actor,
+    request_id,
+    instruction,
+    facts,
+    validate,
+    *,
+    output_tokens=640,
+    shared_once=False,
 ):
     """Reserve before sending, persist confirmed billing even if the returned JSON is unusable."""
     from . import late_usage, latest, model_name, read_key, usage
@@ -49,21 +57,32 @@ def generate(
     request = "generation/" + fingerprint(request_id)
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
-        prior = db.execute(
-            "SELECT fingerprint,status,request FROM api_usage WHERE actor=? AND (request=? OR request LIKE ?) ORDER BY rowid DESC LIMIT 1",
-            (actor, request, request + "/%"),
-        ).fetchone()
+        # A signed medical batch's content key is server-built, resident-bound, and
+        # authorized before every call. Staff reviewing it share one metered extraction.
+        prior = (
+            db.execute(
+                "SELECT fingerprint,status,request,actor FROM api_usage WHERE request=? ORDER BY rowid LIMIT 1",
+                (request,),
+            ).fetchone()
+            if shared_once
+            else db.execute(
+                "SELECT fingerprint,status,request,actor FROM api_usage WHERE actor=? AND (request=? OR request LIKE ?) ORDER BY rowid DESC LIMIT 1",
+                (actor, request, request + "/%"),
+            ).fetchone()
+        )
         if prior:
             if prior[0] != digest:
                 raise ValueError("资料或权限已经变化，请重新打开后重试")
             cached = db.execute(
                 "SELECT result FROM cloud_generation_results WHERE actor=? AND request=?",
-                (actor, prior[2]),
+                (prior[3], prior[2]),
             ).fetchone()
             if cached:
                 return validate(json.loads(cached[0]))
             if prior[1] in ("pending", "uncertain"):
                 raise ValueError("这次云端请求正在处理或等待对账，请稍后重试")
+            if shared_once:
+                raise ValueError("本组云端整理已调用，请核对原件后手工补录")
             if db.execute(
                 "SELECT 1 FROM api_late_usage WHERE actor=? AND request=? AND verified IS NULL",
                 (actor, prior[2]),

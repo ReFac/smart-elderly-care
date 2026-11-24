@@ -1,3 +1,4 @@
+import { residentLabel, staffLabel } from './people-labels.js';
 import { groups } from '../lib/navigation.js';
 import { openEmployment } from './staff-employment.js';
 import { bindFlow, passwordFlow } from './identity.js';
@@ -14,12 +15,12 @@ function identity(ctx) {
   ];
   if (user.kind === 'family') {
     const resident = residents.find((r) => r.id === user.residentId);
-    if (resident) details.push(['绑定长者', resident.name]);
+    if (resident) details.push(['绑定长者', residentLabel(ctx, resident)]);
   }
   const card = node('section', 'personal-identity', [
     node('div', 'personal-avatar', user.displayName.slice(0, 1)),
     node('div', 'personal-identity-body', [
-      node('h2', '', user.displayName),
+      node('h2', '', staffLabel(ctx, user)),
       node(
         'dl',
         'personal-details',

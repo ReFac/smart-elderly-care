@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import {
   allocate, billingSchedule, bindContractFields, contractFields, historicInquiries,
   isTrial, register, registry, statusLabel,
@@ -69,7 +70,7 @@ function discharge(ctx, row) {
   runForm(ctx, {
     title: '办理退住',
     action: 'care.discharge',
-    description: '确认后将释放 ' + row.name + ' 的床位，转为只读归档，保管 365 天。',
+    description: '确认后将释放 ' + residentLabel(ctx, row) + ' 的床位，转为只读归档，保管 365 天。',
     fields: [memo('note', '退住小结', true)],
     map: (v) => ({
       ...v,
@@ -128,12 +129,12 @@ function renew(ctx, row) {
   const min = nextDay(row.endDate > today(ctx) ? row.endDate : today(ctx));
   const dialog = ctx.dialog({
     title: '续住登记',
-    description: row.name + ' · 原合同到期日 ' + row.endDate,
+    description: residentLabel(ctx, row) + ' · 原合同到期日 ' + row.endDate,
     fields: contractFields(min, min),
     submitLabel: '核对续住',
     onSubmit: ({ contractTerm, endDate }) =>
       ctx.command('care.renew', { residentId: row.id, endDate: contractTerm === 'fixed' ? endDate : '' }, {
-        title: '确认续住', target: row.name,
+        title: '确认续住', target: residentLabel(ctx, row),
         fields: [['原合同到期日', row.endDate], ['续住合同期限', contractTerm === 'fixed' ? endDate : '无期限']],
       }),
   });
@@ -154,7 +155,7 @@ export function profile(ctx, row) {
         runForm(ctx, {
           title: '封存历史档案',
           action: 'care.fileArchive',
-          description: row.name + ' · 此后该档案只读，日常资料从原退住日起保管 365 天。',
+          description: residentLabel(ctx, row) + ' · 此后该档案只读，日常资料从原退住日起保管 365 天。',
           fields: [
             field('archiveDate', '原退住或归档日期', {
               type: 'date',
@@ -236,7 +237,7 @@ export function profile(ctx, row) {
   if (row.status === '在住' && hasGrant(ctx, 'care'))
     shortcuts.append(
       btn(ctx, '照护时间线', () =>
-        ctx.detail(row.name + ' · 照护记录', careTimeline(ctx, 'resident', row.id))
+        ctx.detail(residentLabel(ctx, row) + ' · 照护记录', careTimeline(ctx, 'resident', row.id))
       )
     );
   if (state.user.routes.includes('dossier'))
@@ -244,16 +245,19 @@ export function profile(ctx, row) {
   if (row.status === '在住' && hasGrant(ctx, 'care', 'clinical'))
     shortcuts.append(btn(ctx, '服务记录预览', () => familyPreview(ctx, row)));
   if (shortcuts.childElementCount) summary.append(shortcuts);
+  if (isTrial(row)) {
+    const decisions = choose(
+      canAct(ctx, 'care.confirmStay') ? btn(ctx, '确认入住', () => confirmStay(ctx, row), 'primary') : null,
+      canAct(ctx, 'care.endTrial') ? btn(ctx, '取消入住', () => endTrial(ctx, row)) : null,
+    );
+    if (decisions.childElementCount) summary.append(section('试住决定', decisions));
+  }
   if (row.status === '在住') {
     const actions = choose();
     if (hasGrant(ctx, 'intake', 'care'))
       actions.append(btn(ctx, '床头卡', () => bedCard(ctx, row)));
     if (canAct(ctx, 'care.archive')) actions.append(btn(ctx, '复核摘要', () => archive(ctx, row)));
     if (canAct(ctx, 'care.leave')) actions.append(btn(ctx, '登记请假', () => leave(ctx, row)));
-    if (isTrial(row)) {
-      if (canAct(ctx, 'care.confirmStay')) actions.append(btn(ctx, '试住转正式', () => confirmStay(ctx, row)));
-      if (canAct(ctx, 'care.endTrial')) actions.append(btn(ctx, '未转正离院', () => endTrial(ctx, row)));
-    }
     if (!isTrial(row) && row.endDate && canAct(ctx, 'care.renew')) actions.append(btn(ctx, '续住', () => renew(ctx, row)));
     if (canAct(ctx, 'care.transfer')) actions.append(btn(ctx, '转床', () => transfer(ctx, row)));
     if (!isTrial(row) && canAct(ctx, 'care.discharge')) actions.append(btn(ctx, '退住', () => discharge(ctx, row)));
@@ -277,7 +281,7 @@ export function profile(ctx, row) {
       named(a.level + ' · ' + a.note, a.date + ' 评估 · ' + a.reviewDate + ' 复评')
     ),
     block('照护服务', 'tasks', ['care'], (t) =>
-      named(t.title + ' · ' + t.status, t.date + ' ' + t.time + ' · ' + t.assignee)
+      named(t.title + ' · ' + t.status, t.date + ' ' + t.time + ' · ' + staffLabel(ctx, t.assignee, t.assigneeId))
     ),
     block('用药记录', 'medications', ['clinical'], (m) =>
       named(m.name + ' · ' + m.status, m.instruction)
@@ -310,7 +314,7 @@ export function profile(ctx, row) {
   }
   if (history.childElementCount) summary.append(history);
   add(summary, clinicalHistory(ctx, row));
-  ctx.detail('长者档案', summary);
+  return ctx.detail('长者档案', summary);
 }
 
 export function inquiryForm(ctx) {
@@ -335,7 +339,7 @@ export function residents(ctx) {
           title: '到期及未来 30 天到期的档案',
           rows: expiringContracts(ctx.state.residents, today(ctx)),
           cols: [
-            { label: '长者', view: (r) => r.name },
+            { label: '长者', view: (r) => residentAnchor(ctx, r) },
             { label: '合同到期', view: (r) => r.endDate },
             { label: '办理', view: (r) => link(ctx, '续住', () => renew(ctx, r)) }
           ]
@@ -401,7 +405,7 @@ function allBeds(ctx) {
           const available = bed.status === '空闲';
           const button = node('button', 'fx-bed ' + (available ? 'available' : 'occupied'), [
             node('strong', '', bed.label),
-            node('span', '', person?.name || (available ? '空闲床位' : '已入住')),
+            node('span', '', (person && residentLabel(ctx, person)) || (available ? '空闲床位' : '已入住')),
             node(
               'small',
               '',

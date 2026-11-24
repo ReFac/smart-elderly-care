@@ -1,3 +1,4 @@
+import { residentAnchor } from './people-labels.js';
 import {
   btn,
   canAct,
@@ -99,7 +100,7 @@ export function channelOrders(ctx) {
     ),
     cols: [
       { label: '商户订单', view: (r) => named(r.id, r.channel) },
-      { label: '长者 / 账单', view: (r) => named(residentName(ctx, r.residentId), r.billId) },
+      { label: '长者 / 账单', view: (r) => named(residentAnchor(ctx, r.residentId), r.billId) },
       { label: '应收金额', view: (r) => money(r.amount) },
       { label: '状态', view: (r) => r.status },
       {
@@ -207,7 +208,7 @@ export function reminders(ctx) {
       value: (r) => residentName(ctx, r.residentId) + r.month,
     },
     cols: [
-      { label: '长者 / 账期', view: (r) => named(residentName(ctx, r.residentId), r.month) },
+      { label: '长者 / 账期', view: (r) => named(residentAnchor(ctx, r.residentId), r.month) },
       { label: '服务期末', view: (r) => r.endDate },
       { label: '待缴', view: (r) => money(r.balance) },
       { label: '最近跟进', view: (r) => r.reminders?.[0]?.date || '待跟进' },

@@ -1,3 +1,4 @@
+import { auditActorLabel, residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { btn, node, page } from './shared.js';
 import { openDossier } from './dossier.js';
 import { goToRoom } from './rooms.js';
@@ -57,6 +58,8 @@ function displayField(ctx, collection, key, value) {
     assigneeId: ctx.state.accounts,
   }[key];
   const match = list?.find((row) => row.id === value);
+  if (match && key === 'residentId') return [fieldLabel(key), residentAnchor(ctx, match)];
+  if (match && key === 'assigneeId') return [fieldLabel(key), staffLabel(ctx, match)];
   const display =
     match?.name || match?.label || match?.title || match?.displayName || renderValue(value);
   let label = fieldLabel(key);
@@ -107,7 +110,7 @@ function inspector(ctx, change) {
       'p',
       'fx-muted',
       [
-        change.actorName || '系统',
+        auditActorLabel(ctx, change),
         displayDate(change.at) + ' ' + displayTime(change.at),
         change.room,
       ]
@@ -210,12 +213,12 @@ export function recentChanges(ctx) {
     sequence = 0,
     detailSeq = 0,
     roomSearchSeq = 0;
-  const actors = new Map([[ctx.state.user.id, ctx.state.user.displayName]]);
-  for (const person of ctx.state.accounts || []) actors.set(person.id, person.displayName);
+  const actors = new Map([[ctx.state.user.id, staffLabel(ctx, ctx.state.user)]]);
+  for (const person of ctx.state.accounts || []) actors.set(person.id, staffLabel(ctx, person));
   const byUser = optionPicker('操作人', [['', '全部操作人'], ...actors], scope.actorId);
   const byPerson = optionPicker(
     '长者',
-    [['', '全部长者'], ...(ctx.state.residents || []).map((r) => [r.id, r.name])],
+    [['', '全部长者'], ...(ctx.state.residents || []).map((r) => [r.id, residentLabel(ctx, r)])],
     scope.residentId,
   );
   const roomInput = node('input', 'fx-input');
@@ -337,8 +340,7 @@ export function recentChanges(ctx) {
       scope.q,
       scope.day,
       scope.actorId && (actors.get(scope.actorId) || '指定操作人'),
-      scope.residentId &&
-        (ctx.state.residents?.find((r) => r.id === scope.residentId)?.name || '指定长者'),
+      scope.residentId && residentLabel(ctx, scope.residentId),
       scope.roomId && (scope.roomLabel || '指定房间'),
     ].filter(Boolean);
     roomLabel.textContent = labels.join(' / ');
@@ -362,7 +364,7 @@ export function recentChanges(ctx) {
           node('span', '', 'v' + row.revision),
         ]),
         node('strong', '', recordTitle(row)),
-        node('small', '', [row.actorName || '系统', row.room].filter(Boolean).join(' · ')),
+        node('small', '', [auditActorLabel(ctx, row), row.room].filter(Boolean).join(' · ')),
       );
       item.onclick = () => select(row.revision);
       timeline.append(item);

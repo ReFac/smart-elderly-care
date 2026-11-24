@@ -506,6 +506,10 @@ def search(
                         "floorId": r["floorId"],
                         "floorLabel": r["floorLabel"],
                         "matchedNames": matched,
+                        "matchedResidents": [
+                            {"id": bed["residentId"], "name": bed["residentName"], "bedLabel": bed["label"]}
+                            for bed in beds[r["id"]] if bed["residentName"] in matched
+                        ],
                     },
                 )
             )

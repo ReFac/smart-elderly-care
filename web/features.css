@@ -931,3 +931,6 @@
 .invoice-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 12px; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--paper) }
 .invoice-row .btn { justify-self:start; align-self:end }
 @media(max-width:560px) { .invoice-row { grid-template-columns:1fr } }
+.resident-profile-link { color:var(--accent, #235fa9); text-decoration:underline; text-underline-offset:3px; }
+.resident-profile-link:hover { text-decoration-thickness:2px; }
+.search-results a.result { text-decoration:none; }

@@ -11,9 +11,9 @@ from .room_context import room_context, validate_proposal
 from .operations import expense_import
 from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, staff_employment, storage_assets
-from . import lead_contacts, lead_intake, visit_schedule
+from . import lead_contacts, lead_intake, medical_visits, people_labels, visit_schedule
 from .bootstrap import empty_workspace
-from .care import trial_followups
+from .care import trial_expiry, trial_followups
 from . import backups, history, rounds
 from .access_policy import can_record_scale
 from .care import archive_retention
@@ -107,6 +107,7 @@ class Store:
             if version < 4:
                 access.migrate_branding(db)
             dossier.init(db)
+            medical_visits.init(db)
             archive_retention.init(db)
             rounds_family.init(db)
             gateways.init(db)
@@ -127,6 +128,7 @@ class Store:
             rounds.init(db, self.now())
             history.prune(db, self.now())
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        trial_expiry.maintain(self)
         archive_retention.maintain(self)
         self.backups = backups.BackupService(self)
         self.rounds = rounds.RoundService(self)
@@ -174,6 +176,7 @@ class Store:
             access.logout(db, token)
 
     def version(self, token):
+        trial_expiry.maintain(self)
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
             user = self.actor(db, token)
@@ -186,6 +189,7 @@ class Store:
             }
 
     def snapshot(self, token):
+        trial_expiry.maintain(self)
         archive_retention.maintain(self)
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
@@ -309,6 +313,7 @@ class Store:
                     for e in data.get("longCareEvents", ())
                 ]
             dossier.project(db, data, user, today)
+            medical_visits.project(db, data, user)
             rounds_family.project(db, data, user)
             beds = campus_access.allowed_beds(db, user, include_rooms=True)
             if user["kind"] in ("owner", "staff") and any(
@@ -345,6 +350,7 @@ class Store:
                 if access.has(user, "audit")
                 else []
             )
+            people_labels.project(db, state, data, user, logs)
             return {
                 "revision": row["revision"],
                 "today": today,
@@ -409,16 +415,17 @@ class Store:
             state = json.loads(
                 db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
             )
-            return {
+            return people_labels.recipient_positions(db, {
                 "recipients": trial_followups.recipients(
                     db, state, user, resident_id, self.facility_policy
                 )
-            }
+            })
 
     def handover_recipients(self, token):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            return handovers.recipients(db, self.actor(db, token), self.facility_policy)
+            result = handovers.recipients(db, self.actor(db, token), self.facility_policy)
+            return people_labels.recipient_positions(db, result)
 
     def handover_draft(self, token, receiver_id, resident_id=""):
         with closing(self.connect()) as db, db:
@@ -733,6 +740,7 @@ class Store:
     def execute(
         self, action, payload, revision, token, *, room_bound=False, comment=""
     ):
+        trial_expiry.maintain(self)
         comment = history.comment_text(comment)
         if action == "dossier.ocr":
             from . import document_ocr
@@ -834,6 +842,8 @@ class Store:
                     summary = "已更新院区并行接待席位"
                 elif domain == "leads":
                     summary = lead_contacts.command(db, data, user, action, payload, now)
+                elif action == "dossier.confirmVisit":
+                    summary = medical_visits.confirm(db, data, payload, user, now)
                 elif action == "care.timelineSettings":
                     summary = care_timeline.configure(db, data, user, payload)
                 elif action in ("access.staffContract", "access.staffPayday"):

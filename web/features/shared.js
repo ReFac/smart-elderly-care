@@ -1,4 +1,5 @@
 import { routes } from '../lib/navigation.js';
+import { residentLabel, staffLabel } from './people-labels.js';
 export function node(tag, cls, content) {
   const element = document.createElement(tag);
   if (cls) element.className = cls;
@@ -58,23 +59,26 @@ export const memo = (name, label, required = false, extra = {}) =>
     ...extra
   });
 
-export const residentName = (ctx, id) =>
-  ctx.state.residents.find((row) => row.id === id)?.name || '—';
+export const residentName = residentLabel;
 
 export const bedName = (ctx, id) => ctx.state.beds.find((row) => row.id === id)?.label || '—';
 
 export const active = (ctx) => ctx.state.residents.filter((row) => row.status === '在住');
 
 export function staffField(ctx, name, label, extra = {}) {
+  const accounts = new Map([ctx.state.user, ...(ctx.state.accounts || [])]
+    .filter(a => a && a.kind !== 'family' && a.enabled !== false).map(a => [a.id, a]));
   const labels = new Set([
-    ctx.state.user?.displayName,
+    ...[...accounts.values()].map(a => a.displayName),
     ...(ctx.state.shifts || []).map(row=>row.staff),
-    ...(ctx.state.accounts || []).filter(a=>a.kind==='staff' && a.enabled).map(a=>a.displayName),
     extra.value,
   ].filter(Boolean));
   return select(name, label, [
     {value:'',label:extra.required===false?'按业务默认安排':'请选择人员'},
-    ...[...labels].sort((a,b)=>a.localeCompare(b,'zh-CN')).map(value=>({value,label:value})),
+    ...[...labels].sort((a,b)=>a.localeCompare(b,'zh-CN')).map(value => {
+      const matches = [...accounts.values()].filter(a => a.displayName === value);
+      return { value, label: staffLabel(ctx, matches.length === 1 ? matches[0] : value) };
+    }),
   ], {...extra, allowCustom:true});
 }
 
@@ -84,7 +88,7 @@ export const residentField = (ctx, extra = {}) =>
     '长者',
     active(ctx).map((row) => ({
       value: row.id,
-      label: row.name + ' · ' + bedName(ctx, row.bedId)
+      label: residentLabel(ctx, row)
     })),
     extra
   );
@@ -167,7 +171,7 @@ export function recordIdentity(ctx, resident, detail) {
   const meta = [resident.id, detail].filter(Boolean).join(' · ');
   return node('header', 'fx-identity', [
     node('span', 'fx-initial', ctx.ui.icon('people', 22)),
-    node('div', '', [node('h3', '', resident.name), node('small', 'fx-muted', meta)]),
+    node('div', '', [node('h3', '', residentLabel(ctx, resident)), node('small', 'fx-muted', meta)]),
     resident.status ? badge(ctx, resident.status) : null
   ]);
 }
@@ -224,7 +228,7 @@ export function runForm(
   }
   ctx.dialog({
     title,
-    description: [description, '提交人 ' + ctx.state.user.displayName].filter(Boolean).join(' · '),
+    description: [description, '提交人 ' + staffLabel(ctx, ctx.state.user)].filter(Boolean).join(' · '),
     fields: dataFields,
     submitLabel,
     onSubmit: (values) => {

@@ -13,6 +13,9 @@ from .records import (
 )
 
 
+TRIAL_PENDING = "试住到期待确认"
+
+
 def vacant_bed(state, bed_id):
     bed = lookup(state, "beds", bed_id)
     if bed["residentId"] or bed["status"] != "空闲":
@@ -47,7 +50,7 @@ def move(state, resident, today, kind, old_bed=None, new_bed=None):
     if kind == "入住":
         rates["initialCareLevel"] = resident["level"]
         rates["stayType"] = resident["stayType"]
-    if old_bed:
+    if old_bed and old_bed.get("residentId") == resident["id"]:
         old_bed.update(residentId="", status="空闲")
     if new_bed:
         new_bed.update(residentId=resident["id"], status="已入住")
@@ -255,21 +258,55 @@ def admit(state, p, today):
     return f"为{resident['name']}办理正式入住，分配{bed['label']}，月付账单日为每月{terms['billingDay']}日"
 
 
+def undecided_trial(state, resident_id):
+    resident = lookup(state, "residents", resident_id)
+    if resident.get("stayType") != "trial" or resident["status"] not in (
+        "在住",
+        TRIAL_PENDING,
+    ):
+        raise ValueError("请选择尚未确认入住结果的试住档案。")
+    return resident
+
+
 def confirm_stay(state, p, today):
-    if not p.get("residentId") or set(p) - {"residentId", "billingDay", "endDate"}:
+    if not p.get("residentId") or set(p) - {
+        "residentId",
+        "billingDay",
+        "endDate",
+        "bedId",
+    }:
         raise ValueError("请从长者档案确认试住转正式入住。")
-    resident = get_resident(state, p["residentId"])
-    if resident.get("stayType") != "trial":
-        raise ValueError("仅可为当前试住的长者办理转正式入住。")
+    resident = undecided_trial(state, p["residentId"])
+    new_bed = current = None
+    if resident.get("bedId"):
+        current = lookup(state, "beds", resident["bedId"])
+        if current["residentId"] != resident["id"]:
+            raise ValueError("试住床位登记已改变，请核对当前床位。")
+        if p.get("bedId") and p["bedId"] != current["id"]:
+            new_bed = vacant_bed(state, p["bedId"])
+    else:
+        if not p.get("bedId"):
+            raise ValueError("试住床位已释放，请选择当前空闲床位。")
+        new_bed = vacant_bed(state, p["bedId"])
     billing_day = monthly_billing_day(
         p.get("billingDay", resident.get("billingDay")), today
     )
     resident.update(
+        status="在住",
         stayType="formal",
         formalizedAt=today,
         billingDay=billing_day,
         endDate=contract_end(p.get("endDate", resident.get("endDate")), today),
     )
+    if new_bed:
+        move(
+            state,
+            resident,
+            today,
+            "转床" if current else "确认入住",
+            old_bed=current,
+            new_bed=new_bed,
+        )
     return f"为{resident['name']}办理试住转正式入住，月付账单日为每月{billing_day}日"
 
 
@@ -292,17 +329,17 @@ def discharge(state, p, today):
 
 
 def end_trial(state, p, today):
-    resident = get_resident(state, p.get("residentId"))
-    if resident.get("stayType") != "trial":
-        raise ValueError("仅可办理在住试住长者的试住离院。")
+    resident = undecided_trial(state, p.get("residentId"))
     reason = required_field(p, "reason", "试住未转正式原因")
     release_bed(state, resident, today, reason)
     return f"{resident['name']}试住未转正式，已退床归档并派发回访"
 
 
 def release_bed(state, resident, today, note):
-    old_bed = lookup(state, "beds", resident["bedId"])
-    move(state, resident, today, "退住", old_bed=old_bed)
+    old_bed = None
+    if resident.get("bedId"):
+        old_bed = lookup(state, "beds", resident["bedId"])
+        move(state, resident, today, "退住", old_bed=old_bed)
     resident.update(
         status="已退住",
         dischargedAt=today,
@@ -316,7 +353,9 @@ def release_bed(state, resident, today, note):
                 "待复核",
             ):
                 entry["status"] = "已取消"
-    return f"{resident['name']}办理退住，释放{old_bed['label']}"
+    return f"{resident['name']}办理退住" + (
+        f"，释放{old_bed['label']}" if old_bed else ""
+    )
 
 
 def renew(state, p, today):

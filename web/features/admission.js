@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor } from './people-labels.js';
 import {
   node,
   btn,
@@ -13,10 +14,11 @@ import {
 } from './shared.js';
 import { profile } from './residency.js';
 import { trialLength, trialLastDay, trialTermFields } from './trial-terms.js';
+import { confirmStay, endTrial } from './trial-stays.js';
 
 const statuses = { 未入住: '未入住', 在住: '在住', 已退住: '归档老人' };
-export const isTrial = (row) => row.status === '在住' && row.stayType === 'trial';
-export const statusLabel = (row) => isTrial(row) ? '试住中' : statuses[row.status] || row.status;
+export const isTrial = (row) => ['在住', '试住到期待确认'].includes(row.status) && row.stayType === 'trial';
+export const statusLabel = (row) => isTrial(row) && row.bedId ? '试住中' : statuses[row.status] || row.status;
 const archived = (row) => row.status === '已退住';
 
 const stayTypes = [
@@ -115,7 +117,7 @@ export function register(ctx, inquiry) {
         target: payload.name,
         fields: [
           ['类别', v.kind === 'archive' ? '归档老人，保管 365 天' : '未入住，建档后可分床'],
-          ...(same.length ? [['同名归档', same.map((x) => x.name + ' · ' + x.id).join('、')]] : []),
+          ...(same.length ? [['同名归档', same.map((x) => residentLabel(ctx, x) + ' · ' + x.id).join('、')]] : []),
           ...(v.kind === 'archive' ? [['归档日期', v.archiveDate || day]] : []),
         ],
       });
@@ -133,14 +135,7 @@ export function register(ctx, inquiry) {
     if (rows.length) {
       notify.append(
         node('strong', '', '发现同名归档老人，请核对档案号。'),
-        ...rows.map((r) =>
-          btn(
-            ctx,
-            r.name + ' · ' + (r.dischargedAt || '历史归档') + ' · 查看档案',
-            () => profile(ctx, r),
-            'ghost'
-          )
-        )
+        ...rows.map(r => node('div', '', [residentAnchor(ctx, r), ' · ' + r.id + ' · ' + (r.dischargedAt || '历史归档')]))
       );
     }
   };
@@ -165,6 +160,7 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
     profile(ctx, person);
     return;
   }
+  if (isTrial(person) && !person.bedId) return confirmStay(ctx, person, targetBed);
   const transfer = person.status === '在住';
   const free = ctx.state.beds.filter((b) => b.status === '空闲' && !b.residentId);
   if (!free.length) {
@@ -176,7 +172,7 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
   const dialog = ctx.dialog({
     title: transfer ? '转移床位' : '从档案办理入住',
     description:
-      person.name +
+      residentLabel(ctx, person) +
       ' · 档案 ' +
       person.id +
       (transfer ? ' · 当前床位 ' + bedLabel(ctx, person.bedId) : ' · 入住日期 ' + day),
@@ -216,7 +212,7 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
             ['床位变动', '确认后立即释放原床位并登记新床位。'],
           ]
         : [
-            ['长者档案', person.name + ' · ' + person.id],
+            ['长者档案', residentLabel(ctx, person) + ' · ' + person.id],
             ['入住方式', payload.stayType === 'trial' ? '试住' : '正式入住'],
             ['入住床位', bedLabel(ctx, payload.bedId)],
             ['照护等级', payload.level],
@@ -228,8 +224,8 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
               : [['收费约定', billingSchedule(payload)], ['合同期限', payload.endDate || '无期限']]),
           ];
       return ctx.command(action, payload, {
-        title: transfer ? '确认将' + person.name + '从原床位转至新床位？' : '确认从档案办理入住',
-        target: person.name,
+        title: transfer ? '确认将' + residentLabel(ctx, person) + '从原床位转至新床位？' : '确认从档案办理入住',
+        target: residentLabel(ctx, person),
         fields,
         confirmLabel: transfer ? '确认转床' : payload.stayType === 'trial' ? '确认试住' : '确认入住',
       });
@@ -277,12 +273,12 @@ export function registry(ctx, { bed = null, stayType = 'formal' } = {}) {
       .reverse()
       .filter((r) =>
         term
-          ? (r.name + ' ' + r.id).normalize('NFKC').toLocaleLowerCase().includes(term)
-          : all || r.status === '未入住'
+          ? (residentLabel(ctx, r) + ' ' + r.id).normalize('NFKC').toLocaleLowerCase().includes(term)
+          : all || r.status === '未入住' || isTrial(r)
       );
-    scope.textContent = term ? '搜索范围 · 全部档案' : all ? '全部档案' : '待入住的新档案';
+    scope.textContent = term ? '搜索范围 · 全部档案' : all ? '全部档案' : '待入住 · 含试住待确认档案';
     toggle.hidden = !!term;
-    toggle.textContent = all ? '仅查看待入住新档案' : '查看全部档案（含在住及归档老人）';
+    toggle.textContent = all ? '仅查看待入住档案' : '查看全部档案（含在住及归档老人）';
     body.replaceChildren(
       table(ctx, {
         title: term ? '搜索结果' : all ? '全部档案' : '待入住档案',
@@ -296,7 +292,7 @@ export function registry(ctx, { bed = null, stayType = 'formal' } = {}) {
           {
             label: '长者',
             view: (r) =>
-              node('div', 'fx-named', [node('strong', '', r.name), node('small', '', r.id)]),
+              node('div', 'fx-named', [node('strong', '', residentAnchor(ctx, r)), node('small', '', r.id)]),
           },
           { label: '状态', view: (r) => badge(ctx, statusLabel(r)) },
           {
@@ -308,7 +304,11 @@ export function registry(ctx, { bed = null, stayType = 'formal' } = {}) {
             align: 'end',
             view: (r) =>
               choose(
-                !archived(r) && canAct(ctx, r.status === '在住' ? 'care.transfer' : 'care.admit')
+                isTrial(r) && canAct(ctx, 'care.confirmStay')
+                  ? btn(ctx, '确认入住', () => confirmStay(ctx, r, bed), 'ghost') : null,
+                isTrial(r) && canAct(ctx, 'care.endTrial')
+                  ? btn(ctx, '取消入住', () => endTrial(ctx, r), 'ghost') : null,
+                !archived(r) && (!isTrial(r) || (bed && r.bedId)) && canAct(ctx, r.status === '在住' ? 'care.transfer' : 'care.admit')
                   ? btn(
                       ctx,
                       r.status === '在住' ? '转床' : stayType === 'trial' ? '办理试住' : '办理入住',

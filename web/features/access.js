@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { backupPanel } from './backups.js';
 import { roundsSettings } from './rounds-desk.js';
 import { passwordFlow } from './identity.js';
@@ -216,7 +217,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
   let role, grants, campus;
   if (family) {
     if (!target) {
-      const options = state.residents.map((r) => [r.id, r.name + ' · ' + r.id]);
+      const options = state.residents.map((r) => [r.id, residentLabel(ctx, r) + ' · ' + r.id]);
       options.unshift(['', '请选择已核验授权的长者']);
       const [residentRow, select] = selectField('已获授权的长者', options);
       resident = select;
@@ -236,7 +237,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
         facts([
           [
             '绑定长者',
-            state.residents.find((r) => r.id === target.residentId)?.name || target.residentId,
+            residentLabel(ctx, target.residentId),
           ],
         ]),
       );
@@ -414,7 +415,7 @@ function accounts(ctx) {
           'access-person-icon',
           icon(account.kind === 'owner' ? 'shield' : 'people', 22),
         ),
-        named(account.displayName, account.username + ' · ' + account.role),
+        named(staffLabel(ctx, account), account.username + ' · ' + account.role),
         badge(ctx, account.enabled ? '已启用' : '已停用', account.enabled ? 'green' : 'neutral'),
       ]),
       account.enabled ? null : node('p', 'fx-muted', '以下为账号恢复启用后的权限。'),
@@ -422,7 +423,7 @@ function accounts(ctx) {
         ? facts([
             [
               '绑定长者',
-              state.residents.find((r) => r.id === account.residentId)?.name || account.residentId,
+              residentLabel(ctx, account.residentId),
             ],
             ['已完成照护服务', account.familyServices ? '可查阅近期服务日期和项目' : '未开通查阅'],
             ['照护工单', account.portalScopes.includes('careSchedule') ? '可查阅' : '未开通查阅'],
@@ -464,7 +465,7 @@ function accounts(ctx) {
         matches: (r, key) => identityLabel(r) === key || (key==='待激活' && r.activationPending && r.enabled) || (r.enabled ? '已启用' : '已停用') === key,
       },
       cols: [
-        { label: '姓名 / 登录名', view: (r) => named(r.displayName, r.username) },
+        { label: '姓名 / 登录名', view: (r) => named(staffLabel(ctx, r), r.username) },
         {
           label: '岗位',
           view: (r) =>
@@ -480,7 +481,7 @@ function accounts(ctx) {
           label: '工作分院',
           view: (row) =>
             row.kind === 'family'
-              ? (boundPerson(row)?.name || '随绑定长者')
+              ? (boundPerson(row) ? residentAnchor(ctx, boundPerson(row)) : '随绑定长者')
               : (state.campusOptions || []).find((c) => c.id === row.facilityScope?.campusIds?.[0])?.name || '全机构',
         },
         {

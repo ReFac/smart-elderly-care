@@ -1,5 +1,14 @@
 import { named, node } from './shared.js';
 
+export function asBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = () => reject(new Error('读取原件失败，请重新选择。'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export function originalViewer(doc, onPage = () => {}) {
   const base = '/api/documents/' + encodeURIComponent(doc.id);
   const pdf = doc.mime === 'application/pdf';

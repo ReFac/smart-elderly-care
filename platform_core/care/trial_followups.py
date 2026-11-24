@@ -48,7 +48,10 @@ def recipients(db, state, user, resident_id, policy):
                 campus_access.require_resident(db, employee, resident_id, state)
             except PermissionError:
                 continue
-            result.append({k: employee[k] for k in ("id", "displayName", "username")})
+            result.append({
+                k: employee[k] for k in ("id", "displayName", "username", "role", "staffDuties")
+                if k in employee
+            })
     return result
 
 

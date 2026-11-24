@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor } from './people-labels.js';
 import { roomTasks } from './agent-runs.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import { active, canAct, node, page } from './shared.js';
@@ -83,38 +84,20 @@ function searchBox(ctx, openRoom, campusId) {
           [
             ctx.ui.icon(room.matchedNames.length ? 'people' : 'bed', 18),
             node('span', '', [
-              node('strong', '', room.number + ' 房 · ' + text),
+              node('strong', '', room.number + ' 房'),
               node('small', '', pathName(room.campusName, room.buildingName, room.floorLabel))
             ]),
             ctx.ui.icon('chevron', 14)
           ]
         );
-        const direct =
-          room.matchedNames.length === 1 && ctx.available('residents')
-            ? button(
-                '直接打开' + text + '的档案',
-                async () => {
-                  hide();
-                  const data = await openRoom(
-                    room.buildingId,
-                    room.floorId,
-                    room.roomId,
-                    room.matchedNames
-                  );
-                  if (!data) return;
-                  const beds = data.beds.filter((bed) => bed.residentName === text);
-                  if (beds.length !== 1) {
-                    ctx.toast('请按房内床号核对同名长者');
-                    return;
-                  }
-                  const person = ctx.state.residents.find((r) => r.id === beds[0].residentId);
-                  if (person) profile(ctx, person);
-                },
-                'room-direct-profile',
-                '打开档案'
-              )
-            : null;
-        list.append(node('div', 'room-match-row', [entry, direct]));
+        const people = (room.matchedResidents || []).map(hit => {
+          const person = ctx.state.residents.find(r => r.id === hit.id);
+          if (!person) return null;
+          const anchor = residentAnchor(ctx, person);
+          anchor.title = '打开长者档案 · ' + hit.bedLabel;
+          return node('div', 'room-direct-profile', [anchor, node('small', '', ' · ' + hit.bedLabel)]);
+        });
+        list.append(node('div', 'room-match-row', [entry, ...people]));
       }
       matches.replaceChildren(list);
       if (result.hasMore) matches.append(statusText('还有更多结果，可继续输入姓名或房号。'));
@@ -144,14 +127,14 @@ function searchBox(ctx, openRoom, campusId) {
       return;
     }
     if (!['ArrowUp', 'ArrowDown'].includes(e.key) || matches.hidden) return;
-    const buttons = [...matches.querySelectorAll('button')];
+    const buttons = [...matches.querySelectorAll('button, a[href]')];
     if (!buttons.length) return;
     e.preventDefault();
     const current = buttons.indexOf(document.activeElement);
     buttons[(current + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus();
   });
   form.addEventListener('focusout', (e) => {
-    if (!form.contains(e.relatedTarget)) hide();
+    if (!form.contains(e.relatedTarget) && !e.relatedTarget?.closest('dialog[open]')) hide();
   });
   return form;
 }
@@ -276,7 +259,7 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
       bed.status === '空闲' &&
       (canAct(ctx, 'care.admit') || (canAct(ctx, 'care.transfer') && active(ctx).length));
     const name =
-      canRead && bed.residentName ? bed.residentName : allocatable ? '空闲 · 办理分配' : bed.status;
+      canRead && bed.residentName ? residentLabel(ctx, resident || {name:bed.residentName, id:bed.residentId, bedId:bed.id}) : allocatable ? '空闲 · 办理分配' : bed.status;
     const body = [
       ctx.ui.icon('bed', 18),
       node('span', '', [

@@ -17,7 +17,7 @@ from platform_core.agents import chat
 from platform_core.operations import expense_import
 from platform_core.backups import exchange
 from platform_core import access, facility
-from platform_core import lead_intake
+from platform_core import lead_intake, medical_visits
 from platform_core.provider import round_priorities
 from platform_core.store import Conflict, SignedOut, Store, encode
 
@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 SMALL_BODY = 64 * 1024
 DOCUMENT_BODY = 12 * 1024 * 1024
+VISIT_GROUP_BODY = 34 * 1024 * 1024  # 24 MiB of originals, base64-encoded, plus metadata.
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -140,6 +141,10 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def read_resource(self, path):
+        original = re.fullmatch(r"/api/medical-visits/originals/([a-f0-9]{32})", path)
+        if original:
+            raw, mime = medical_visits.original(self.store, self.token(), original[1])
+            return self.respond(200, raw, mime)
         if path in ("/visit", "/visit/"):
             return self.respond(200, (WEB / "visit.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/api/public/reception":
@@ -434,6 +439,13 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, image, mime)
 
     def write_resource(self, path):
+        visit = re.fullmatch(r"/api/residents/([A-Za-z0-9_-]{1,100})/medical-visits/preview", path)
+        if visit:
+            token = self.token()
+            self.store.version(token)
+            group = self.read_json(VISIT_GROUP_BODY)
+            result = medical_visits.preview(self.store, token, visit[1], group)
+            return self.send_json(200, result)
         if path == "/api/public/leads":
             payload = self.read_json(8192)
             return self.send_json(202, lead_intake.submit(self.store, payload, self.client_address[0]))

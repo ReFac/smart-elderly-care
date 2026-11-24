@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { residentInsights } from './resident-insights.js';
 import { billDetail } from './billing.js';
 import { editResident } from './profile-editor.js';
@@ -6,8 +7,10 @@ import { contactBook } from './family-contacts.js';
 import { familyInbox, familyRecipients } from './family-rounds.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import { previewSummary } from './dossier-summary.js';
-import { originalViewer } from './document-original.js';
+import { asBase64, originalViewer } from './document-original.js';
 import { pendingDocument, recognizeDocument, reviewReceipt } from './document-ocr.js';
+import { openVisitEditor } from './medical-visit-intake.js';
+import { visitHistory } from './medical-visit-review.js';
 import {
   node,
   add,
@@ -163,7 +166,7 @@ function myFamily(ctx) {
     node('span', 'family-mark', ctx.ui.icon('people', 25)),
     node('div', '', [
       node('small', '', me.portalSelf ? '我的入住档案' : '绑定长者'),
-      node('h2', '', resident.name)
+      node('h2', '', residentLabel(ctx, resident))
     ]),
     node('span', 'family-institution', [
       ctx.ui.icon('building', 15),
@@ -283,14 +286,7 @@ function options(items) {
   return select;
 }
 
-export function asBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',')[1]);
-    reader.onerror = () => reject(new Error('读取原件失败，请重新选择。'));
-    reader.readAsDataURL(file);
-  });
-}
+export { asBase64 };
 
 function newDocument(ctx, resident) {
   const form = node('form', 'fx-profile fx-document-form');
@@ -442,7 +438,7 @@ function newDocument(ctx, resident) {
           : '';
       const archived = await ctx.command('dossier.document', payload, {
         title: imageHash ? '存档并提交 DeepSeek OCR' : '存档医疗文书',
-        target: resident.name,
+        target: residentLabel(ctx, resident),
         fields: [
           ['文书', kind.value],
           ['日期', event.value],
@@ -466,7 +462,7 @@ function newDocument(ctx, resident) {
       submit.disabled = false;
     }
   });
-  ctx.detail('为' + resident.name + '存档医疗文书', form).addEventListener('close', () => inspection?.abort(), { once: true });
+  ctx.detail('为' + residentLabel(ctx, resident) + '存档医疗文书', form).addEventListener('close', () => inspection?.abort(), { once: true });
 }
 
 function showDocument(ctx, doc) {
@@ -482,7 +478,7 @@ function showDocument(ctx, doc) {
   const transcription = node('div', 'fx-profile', [
     facts([
       ['文字来源', s.method],
-      ['核对人员', s.reviewedBy],
+      ['核对人员', staffLabel(ctx, s.reviewedBy, s.reviewerId)],
       ['存档日期', doc.recordedDate]
     ]),
     section('原文事实与描述', node('p', '', s.sourceFacts)),
@@ -612,13 +608,15 @@ export function openDossier(ctx, resident) {
   const recentChanges = scopedHistoryButton(ctx, 'resident', resident.id);
   if (recentChanges) actions.append(recentChanges);
   if (!archived && allowed(ctx, 'care')) contents.append(careTimeline(ctx, 'resident', resident.id));
-  if (allowed(ctx, 'medical')) contents.append(timeline(ctx, resident));
+  if (allowed(ctx, 'medical')) contents.append(
+    visitHistory(ctx, resident, archived ? null : openVisitEditor), timeline(ctx, resident)
+  );
   if (allowed(ctx, 'residents') || allowed(ctx, 'intake'))
     side.append(
       section(
         '基本资料',
         facts([
-          ['姓名', resident.name],
+          ['姓名', residentLabel(ctx, resident)],
           ['年龄', resident.age == null ? '' : resident.age + ' 岁'],
           ...displayed(basicFields, profile)
         ])
@@ -660,14 +658,14 @@ export function openDossier(ctx, resident) {
               ? disclosure(
                   r.source + ' · ' + r.date,
                   node('div', 'fx-profile', [
-                    named(r.summary, r.reviewer),
+                    named(r.summary, staffLabel(ctx, r.reviewer)),
                     facts(r.evidence.map((e) => [e.label, e.value]))
                   ]),
                   r.evidence.length
                 )
               : named(
                   r.summary,
-                  [r.source || '档案摘要复核', r.observedAt || r.date, r.room, r.reviewer]
+                  [r.source || '档案摘要复核', r.observedAt || r.date, r.room, staffLabel(ctx, r.reviewer)]
                     .filter(Boolean)
                     .join(' · ')
                 )
@@ -681,7 +679,7 @@ export function openDossier(ctx, resident) {
   if (resident.status==='在住' && (allowed(ctx, 'care') || allowed(ctx, 'clinical'))) contents.prepend(residentInsights(ctx, resident.id));
   if (!side.childElementCount) side.remove();
   if (!contents.childElementCount) contents.remove();
-  ctx.detail('长者详细档案', body);
+  return ctx.detail('长者详细档案', body);
 }
 
 export function renderDossier(route, ctx) {
@@ -696,7 +694,7 @@ export function renderDossier(route, ctx) {
       rows: ctx.state.residents || [],
       search: {
         placeholder: '搜索姓名或档案号',
-        value: (r) => r.name + ' ' + r.id
+        value: (r) => residentLabel(ctx, r) + ' ' + r.id
       },
       cols: [
         {
@@ -704,7 +702,7 @@ export function renderDossier(route, ctx) {
           view: (r) =>
             node('div', 'fx-person-cell', [
               node('span', 'fx-person-mark', ctx.ui.icon('people', 16)),
-              named(r.name, r.id)
+              named(residentAnchor(ctx, r), r.id)
             ])
         },
         {

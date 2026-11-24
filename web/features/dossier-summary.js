@@ -1,3 +1,4 @@
+import { residentLabel } from './people-labels.js';
 import { named, node, section, records } from './shared.js';
 
 export async function previewSummary(ctx, resident, openDocument) {
@@ -64,5 +65,5 @@ export async function previewSummary(ctx, resident, openDocument) {
       submit.disabled = false;
     }
   });
-  ctx.detail('核对' + resident.name + '的动态档案摘要', form);
+  ctx.detail('核对' + residentLabel(ctx, resident) + '的动态档案摘要', form);
 }

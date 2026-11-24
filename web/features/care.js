@@ -1,3 +1,4 @@
+import { residentAnchor, staffLabel } from './people-labels.js';
 import { careTimeline } from './care-timeline.js';
 import {
   canAct,
@@ -42,7 +43,7 @@ const statusFilter = {
 
 const personCol = (ctx) => ({
   label: '长者',
-  view: (r) => residentName(ctx, r.residentId),
+  view: (r) => residentAnchor(ctx, r.residentId),
 });
 
 const observations = ['生活起居', '院内活动', '日常沟通'];
@@ -116,7 +117,7 @@ export function assessments(ctx) {
         '。待派工：' +
         (plan.items || ['执行个体照护计划']).join('、') +
         '。责任人：' +
-        plan.assignee +
+        staffLabel(ctx, plan.assignee, plan.assigneeId) +
         '（' +
         (plan.assignmentSource || '人工指定') +
         '）。',
@@ -155,7 +156,7 @@ export function assessments(ctx) {
         },
         {
           label: '负责人员',
-          view: (r) => r.assignee,
+          view: (r) => staffLabel(ctx, r.assignee, r.assigneeId),
         },
         {
           label: '评估日期',
@@ -206,7 +207,7 @@ export function assessments(ctx) {
         },
         {
           label: '负责人员',
-          view: (r) => r.assignee,
+          view: (r) => staffLabel(ctx, r.assignee, r.assigneeId),
         },
       ],
     });
@@ -224,7 +225,7 @@ export function assessments(ctx) {
         },
         {
           label: '负责人员',
-          view: (r) => r.assignee,
+          view: (r) => staffLabel(ctx, r.assignee, r.assigneeId),
         },
         {
           label: '状态',
@@ -244,7 +245,7 @@ export function assessments(ctx) {
                       ['计划', r.title],
                       ['内容', r.note],
                       ['状态', r.status],
-                      ['复核人', r.reviewer],
+                      ['复核人', staffLabel(ctx, r.reviewer)],
                       ['复评日期', r.reviewDate],
                     ])
                   )
@@ -357,7 +358,7 @@ function serviceProof(ctx, id) {
         ['工单编号', task.id],
         ['任务', task.title],
         ['服务对象', residentName(ctx, task.residentId)],
-        ['执行人', task.operator || '未登记'],
+        ['执行人', task.operator ? staffLabel(ctx, task.operator, task.operatorId) : '未登记'],
         ['执行记录', task.note],
         ['床位核验', task.checkedBedId || '未登记'],
         [
@@ -373,7 +374,7 @@ function serviceProof(ctx, id) {
             [r.source || '服务抽检', r.rating && r.rating + ' 分', r.note]
               .filter(Boolean)
               .join(' · '),
-            r.reviewer,
+            staffLabel(ctx, r.reviewer),
           ),
         ),
       ),
@@ -400,7 +401,7 @@ function taskHistory(ctx) {
       { label: '任务', view: (r) => named(r.title, r.kind) },
       personCol(ctx),
       { label: '计划时间', view: (r) => named(r.time, r.date) },
-      { label: '责任人', view: (r) => r.assignee },
+      { label: '责任人', view: (r) => staffLabel(ctx, r.assignee, r.assigneeId) },
       { label: '状态', view: (r) => badge(ctx, r.status) },
       {
         label: '操作',
@@ -499,7 +500,7 @@ function vitals(ctx) {
                     ['项目', r.metric],
                     ['测量结果', r.value + ' ' + (r.unit || '')],
                     ['状态', r.status],
-                    ['记录人', r.operator],
+                    ['记录人', staffLabel(ctx, r.operator, r.operatorId)],
                     ['记录', r.note],
                     ['处理记录', r.resolution || r.resolutionNote],
                   ])
@@ -625,7 +626,7 @@ export function medications(ctx) {
               },
               {
                 label: '负责人员',
-                view: (r) => r.assignee || '—',
+                view: (r) => staffLabel(ctx, r.assignee, r.assigneeId) || '—',
               },
               {
                 label: '状态',
@@ -648,8 +649,8 @@ export function medications(ctx) {
                               ['医嘱', r.instruction],
                               ['筛查提醒', r.warnings.join('、')],
                               ['审核意见', r.note],
-                              ['复核人', r.reviewer],
-                              ['执行人', r.operator],
+                              ['复核人', staffLabel(ctx, r.reviewer)],
+                              ['执行人', staffLabel(ctx, r.operator, r.operatorId)],
                               ['执行补充', r.executionNote],
                               ['计划给药时间', r.scheduledAt?.replace('T', ' ')],
                               ['执行登记时间', (r.executedTime || r.executedAt)?.replace('T', ' ')],
@@ -657,7 +658,7 @@ export function medications(ctx) {
                                 '核查历史',
                                 (r.reviews || [])
                                   .map((v) =>
-                                    [v.date, v.reviewer, ...v.warnings, v.note]
+                                    [v.date, staffLabel(ctx, v.reviewer), ...v.warnings, v.note]
                                       .filter(Boolean)
                                       .join(' · ')
                                   )

@@ -1,3 +1,4 @@
+import { residentLabel, residentAnchor } from './people-labels.js';
 import {
   node,
   page,
@@ -34,7 +35,7 @@ function generate(ctx, selected) {
   const resident = select(
     'residentId',
     '长者',
-    people.map((r) => ({ value: r.id, label: r.name + ' · ' + r.status })),
+    people.map((r) => ({ value: r.id, label: residentLabel(ctx, r) + ' · ' + r.status })),
   );
   const month = today(ctx).slice(0, 7);
   const unbilled = people.find(
@@ -252,7 +253,7 @@ export function billing(ctx) {
             cols: [
               {
                 label: '长者',
-                view: (b) => residentName(ctx, b.residentId),
+                view: (b) => residentAnchor(ctx, b.residentId),
               },
               {
                 label: '账期',
@@ -284,7 +285,7 @@ export function billing(ctx) {
         empty: '当前没有已到期且尚未出账的约定月付账期。',
         search: { placeholder: '搜索长者', value: (r) => residentName(ctx, r.residentId) },
         cols: [
-          { label: '长者', view: (r) => residentName(ctx, r.residentId) },
+          { label: '长者', view: (r) => residentAnchor(ctx, r.residentId) },
           { label: '本期账单日', view: (r) => r.billingDate },
           { label: '计费区间', view: (r) => r.startDate + ' 至 ' + r.endDate },
           { label: '操作', align: 'end', view: (r) => ctx.state.allowedActions.includes('ops.bill')
@@ -308,7 +309,7 @@ export function billing(ctx) {
             cols: [
               {
                 label: '长者',
-                view: (r) => residentName(ctx, r.residentId),
+                view: (r) => residentAnchor(ctx, r.residentId),
               },
               {
                 label: '账户编号',
@@ -357,7 +358,7 @@ export function billing(ctx) {
               },
               {
                 label: '长者',
-                view: (r) => residentName(ctx, r.residentId),
+                view: (r) => residentAnchor(ctx, r.residentId),
               },
               {
                 label: '账单编号',
