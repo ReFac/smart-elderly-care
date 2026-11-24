@@ -168,7 +168,9 @@ export function loginScreen(onLogin, branding = {}) {
   ]);
   const recover = node('button','btn btn-ghost','首次设置 / 找回密码');
   recover.type='button'; recover.onclick=()=>passwordFlow({username:name.value.trim()});
-  panel.append(form, recover, help);
+  const visit = node('a', 'access-visitor-link', [icon('calendar', 18), node('strong', '', '访客咨询与预约参观'), icon('chevron', 16)]);
+  visit.href = '/visit';
+  panel.append(form, recover, help, visit);
   entry.append(panel);
   main.append(hero, entry);
   return main;

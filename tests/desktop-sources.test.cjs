@@ -73,3 +73,52 @@ test('preload forwards only trusted clicks on displayed assistant source links',
   await click(event(true, true));
   assert.deepEqual(requests, [['assistant:open-public-source', publicHost]]);
 });
+
+test('customer detail dialing accepts only canonical phone numbers in the institution leads main frame', async () => {
+  const { registerLeadCalls } = require('../clients/desktop/lead-calls.cjs');
+  const opened = [];
+  const mainFrame = { origin, url: origin + '/#leads' };
+  let invoke;
+  const contents = { mainFrame, isDestroyed: () => false, ipc: { handle(name, fn) {
+    assert.equal(name, 'leads:call-customer');
+    invoke = fn;
+  } } };
+  registerLeadCalls(contents, origin, url => opened.push(url));
+  const call = v => invoke({ senderFrame: mainFrame }, v);
+  const dial = 'tel:15500000161';
+  for (const uri of [dial, 'tel:037512345678', 'tel:+14155550111']) assert.equal(await call(uri), true);
+  for (const uri of ['https://example.org', 'tel://15500000161', 'tel:15500000161;ext=9',
+    'tel:15500000161%2A', 'tel:15500000161\n', 'tel:110', 'tel:*123#', 'tel:15500000161,123', null]) {
+    assert.equal(await call(uri), false);
+  }
+  assert.equal(await invoke({ senderFrame: { ...mainFrame } }, dial), false);
+  for (const page of [origin + '/#overview', origin + '/visit#leads', 'https://example.org/#leads']) {
+    mainFrame.url = page;
+    assert.equal(await call(dial), false);
+  }
+  assert.deepEqual(opened, [dial, 'tel:037512345678', 'tel:+14155550111']);
+});
+
+test('only explicit clicks in visible lead details reach the dial action', async () => {
+  let handler;
+  const calls = [];
+  const view = { origin, hash: '#leads' };
+  const phone = { isConnected: true, protocol: 'tel:', href: 'tel:15500000161', getClientRects: () => [{}] };
+  runInNewContext(readFileSync(require.resolve('../clients/desktop/source-preload.cjs'), 'utf8'), {
+    require: () => ({ ipcRenderer: { invoke: async (...args) => { calls.push(args); return true; } } }),
+    window: { addEventListener(_type, fn) { handler = fn; } }, location: view,
+  });
+  const click = (trusted, hasPhone = true) => handler({ isTrusted: trusted, button: 0, defaultPrevented: false,
+    preventDefault() {}, stopImmediatePropagation() {}, target: { closest: selector =>
+      hasPhone && selector === 'dialog[open] .lead-detail-head a.lead-phone' ? phone : null } });
+  await click(false);
+  await click(true, false);
+  phone.isConnected = false;
+  await click(true);
+  phone.isConnected = true;
+  view.hash = '#overview';
+  await click(true);
+  view.hash = '#leads';
+  await click(true);
+  assert.deepEqual(calls, [['leads:call-customer', phone.href]]);
+});

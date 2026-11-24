@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17375a">
+  <title>来院参观与咨询 · 安康家园</title>
+  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/visit.css">
+  <script type="module" src="/visit.js"></script>
+</head>
+<body>
+  <header class="public-header"><div><img src="/assets/mark.svg" alt="" width="34" height="34"><strong data-brand>安康家园</strong></div><a href="/">员工与家属登录 <span aria-hidden="true">↗</span></a></header>
+  <main class="reception">
+    <section class="welcome" aria-labelledby="welcome-title">
+      <p class="eyebrow">访客接待</p>
+      <h1 id="welcome-title">来院参观<br>与咨询</h1>
+      <p class="introduction">想为自己或家人了解入住？留下联系方式，接待人员会与您通话，了解需求并确认来访安排。</p>
+      <aside class="callback-card"><h2>先电话聊一聊</h2><p>接听回电，了解试住、收费和照护服务。</p><button type="button" id="open-callback">请给我回电 <span aria-hidden="true">→</span></button></aside>
+    </section>
+    <section class="form-card" aria-labelledby="visit-title">
+      <h2 id="visit-title">申请参观</h2><p class="subhead">告诉我们您想来哪个院区，具体时段以电话确认为准。</p>
+      <form id="visit-form">
+        <label>参观院区<select required name="campusId" class="campuses" disabled><option value="">正在载入院区…</option></select></label>
+        <div class="pair"><label>您的称呼<input name="name" required maxlength="40" autocomplete="name" placeholder="怎么称呼您"></label>
+        <label>联系电话<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" required placeholder="可接通的手机号"></label></div>
+        <fieldset><legend>期望参观时间 <small>选填 · 北京时间</small></legend>
+          <div class="pair"><label><span class="sr-only">期望参观日期</span><input name="day" type="date"></label>
+          <label><span class="sr-only">期望参观时刻</span><select name="time"><option value="">请选择时间</option></select></label></div>
+        </fieldset>
+        <label>希望了解的内容 <small>选填</small><textarea name="note" rows="2" maxlength="400" placeholder="例如：想看看双人间，了解试住费用"></textarea></label>
+        <label class="consent"><input type="checkbox" required name="consent"><span>我同意所选院区使用我填写的号码联系我，安排本次咨询或参观。</span></label>
+        <p class="form-error" role="alert"></p><button class="primary" type="submit" disabled>提交参观意愿</button>
+      </form>
+      <div class="receipt" id="visit-receipt" role="status" tabindex="-1" hidden><h3>参观意愿已送达</h3><p>请留意接待人员的来电。通话确认后，工作人员会为您留出接待时段。</p></div>
+    </section>
+  </main>
+  <dialog id="callback" aria-labelledby="callback-title">
+    <div class="dialog-head"><h2 id="callback-title">请接待人员回电</h2><button type="button" id="close" aria-label="关闭">×</button></div>
+    <form id="callback-form">
+      <label>咨询院区<select name="campusId" required class="campuses" disabled><option value="">正在载入院区…</option></select></label>
+      <label>我的手机号<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" required></label>
+      <button type="button" id="pick-phone" class="text-action" hidden>从本机名片选择我的号码</button>
+      <label class="consent"><input type="checkbox" required name="consent"><span>我同意所选院区保存这个号码，并就本次养老服务咨询给我回电。</span></label>
+      <p class="form-error" role="alert"></p><button class="primary" type="submit" disabled>同意并请求回电</button>
+    </form>
+    <div class="receipt" id="callback-receipt" role="status" tabindex="-1" hidden><h3>回电请求已收到</h3><p>感谢留言。如需安排来院参观，也可以填写参观意愿。</p></div>
+  </dialog>
+  <p class="load-error" role="alert" id="load-error"></p>
+</body>
+</html>

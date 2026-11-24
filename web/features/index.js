@@ -13,10 +13,12 @@ import { renderDossier } from './dossier.js';
 import { renderGateways } from './gateways.js';
 import { recentChanges } from './recent-changes.js';
 import { activityPage } from './activity.js';
+import { leadsPage } from './leads.js';
 
 import { roomsPage, tourPage } from './rooms.js';
 
 const features = {
+  leads: leadsPage,
   account: accountCenter,
   rooms: roomsPage,
   tour: tourPage,

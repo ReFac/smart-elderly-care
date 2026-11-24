@@ -5,8 +5,27 @@ from functools import cache
 import json
 from pathlib import Path
 import re
+import unicodedata
 
 ASSETS = Path(__file__).resolve().parents[1] / "web" / "assets"
+
+
+def phone_number(raw, *, mobile=False):
+    """Canonical contact key for resident files, explicit visits and callback matching."""
+    if not isinstance(raw, str) or len(raw) > 40:
+        return ""
+    value = re.sub(r"[\s()-]", "", unicodedata.normalize("NFKC", raw))
+    if value.startswith("00"):
+        value = "+" + value[2:]
+    if value.startswith("+86"):
+        value = value[3:]
+        if not value.startswith(("0", "1")):
+            value = "0" + value
+    if re.fullmatch(r"1[3-9][0-9]{9}", value):
+        return value
+    if not mobile and re.fullmatch(r"0[1-9][0-9]{8,10}", value):
+        return value
+    return value if re.fullmatch(r"\+[1-9][0-9]{7,14}", value) else ""
 
 
 @cache

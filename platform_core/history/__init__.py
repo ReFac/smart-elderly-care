@@ -238,6 +238,8 @@ class Reader:
             from ..provider.speech import can_read_agent_history
 
             return own and can_read_agent_history(self.db, self.user, row["revision"])
+        if action == "leads.public":
+            return policy.has(self.user, "intake")
         if action == "family.consent":
             return policy.has(self.user, "relatives") and policy.has(
                 self.user, "family.share"
@@ -287,6 +289,17 @@ class Reader:
         if self.user["kind"] == "owner":
             return True
         name = c["collection"]
+        if name in ("leadContacts", "leadEvents", "visitBookings", "visitSchedulePolicies"):
+            if not policy.has(self.user, "intake"):
+                return False
+            if self.allowed_beds is None:
+                return True
+            campus = self.db.execute(
+                "SELECT json_extract(item.value,'$.campusId') FROM workspace,json_each(data,?) item "
+                "WHERE json_extract(item.value,'$.id')=?",
+                ("$." + name, c["entityId"]),
+            ).fetchone()
+            return bool(campus and campus[0] in campus_access.registration_campuses(self.user))
         if name == "family_round_preferences":
             return policy.has(self.user, "relatives") and policy.has(
                 self.user, "family.share"

@@ -65,6 +65,8 @@ PAGES = (
     Page("billing", "支出登记", ("费用支出",), "expenses"),
     Page("billing", "预交余额", ("预交金余额",), "deposits"),
     Page("billing", "收款流水", ("账单核销记录",), "payments"),
+    Page("leads", "意向客户", ("来电登记", "意向客服", "咨询回访")),
+    Page("leads", "接待时间表", ("来访排班", "接待排班表", "参观排班", "来访预约"), "schedule"),
     Page("shifts", "人员排班", ("员工排班", "排班表", "排班")),
     Page("reports", "统计报送", ("民政报送", "统计报表")),
     Page("inbox", "预警与确认", ("预警与人工确认", "预警中心")),

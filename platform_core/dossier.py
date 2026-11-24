@@ -18,6 +18,7 @@ from .care.records import append_record, lookup
 
 MAX_IMAGE = 8 * 1024 * 1024
 BASIC = {
+    "phone": 40,
     "birthDate": 10,
     "birthplace": 120,
     "nativePlace": 120,
@@ -134,6 +135,11 @@ def edit_profile(db, state, p, user, today):
             and k not in ("language", "education", "maritalStatus", "occupation")
         }
     )
+    if "phone" in p and basic["phone"]:
+        normalized = profile_fields.phone_number(basic["phone"], mobile=True)
+        if not normalized:
+            raise ValueError("请核对长者本人手机号；境外号码请填写国家区号")
+        basic["phone"] = normalized
     if set(p) & HOUSEHOLD.keys():
         access.require(user, "relatives")
         household.update(

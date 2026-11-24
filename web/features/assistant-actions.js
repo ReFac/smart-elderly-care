@@ -4,6 +4,8 @@ import { routes } from '../lib/navigation.js';
 
 // These destinations are also indexed by the keyboard quick finder.
 export const quickDestinations = [
+  { label: '意向客户', words: '来电登记 电话回访 客户反馈', route: 'leads' },
+  { label: '接待时间表', words: '意向客户 来访排班 电话预约 参观时间', route: 'leads', tab: 'schedule' },
   {
     label: '办理老人入住',
     words: '创建老人入住 办理长者入住 老人入院 分配床位',

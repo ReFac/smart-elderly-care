@@ -1,0 +1,57 @@
+:root {color-scheme:light;font-family:"Instrument Sans","PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#162d48;background:#f5f8fb;font-size:16px}
+* {box-sizing:border-box}
+body {margin:0}
+button,input,textarea,select {font:inherit}
+button,a {cursor:pointer}
+[hidden] {display:none!important}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible {outline:3px solid #3869a8;outline-offset:3px}
+.public-header {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px max(5vw,calc((100% - 1152px)/2));background:white;border-bottom:1px solid #dce5ee}
+.public-header div {display:flex;align-items:center;gap:10px;font-size:19px}
+.public-header a,.text-action {color:#305883;text-decoration:none}
+.public-header a {font-size:14px}
+.public-header a:hover,.text-action:hover {text-decoration:underline}
+.reception {max-width:1200px;margin:clamp(26px,5vh,68px) auto;padding:0 24px;display:grid;grid-template-columns:.85fr 1.2fr;align-items:stretch;gap:22px}
+.welcome,.form-card {border-radius:20px;padding:clamp(26px,3.2vw,48px)}
+.welcome {display:flex;flex-direction:column;align-items:flex-start;color:white;background:linear-gradient(145deg,#142e50,#204d78 75%,#356189)}
+.eyebrow {margin:0;font-weight:650;font-size:14px;color:#f4cf98;letter-spacing:.12em}
+.welcome h1 {font-size:clamp(46px,5.2vw,78px);line-height:1.13;letter-spacing:-.04em;margin:22px 0}
+.introduction,.callback-card p,.subhead,.receipt p {line-height:1.75;margin:0}
+.introduction {max-width:32ch;color:#e0ebf8}
+.callback-card {margin-top:auto;padding-top:50px;width:100%}
+.callback-card h2 {border-top:1px solid #ffffff4a;padding-top:26px;font-size:20px;margin:0 0 5px}
+.callback-card p {font-size:14px;color:#dbe8f8}
+.callback-card button {margin-top:15px;border:1px solid #bbcee0;border-radius:8px;background:#ffffff0d;padding:9px 15px;color:white;font-weight:650}
+.callback-card button:hover {background:#ffffff1f}
+.callback-card button span,.public-header a span {margin-left:8px}
+.form-card,dialog {background:#fff;border:1px solid #dbe4ed;box-shadow:0 10px 28px #17375a0a}
+.form-card h2,.dialog-head h2 {margin:0;font-size:28px;color:#132e50}
+.subhead {color:#53677d;font-size:14px;margin:6px 0 23px}
+form {display:grid;gap:16px}
+form label,fieldset {font-size:14px;font-weight:600}
+form label:not(.consent) {display:block}
+form small {font-size:12px;font-weight:450;color:#647488;margin-left:4px}
+input:not([type=checkbox]),select,textarea {width:100%;margin-top:6px;padding:10px 11px;border:1px solid #becbd9;border-radius:7px;background:white;color:#162d48;min-height:42px;font-size:15px}
+textarea {resize:vertical}
+.pair {display:grid;grid-template-columns:1fr 1fr;gap:14px}
+fieldset {border:0;padding:0;margin:0;min-width:0}
+legend {padding:0}
+.consent {display:flex;align-items:flex-start;gap:9px;color:#415970;font-weight:450;font-size:13px;line-height:1.6}
+.consent input {flex:none;width:17px;height:17px;margin:2px 0 0;accent-color:#255ca1}
+.primary {border:0;background:#245ca2;color:white;border-radius:8px;min-height:45px;padding:0 22px;font-weight:650}
+.primary:hover {background:#184b8a}
+button:disabled,select:disabled {opacity:.55;cursor:default}
+.form-error,.load-error {margin:0;color:#a13f2c;font-size:14px}
+.form-error:empty,.load-error:empty {display:none}
+.load-error {text-align:center;margin:16px;padding:10px}
+.receipt {background:#edf5f0;border-left:3px solid #458366;padding:20px;color:#285143;border-radius:6px}
+.receipt h3 {margin:0 0 6px}
+dialog {color:#162d48;border-radius:16px;max-width:min(420px,calc(100% - 30px));width:100%;padding:26px}
+dialog::backdrop {background:#11233b80}
+.dialog-head {display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
+.dialog-head h2 {font-size:22px}
+.dialog-head button,.text-action {border:0;background:none}
+.dialog-head button {font-size:28px;color:#50657c;line-height:1}
+.text-action {justify-self:start;padding:0;font-size:14px}
+.sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@media(max-width:760px){.reception{grid-template-columns:1fr;margin:18px auto;padding:0 15px;gap:14px}.public-header{padding:14px 17px}.welcome h1{font-size:38px;margin:12px 0}.welcome h1 br{display:none}.callback-card{padding-top:20px}.callback-card h2{padding-top:14px}.introduction{max-width:none}}
+@media(max-width:420px){.pair{grid-template-columns:1fr}.welcome,.form-card{padding:22px 19px}}

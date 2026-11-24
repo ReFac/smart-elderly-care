@@ -28,6 +28,7 @@ import {
 } from './shared.js';
 
 const basicFields = [
+  ['phone', '长者本人手机号'],
   ['birthDate', '出生日期', 'date'],
   ['birthplace', '出生地'],
   ['nativePlace', '籍贯'],

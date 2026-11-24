@@ -17,6 +17,7 @@ from platform_core.agents import chat
 from platform_core.operations import expense_import
 from platform_core.backups import exchange
 from platform_core import access, facility
+from platform_core import lead_intake
 from platform_core.provider import round_priorities
 from platform_core.store import Conflict, SignedOut, Store, encode
 
@@ -119,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_resource(path)
         except SignedOut as e:
             self.send_json(401, {"error": str(e)})
-        except access.LoginThrottled as e:
+        except (access.LoginThrottled, lead_intake.SubmissionLimit) as e:
             self.send_json(429, {"error": str(e)})
         except PermissionError as e:
             self.send_json(403, {"error": str(e)})
@@ -139,6 +140,15 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def read_resource(self, path):
+        if path in ("/visit", "/visit/"):
+            return self.respond(200, (WEB / "visit.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/api/public/reception":
+            return self.send_json(200, lead_intake.reception(self.store))
+        if path == "/api/leads/schedule":
+            query = parse_qs(urlsplit(self.path).query, max_num_fields=2)
+            if set(query) != {"campusId", "date"} or any(len(v) != 1 for v in query.values()):
+                raise ValueError("请选择接待院区和排班日期")
+            return self.send_json(200, lead_intake.schedule(self.store, self.token(), query["campusId"][0], query["date"][0]))
         expense_file = re.fullmatch(r"/api/finance/expense-import/files/([a-f0-9]{64})", path)
         if expense_file:
             raw = expense_import.original(self.store, self.token(), expense_file[1])
@@ -424,6 +434,9 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, image, mime)
 
     def write_resource(self, path):
+        if path == "/api/public/leads":
+            payload = self.read_json(8192)
+            return self.send_json(202, lead_intake.submit(self.store, payload, self.client_address[0]))
         inspection = re.fullmatch(r"/api/residents/([a-zA-Z0-9_-]+)/document-pages", path)
         if inspection:
             if self.headers.get_content_type() != "application/pdf":

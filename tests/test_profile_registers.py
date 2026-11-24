@@ -171,6 +171,27 @@ class ProfileRegisterTests(unittest.TestCase):
         self.command("dossier.profile", {**p, "address": "旧客户端更正后的地址"})
         self.assertNotIn("addressRegion", self.data()["dossierProfiles"][0])
 
+    def test_resident_mobile_is_optional_normalized_and_separate_from_family(self):
+        base = {"residentId": "r001", "name": "样例长者"}
+        self.command("dossier.profile", {**base, "address": "原登记地址"})
+        self.assertNotIn("phone", self.data()["dossierProfiles"][0])
+        self.command("dossier.profile", {
+            **base, "phone": "＋８６ １３９-００００-０１２３",
+            "familyContact": {"kind": "子女", "name": "家属甲", "relationship": "女儿", "phone": "13800000876"},
+        })
+        profile = self.data()["dossierProfiles"][0]
+        self.assertEqual(profile["phone"], "13900000123")
+        self.assertEqual(profile["familyMembers"][0]["phone"], "13800000876")
+        for invalid in ("0371-60000000", "1234", "老张"):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "长者本人手机号"):
+                self.command("dossier.profile", {**base, "phone": invalid})
+        self.command("dossier.profile", {**base, "address": "新地址"})
+        self.assertEqual(self.data()["dossierProfiles"][0]["phone"], "13900000123")
+        self.command("dossier.profile", {**base, "phone": ""})
+        profile = self.data()["dossierProfiles"][0]
+        self.assertEqual(profile["phone"], "")
+        self.assertEqual(profile["familyMembers"][0]["phone"], "13800000876")
+
     def test_receipt_lifecycle_scope_and_permissions(self):
         clerk = self.staff("ins-clerk", ["longCare"])
         readonly = self.staff("ordinary", ["residents"])

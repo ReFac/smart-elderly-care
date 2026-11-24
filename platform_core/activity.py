@@ -173,10 +173,16 @@ def page(db, user, room="", actor="", before=None, limit=50):
         permitted = campus_access.resident_ids(
             state, campus_access.allowed_beds(db, user), user
         )
-        filters.append(
-            "(a.residentId IN (SELECT value FROM json_each(?)) OR a.action LIKE 'agent.%')"
-        )
+        clause = "a.residentId IN (SELECT value FROM json_each(?)) OR a.action LIKE 'agent.%'"
         params.append(json.dumps(sorted(permitted)))
+        campuses = campus_access.registration_campuses(user)
+        if campuses and access.has(user, "intake"):
+            clause += """ OR (a.action LIKE 'leads.%' AND EXISTS (
+                SELECT 1 FROM history_targets t WHERE t.revision=a.revision AND t.kind='campus')
+                AND NOT EXISTS (SELECT 1 FROM history_targets t WHERE t.revision=a.revision
+                AND t.kind='campus' AND t.entity NOT IN (SELECT value FROM json_each(?))))"""
+            params.append(json.dumps(campuses))
+        filters.append("(" + clause + ")")
     if room:
         filters.append("(instr(a.room,?)>0 OR instr(a.previousRoom,?)>0)")
         params.extend((room, room))

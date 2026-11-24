@@ -14,6 +14,10 @@ export async function editResident(ctx, resident, profile) {
     const value = { ...resident, ...profile };
     const form = node('div', 'dossier-form');
     const name = textControl('姓名', value.name, 'text', { required: true, maxLength: 60 });
+    const phone = textControl('长者本人手机号（选填）', value.phone, 'tel', {
+      maxLength: 40,
+      autocomplete: 'off',
+    });
     const birth = textControl('出生日期', value.birthDate, 'date', { max: today(ctx) });
     const ages = Array.from({ length: 126 }, (_, i) => String(i));
     const age = picker(
@@ -32,6 +36,7 @@ export async function editResident(ctx, resident, profile) {
     form.append(
       group('个人资料', [
         name.element,
+        phone.element,
         birth.element,
         age.element,
         ...Object.values(selected).map((x) => x.element),
@@ -92,6 +97,7 @@ export async function editResident(ctx, resident, profile) {
         const payload = {
           residentId: resident.id,
           name: name.control.value.trim(),
+          phone: phone.control.value.trim(),
           birthDate: birth.control.value,
           age: age.control.value,
         };
@@ -108,6 +114,7 @@ export async function editResident(ctx, resident, profile) {
         const details = [];
         const names = {
           name: '姓名',
+          phone: '长者本人手机号',
           birthDate: '出生日期',
           age: '登记年龄',
           birthRegion: '出生地',

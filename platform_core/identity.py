@@ -4,6 +4,7 @@ from contextlib import closing
 from email.message import EmailMessage
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -375,6 +376,15 @@ def finish(store, payload, *, token=None, host_owner=False):
                 "INSERT OR REPLACE INTO identity_contacts VALUES(?,?,?,1)",
                 (aid, row["channel"], row["destination"]),
             )
+            if row["channel"] == "sms":
+                from . import lead_contacts
+                from .store import encode
+
+                state = json.loads(db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0])
+                events = len(state.get("leadEvents", ()))
+                lead_contacts.reconcile_callbacks(db, state, store.now())
+                if len(state.get("leadEvents", ())) != events:
+                    db.execute("UPDATE workspace SET data=? WHERE id=1", (encode(state),))
             message = "本人已验证安全联系方式"
         else:
             new = access._password(payload.get("newPassword"))

@@ -16,6 +16,7 @@ import { selectTab } from './features/shared.js';
 
 import { profile, expiringContracts } from './features/residency.js';
 import { dueMedicationCount } from './features/medication-rules.js';
+import { pendingLeadCalls } from './features/leads.js';
 
 const { el, icon, button, toast } = ui;
 
@@ -507,6 +508,8 @@ function notices() {
     items.unshift(['待我签收的交班', myPendingHandovers().length, 'care', 'handover']);
   if (myTrialFollowups().length)
     items.unshift(['待我办理的试住回访', myTrialFollowups().length, 'residents', 'trials']);
+  if (available('leads') && pendingLeadCalls(state))
+    items.unshift(['意向客户待电话回访', pendingLeadCalls(state), 'leads', 'contacts']);
   if (available('inbox')) {
     if (state.roundsNoticeCount)
       items.unshift(['今日巡查提醒', state.roundsNoticeCount, 'inbox', 'rounds']);
@@ -631,6 +634,7 @@ function masthead() {
     if (
       hasNewNotice(context()) ||
       myTrialFollowups().length ||
+      (available('leads') && pendingLeadCalls(state)) ||
       state.supplyOrders?.some(row => row.assigneeId === state.user.id && row.status === '待执行') ||
       (available('inbox') && state.roundsNoticeCount > 0) ||
       (available('care') && myPendingHandovers().length) ||

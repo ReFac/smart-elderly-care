@@ -32,6 +32,9 @@ ORIGINALS = {
 }
 # A point-in-time restore cannot retract external actions, recorded clinical observations or cash.
 PROTECTED = {
+    "leadContacts": "意向客户与回访意愿",
+    "leadEvents": "来电、回访与接待记录",
+    "visitBookings": "已确认的接待排期与变更",
     "trialFollowups": "试住回访及报告",
     "longCareEvents": "长护险办理凭证",
     "payments": "收款凭证",
@@ -55,6 +58,7 @@ PROTECTED = {
 }
 LABELS = {
     **PROTECTED,
+    "visitSchedulePolicies": "院区并行接待席位",
     "beds": "床位",
     "residents": "长者",
     "inquiries": "入住咨询",
@@ -69,6 +73,16 @@ LABELS = {
     "suggestions": "工作建议",
     "leaves": "请假外出",
 }
+
+
+RECEPTION_COLLECTIONS = ("leadContacts", "leadEvents", "visitBookings", "visitSchedulePolicies")
+
+
+def with_reception_collections(state):
+    # Snapshots taken before the reception desk opened represent empty reception ledgers.
+    for key in RECEPTION_COLLECTIONS:
+        state.setdefault(key, [])
+    return state
 
 
 def attach(db, path, store):
@@ -135,7 +149,7 @@ def describe(db):
         "incoming", "SELECT id FROM {s}.facility_site"
     ):
         raise ValueError("备份所属机构与本机构不一致")
-    source = json.loads(field("incoming", "SELECT data FROM {s}.workspace WHERE id=1"))
+    source = with_reception_collections(json.loads(field("incoming", "SELECT data FROM {s}.workspace WHERE id=1")))
     live = json.loads(field("main", "SELECT data FROM {s}.workspace WHERE id=1"))
     changes = []
     blockers = []
@@ -252,8 +266,10 @@ def apply(db):
             f'INSERT INTO main."{name}" SELECT s.* FROM incoming."{name}" AS s WHERE '
             + absent(db, name, "main", compare_values=False)
         )
-    db.execute(
-        "UPDATE workspace SET data=(SELECT data FROM incoming.workspace WHERE id=1) WHERE id=1"
-    )
+    raw = db.execute("SELECT data FROM incoming.workspace WHERE id=1").fetchone()[0]
+    state = json.loads(raw)
+    if any(key not in state for key in RECEPTION_COLLECTIONS):
+        raw = json.dumps(with_reception_collections(state), ensure_ascii=False, separators=(",", ":"))
+    db.execute("UPDATE workspace SET data=? WHERE id=1", (raw,))
     if db.execute("PRAGMA main.foreign_key_check").fetchone():
         raise ValueError("恢复数据与当前授权机构的关联记录不一致")

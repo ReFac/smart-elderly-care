@@ -21,6 +21,7 @@ export const groups = [
   [
     '机构运营',
     [
+      ['leads', '意向客户', 'intake'],
       ['inventory', '物资仓储', 'box'],
       ['billing', '财务结算', 'wallet'],
       ['longCare', '长期护理保险', 'shield'],

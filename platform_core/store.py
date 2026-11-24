@@ -11,6 +11,7 @@ from .room_context import room_context, validate_proposal
 from .operations import expense_import
 from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, staff_employment, storage_assets
+from . import lead_contacts, lead_intake, visit_schedule
 from .bootstrap import empty_workspace
 from .care import trial_followups
 from . import backups, history, rounds
@@ -78,6 +79,7 @@ class Store:
         )
         self.now = now
         self.network_probes = BoundedSemaphore(4)
+        self.public_submissions = lead_intake.PublicSubmissions()
         self.code_senders = dict(code_senders or {})
         self.facility_policy = facility_policy
         with closing(self.connect()) as db, db:
@@ -198,11 +200,17 @@ class Store:
                 for r in state["residents"]
                 if r["status"] != archive_retention.EXPIRED
             ]
+            lead_contacts.reconcile_callbacks(db, state, self.now())
             data = access.project(db, state, user, self.facility_policy)
             from .operations import dispatch
 
             dispatch.project(db, state, user, data)
             trial_followups.project(db, state, user, data)
+            lead_contacts.project(db, state, user, data)
+            if not data["leadCampuses"] and "leads" in user["routes"]:
+                user = {**user, "routes": [route for route in user["routes"] if route != "leads"]}
+                data["user"] = user
+                data["allowedActions"] = [action for action in data["allowedActions"] if not action.startswith("leads.")]
             if access.has(user, "finance"):
                 from .operations.charges import CATEGORIES, UNITS
                 from .operations.billing_cycles import pending_periods
@@ -818,7 +826,15 @@ class Store:
             previous = activity.locate(db, data, action, payload, user)
             domain = action.partition(".")[0]
             try:
-                if action == "care.timelineSettings":
+                if action == "leads.capacity":
+                    if set(payload) != {"campusId", "capacity"}:
+                        raise ValueError("请选择院区和并行接待席位数")
+                    campus_id = lead_contacts.require_campus(db, user, payload["campusId"])
+                    visit_schedule.configure(data, campus_id, payload["capacity"], now)
+                    summary = "已更新院区并行接待席位"
+                elif domain == "leads":
+                    summary = lead_contacts.command(db, data, user, action, payload, now)
+                elif action == "care.timelineSettings":
                     summary = care_timeline.configure(db, data, user, payload)
                 elif action in ("access.staffContract", "access.staffPayday"):
                     summary = staff_employment.apply(db, user, action, payload, now, self.facility_policy)
@@ -946,6 +962,9 @@ class Store:
                 care_timeline.stamp_execution(db, data, task_id, now)
             if action == "care.dateArchive":
                 archive_retention.clear_due(db, data, today, payload["residentId"])
+            if action in ("care.admit", "care.confirmStay", "dossier.profile", "dossier.relative",
+                          "access.create", "access.update", "access.status"):
+                lead_contacts.reconcile_callbacks(db, data, now)
             current = activity.locate(db, data, action, payload, user)
             if action == "care.register":
                 current = activity.for_person(data, data["residents"][-1]["id"])

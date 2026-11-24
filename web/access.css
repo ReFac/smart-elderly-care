@@ -8,6 +8,19 @@
   background: #f9fbff;
   color: var(--login-ink);
 }
+.access-visitor-link {
+  margin-top: 7px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #224b92;
+  text-decoration: none;
+  border: 1px solid #c8d7ed;
+  padding: 12px 14px;
+  border-radius: 8px;
+}
+.access-visitor-link:hover { background: #eef4ff; }
+.access-visitor-link strong { flex: 1; }
 .access-login-hero {
   position: relative;
   isolation: isolate;

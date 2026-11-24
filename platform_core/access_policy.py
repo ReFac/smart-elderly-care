@@ -2,7 +2,7 @@
 
 PERMISSIONS = {
     "residents": "查阅长者基本档案",
-    "intake": "接待、入住和床位管理",
+    "intake": "意向客户、接待、入住和床位管理",
     "care": "评估、照护和工单执行",
     "clinical": "体征、异常、医嘱和用药复核",
     "clinical.rules": "维护经专业核准的用药核查规则",
@@ -60,6 +60,7 @@ ROUTE_GRANTS = {
     "history": (),
     "assistants": ("assistants",),
     "intake": ("intake",),
+    "leads": ("intake",),
     "residents": ("residents", "intake", "care", "clinical"),
     "assessments": ("care",),
     "care": ("care", "clinical"),
@@ -86,6 +87,13 @@ ROUTE_GRANTS = {
     "integrations": ("gateway.simulate", "alerts", "voice", "voice.confirm"),
 }
 ACTION_GRANTS = {
+    "leads.register": "intake",
+    "leads.call": "intake",
+    "leads.feedback": "intake",
+    "leads.archive": "intake",
+    "leads.book": "intake",
+    "leads.cancel": "intake",
+    "leads.capacity": "intake",
     "care.reassignTrialFollowup": "intake",
     "care.inquire": "intake",
     "care.register": "intake",
@@ -331,6 +339,8 @@ def authorize(user, action, payload, state):
     if not permission:
         raise ValueError("未登记的业务操作")
     require(user, permission)
+    if action == "leads.capacity":
+        require(user, "staff.manage")
     if action == "care.assess" and "scale" in payload and not can_record_scale(user):
         raise PermissionError("标准量表原表录入需要照护及临床或医疗档案权限")
     if action == "dossier.reviewDocument":
@@ -355,6 +365,9 @@ def allowed_actions(user):
         action for action, permission in ACTION_GRANTS.items() if has(user, permission)
     ]
     from .operations.dispatch import unrestricted
+
+    if not has(user, "staff.manage"):
+        actions = [a for a in actions if a != "leads.capacity"]
 
     if not unrestricted(user):
         actions = [a for a in actions if a not in ("ops.publishNotice", "ops.supplyOrder", "ops.importExpenses")]
@@ -412,6 +425,8 @@ def can_view_audit(user, action, *, agent_initiator=None, agent_grants=()):
         return False
     if user["kind"] == "owner":
         return True
+    if action == "leads.public":
+        return has(user, "intake")
     if action == "family.consent":
         return has(user, "relatives") and has(user, "family.share")
     if action.startswith("agent."):
