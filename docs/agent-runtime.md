@@ -19,7 +19,7 @@
 
 | 请求 | 行为 |
 | --- | --- |
-| `GET /api/agent/capabilities` | 返回当前登录人的工具、业务域、最大步数、运行模式及可见适配器。当前运行模式为 `local-rules`。 |
+| `GET /api/agent/capabilities` | 返回当前登录人的工具、业务域、最大步数、运行模式及可见适配器。本地执行器为 `local-rules`，`planningModes` 列出本地及平台云端规划，`plan` 列出机构可用性。 |
 | `GET /api/agent/runs` | 返回当前账号可见的最近运行摘要，最多 80 条。 |
 | `GET /api/agent/runs/{id}` | 返回当前状态、来源版本、简报、证据和有序事件。缺少智能助手权限返回 403。持有该权限但无权访问指定运行时返回 404。 |
 | `POST /api/commands` | `agent.start` 创建运行，`agent.publish` 发布简报，`agent.cancel` 取消。三个命令均需当前会话及整数工作区版本。 |
@@ -75,3 +75,9 @@ python3 -m unittest discover -s tests -p 'test_agent_runtime.py' -v
 面试演示可以使用“交班与库存”的双域任务，现场打开一份简报的源记录编号，重启服务后恢复待确认任务，再由两个客户端尝试发布。可直接核对的结果是两次工具调用、两份待审核建议和一次发布事件。模型效果、节省工时及生产规模应在有对应数据后单独报告。
 
 云端规划通过现有 `agent.start` 调用，提交 `planning=platform` 并保留同一个请求号。套餐配置、故障回退和用量对账见[平台套餐说明](provider.md)。
+
+## 房间范围与本地工具
+
+在「房间工作台」选择楼层或房间，点击「在此范围发起协作」。范围随运行保存在 SQLite 中。照护和财务工具只计算该范围当前在住长者的工单、评估或账单。尚无位置归属的物资只在全院任务使用。历史账单按现居区域的长者归集，历史房间审计按事件发生时的床位归集。
+
+`GET /api/agent/capabilities` 提供登录人的本地工具、业务命令和规划方式。通过 `GET /api/facility/search` 本地搜索姓名或房号。通过 `GET /api/agent/room-context?roomId=…&limit=12` 取得可操作工单的目标编号、字段与权限条件。提交 `POST /api/agent/room-proposals` 时提供 `revision` 以及仅含 `roomId, taskId, note, requestId` 的 `payload`，服务端在写事务内重新核对房间、当前入住和工单，随后进入现有人工确认队列。这些查询和草稿均零模型调用。每个客户使用独立机构数据库，后续可通过受信的服务端 `Store(..., facility_policy=...)` 接入细粒度区域授权。该扩展约束房间与 Agent 接口；原有临床、财务等管理模块继续执行其现有岗位权限。

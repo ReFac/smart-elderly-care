@@ -13,7 +13,11 @@ import { renderDossier } from './dossier.js';
 import { renderGateways } from './gateways.js';
 import { activityPage } from './activity.js';
 
+import { roomsPage, tourPage } from './rooms.js';
+
 const features = {
+  rooms: roomsPage,
+  tour: tourPage,
   access: (ctx) => renderAccess('access', ctx),
   settings: (ctx) => renderAccess('settings', ctx),
   family: (ctx) => renderDossier('family', ctx),

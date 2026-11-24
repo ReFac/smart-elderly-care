@@ -1,6 +1,30 @@
 """库存流水、可用存量与人员排班。"""
 
+import unicodedata
+
 from .records import lookup, new_id, parse_day, text_field, whole_number
+
+
+def item_key(name, unit):
+    return tuple(
+        unicodedata.normalize("NFKC", field).strip().casefold()
+        for field in (name, unit)
+    )
+
+
+def add_item(state, payload, today):
+    name = text_field(payload, "name", "物资名称", 80)
+    unit = text_field(payload, "unit", "计量单位", 16)
+    minimum = whole_number(payload.get("minimum"), "库存下限", zero=True)
+    if "quantity" in payload:
+        raise ValueError("请在建档后通过入库流水登记实际数量")
+    key = item_key(name, unit)
+    if any(item_key(row["name"], row["unit"]) == key for row in state["inventory"]):
+        raise ValueError("相同名称和单位的物资已建档")
+    state["inventory"].append(
+        dict(id=new_id("stock"), name=name, unit=unit, minimum=minimum, quantity=0)
+    )
+    return f"新建物资品目{name}（{unit}）"
 
 
 def record_stock(state, payload, today):

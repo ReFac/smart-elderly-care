@@ -105,7 +105,7 @@ class AccountPermissions(unittest.TestCase):
             data["residents"],
             [{"id": first, "name": self.state["residents"][0]["name"]}],
         )
-        self.assertEqual(data["user"]["routes"], ["family"])
+        self.assertEqual(data["user"]["routes"], ["family", "tour"])
         for key in ("tasks", "medications", "bills", "reports", "suggestions", "beds"):
             self.assertEqual(data[key], [])
         for key in ("settings", "accounts", "rolePresets", "permissionOptions"):

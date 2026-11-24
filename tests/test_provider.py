@@ -1,9 +1,9 @@
 """Paid planning must remain scoped, bounded, replayable and reconcilable."""
 
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 from datetime import datetime, timedelta
-from io import BytesIO
+from io import BytesIO, StringIO
 import json
 import os
 from pathlib import Path
@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
+import manage_plan
 from platform_core import provider
 from platform_core.provider import deepseek
 
@@ -81,6 +82,37 @@ class ProviderTests(unittest.TestCase):
             transport=kwargs.pop("transport", self.mock),
             **kwargs,
         )
+
+    def test_operator_changes_refresh_workspace_and_create_one_audit_entry(self):
+        with closing(self.connect()) as db, db:
+            db.execute(
+                "CREATE TABLE workspace(id INTEGER PRIMARY KEY, revision INTEGER)"
+            )
+            db.execute("INSERT INTO workspace VALUES(1, 7)")
+        for args in (
+            ["grant", "--name", "试点", "--tokens", "2500", "--expires", "2099-11-30"],
+            ["status"],
+            ["disable"],
+        ):
+            with (
+                patch("sys.argv", ["manage_plan.py", "--db", str(self.path), *args]),
+                redirect_stdout(StringIO()),
+            ):
+                self.assertEqual(manage_plan.main(), 0)
+        with closing(self.connect()) as db:
+            self.assertEqual(
+                db.execute("SELECT revision FROM workspace").fetchone()[0], 9
+            )
+            entries = db.execute(
+                "SELECT action,actorId FROM audit ORDER BY revision"
+            ).fetchall()
+            self.assertEqual(
+                [tuple(r) for r in entries],
+                [
+                    ("platform.plan.grant", "platform-operator"),
+                    ("platform.plan.disable", "platform-operator"),
+                ],
+            )
 
     def test_trial_needs_operator_grant_and_key_users_cannot_override(self):
         self.assertEqual(self.status()["state"], "inactive")

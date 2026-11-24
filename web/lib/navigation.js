@@ -11,6 +11,7 @@ export const groups = [
     '照护业务',
     [
       ['intake', '接待入住', 'intake'],
+      ['rooms', '房间工作台', 'location'],
       ['residents', '长者档案', 'people'],
       ['dossier', '个人与医疗档案', 'folder'],
       ['assessments', '能力评估', 'assessment'],
@@ -37,7 +38,13 @@ export const groups = [
       ['settings', '机构设置', 'building'],
     ],
   ],
-  ['家属服务', [['family', '我的亲属资料', 'people']]],
+  [
+    '院内服务',
+    [
+      ['family', '我的亲属资料', 'people'],
+      ['tour', '环境导览', 'building'],
+    ],
+  ],
 ];
 export const routes = new Map(
   groups.flatMap(([group, items]) => items.map(([id, label, icon]) => [id, { group, label, icon }]))

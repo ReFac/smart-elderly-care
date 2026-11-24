@@ -1,8 +1,8 @@
 # 安康医养平台 · 安康家园
 
-本项目以 Agent 工作台为机构人员的任务入口。具有相应授权的员工可以把一个经营或照护目标交给协调 Agent，核对专员从台账中查到的证据，再决定是否发布。电脑端也保留直接办理入住、照护、用药、物资、财务、排班和统计的入口。演示库包含虚构的 3 个照护区、24 张床和 19 位在住长者。
+本项目以 Agent 工作台为机构人员的任务入口。具有相应授权的员工可以把一个经营或照护目标交给协调 Agent，核对专员从台账中查到的证据，再决定是否发布。电脑端也保留直接办理入住、照护、用药、物资、财务、排班和统计的入口。机构房间工作台可按楼层平面图、房号和姓名定位住户，环境导览支持院方登记的照片和全景视点。演示库包含虚构的 3 个照护区、24 张床和 19 位在住长者。
 
-[Agent 工作台实拍](docs/previews/agent-workspace.jpg) · [双 Agent 简报与确认窗](docs/previews/agent-review.jpg) · [运营总览](docs/previews/operations.jpg)
+[房间工作台实拍](docs/previews/rooms.jpg) · [Agent 工作台实拍](docs/previews/agent-workspace.jpg) · [双 Agent 简报与确认窗](docs/previews/agent-review.jpg) · [运营总览](docs/previews/operations.jpg)
 
 ## 启动与验证
 
@@ -23,6 +23,16 @@ python3 server.py --port 8766 --db .local/walkthrough.sqlite3
 # 回归测试使用独立样本和临时数据库
 python3 -m unittest discover -s tests -v
 ```
+
+### 从零开设真实试点
+
+使用独立目录创建试点库，避免沿用演示住户或凭据。首次启动后，安康家园主楼包含 1、2、3、5、6、7 层。总管理员进入「照护业务 → 房间工作台 → 空间管理」，按实地门牌建房建床，再办理第一位长者入住。仓储人员可在「物资仓储」建立品目、登记期初入库。在有实测底图和环境素材时可登记房间位置、发布参观视点。初始化方式仅在创建新库时生效。
+
+```bash
+python3 server.py --db .local/pilot/workspace.sqlite3 --port 8766 --initial-data empty
+```
+
+护士可点击平面图或房号打开同一间房，输入长者姓名中的任一字可跨楼层定位。点击「在此范围发起协作」后，工具只读取所选位置可用的记录。平台套餐与本地房间查询分别计量，查房和环境导览不调用模型。[院区接口、扩建和素材登记](docs/facility.md) · [平台套餐与用量](docs/provider.md)
 
 ## 从一项协作任务开始
 

@@ -1,5 +1,6 @@
 """随首次启动日期生成虚构院区与照护记录。"""
 
+from ..bootstrap import CARE_COLLECTIONS
 from .clinical import (
     add_medication,
     give_medication,
@@ -18,27 +19,10 @@ WARD_NAMES = ("颐养一区", "颐养二区", "护理三区")
 STAFF = ("林晓", "陈悦", "周宁", "吴桐")
 
 
-COLLECTIONS = (
-    "beds",
-    "residents",
-    "inquiries",
-    "assessments",
-    "plans",
-    "tasks",
-    "medications",
-    "vitals",
-    "handovers",
-    "leaves",
-    "qualityChecks",
-    "bedMoves",
-    "archives",
-)
-
-
 def seed(today: str) -> dict:
     """生成相对营业日的虚构演示记录；固定样本 ID 方便跨业务引用。"""
     today = iso_date(today, "业务日期")
-    state = {name: [] for name in COLLECTIONS}
+    state = {name: [] for name in CARE_COLLECTIONS}
     names = (
         "沈月兰",
         "徐松年",

@@ -3,7 +3,7 @@
 import json
 from uuid import uuid4
 
-from . import runtime
+from . import region, runtime
 from .contracts import SPECIALISTS, contract
 from .. import access_policy as policy
 from ..activity import for_person
@@ -15,6 +15,8 @@ def init(db):
         id TEXT PRIMARY KEY, actor TEXT NOT NULL, request TEXT NOT NULL, args TEXT NOT NULL,
         actorName TEXT NOT NULL, started TEXT NOT NULL, revision INTEGER NOT NULL,
         status TEXT NOT NULL, artifacts TEXT NOT NULL, UNIQUE(actor,request))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS agent_regions (
+        runId TEXT PRIMARY KEY REFERENCES agent_runs(id), snapshot TEXT NOT NULL)""")
     db.execute("""CREATE TABLE IF NOT EXISTS agent_events (
         runId TEXT NOT NULL REFERENCES agent_runs(id), seq INTEGER NOT NULL, at TEXT NOT NULL,
         agent TEXT NOT NULL, event TEXT NOT NULL, message TEXT NOT NULL, parent TEXT NOT NULL,
@@ -59,7 +61,9 @@ class Trace:
 
 def summary(row):
     args = json.loads(row["args"])
+    area = json.loads(row["regionSnapshot"]) if row["regionSnapshot"] else None
     return dict(
+        region={k: v for k, v in area.items() if k != "roomIds"} if area else None,
         id=row["id"],
         actorName=row["actorName"],
         started=row["started"],
@@ -71,24 +75,43 @@ def summary(row):
     )
 
 
-def visible(row, user):
-    return (user["kind"] == "owner" or row["actor"] == user["id"]) and all(
-        a["agent"] in {s.key for s in specialists(user)}
-        for a in json.loads(row["artifacts"])
+RUN_SELECT = "SELECT r.*,a.snapshot AS regionSnapshot FROM agent_runs r LEFT JOIN agent_regions a ON a.runId=r.id"
+
+
+def region_visible(db, user, run_id):
+    if not user.get("facilityScope") and isinstance(
+        user.get("facilityScope", {}), dict
+    ):
+        return True
+    row = db.execute(
+        "SELECT snapshot FROM agent_regions WHERE runId=?", (run_id,)
+    ).fetchone()
+    return region.visible(db, user, json.loads(row[0]) if row else None)
+
+
+def visible(db, row, user):
+    area = json.loads(row["regionSnapshot"]) if row["regionSnapshot"] else None
+    return (
+        region.visible(db, user, area)
+        and (user["kind"] == "owner" or row["actor"] == user["id"])
+        and all(
+            a["agent"] in {s.key for s in specialists(user)}
+            for a in json.loads(row["artifacts"])
+        )
     )
 
 
 def listing(db, user):
     if not specialists(user):
         return []
-    query = "SELECT * FROM agent_runs"
+    query = RUN_SELECT
     args = ()
     if user["kind"] != "owner":
-        query += " WHERE actor=?"
+        query += " WHERE r.actor=?"
         args = (user["id"],)
     result = []
-    for row in db.execute(query + " ORDER BY rowid DESC", args):
-        if visible(row, user):
+    for row in db.execute(query + " ORDER BY r.rowid DESC", args):
+        if visible(db, row, user):
             result.append(summary(row))
         if len(result) == 80:
             break
@@ -97,8 +120,8 @@ def listing(db, user):
 
 def get_row(db, user, run_id):
     policy.require(user, "assistants")
-    row = db.execute("SELECT * FROM agent_runs WHERE id=?", (run_id,)).fetchone()
-    if not row or not visible(row, user):
+    row = db.execute(RUN_SELECT + " WHERE r.id=?", (run_id,)).fetchone()
+    if not row or not visible(db, row, user):
         raise FileNotFoundError("找不到可访问的协作任务")
     return row
 
@@ -117,39 +140,86 @@ def detail(db, user, run_id):
     }
 
 
+def preflight(db, state, user, payload):
+    policy.require(user, "assistants")
+    goal = text_field(payload, "goal", "任务目标", 500)
+    request = text_field(payload, "requestId", "请求标识", 100)
+    resident = payload.get("residentId", "")
+    scope = payload.get("scope", "auto")
+    mode = payload.get("planning", "local")
+    if (
+        not isinstance(resident, str)
+        or len(resident) > 100
+        or not isinstance(scope, str)
+        or mode not in ("local", "platform")
+    ):
+        raise ValueError("任务范围或规划模式无效")
+    selected = region.selection(payload["region"]) if "region" in payload else None
+    args = dict(goal=goal, residentId=resident, scope=scope)
+    if mode == "platform":
+        args["planning"] = mode
+    if selected:
+        args["region"] = selected
+    encoded = json.dumps(args, ensure_ascii=False)
+    prior = db.execute(
+        "SELECT id,args FROM agent_runs WHERE actor=? AND request=?",
+        (user["id"], request),
+    ).fetchone()
+    if prior:
+        if json.loads(prior["args"]) != args:
+            raise ValueError("请求标识已被另一项任务使用")
+        get_row(db, user, prior["id"])
+        return {
+            "prior": prior["id"],
+            "args": args,
+            "request": request,
+            "specs": (),
+            "fingerprintScope": encoded,
+        }
+    resolved = region.resolve(db, state, user, selected)
+    specs = tuple(
+        s for s in specialists(user) if not resolved or s.key in ("care", "finance")
+    )
+    if not specs or (scope != "auto" and scope not in {s.key for s in specs}):
+        raise PermissionError("此范围或岗位未授权所选专员")
+    if resident:
+        if not any(s.key == "care" for s in specs) or scope not in ("auto", "care"):
+            raise PermissionError("指定长者的任务需要照护权限")
+        if resolved and resident not in resolved["residentIds"]:
+            raise PermissionError("该长者当前不在所选区域")
+        if not any(
+            r["id"] == resident and r["status"] == "在住" for r in state["residents"]
+        ):
+            raise ValueError("请选择有效的在住长者")
+    return {
+        "prior": None,
+        "args": args,
+        "request": request,
+        "encoded": encoded,
+        "resolved": resolved,
+        "specs": specs,
+        "fingerprintScope": encoded,
+    }
+
+
 def apply(db, state, action, payload, user, now, revision, planning=None):
     at = now.isoformat(timespec="seconds")
     today = now.date().isoformat()
     if action == "agent.start":
-        goal = text_field(payload, "goal", "任务目标", 500)
-        request = text_field(payload, "requestId", "请求标识", 100)
-        resident = payload.get("residentId", "")
-        scope = payload.get("scope", "auto")
-        if not isinstance(resident, str) or not isinstance(scope, str):
-            raise ValueError("任务范围无效")
-        arguments = dict(goal=goal, residentId=resident, scope=scope)
-        if payload.get("planning", "local") not in ("platform", "local"):
-            raise ValueError("规划模式无效")
-        if payload.get("planning") == "platform":
-            arguments["planning"] = "platform"
-        args = json.dumps(arguments, ensure_ascii=False)
-        prior = db.execute(
-            "SELECT * FROM agent_runs WHERE actor=? AND request=?",
-            (user["id"], request),
-        ).fetchone()
-        if prior:
-            if prior["args"] != args:
-                raise ValueError("请求标识已被另一项任务使用")
-            get_row(db, user, prior["id"])
-            return "已登记同一协作任务", prior["id"]
+        check = preflight(db, state, user, payload)
+        if check["prior"]:
+            return "已登记同一协作任务", check["prior"]
+        record = check["args"]
+        goal, resident, scope = record["goal"], record["residentId"], record["scope"]
+        resolved = check["resolved"]
         run_id = "run-" + uuid4().hex
         db.execute(
             "INSERT INTO agent_runs VALUES (?,?,?,?,?,?,?,?,?)",
             (
                 run_id,
                 user["id"],
-                request,
-                args,
+                check["request"],
+                check["encoded"],
                 user["displayName"],
                 at,
                 revision,
@@ -159,6 +229,9 @@ def apply(db, state, action, payload, user, now, revision, planning=None):
         )
         log = Trace(db, run_id, at)
         log.append("coordinator", "run.started", "开始处理委托")
+        if resolved:
+            region.save(db, run_id, resolved)
+            log.append("coordinator", "region.selected", resolved["label"])
         if planning:
             log.append(
                 "coordinator",
@@ -169,13 +242,14 @@ def apply(db, state, action, payload, user, now, revision, planning=None):
             )
         outputs = runtime.execute(
             goal,
-            specialists(user),
+            check["specs"],
             scope,
             state,
             resident,
             today,
             log,
             provider_plan=planning,
+            member_ids=frozenset(resolved["residentIds"]) if resolved else None,
         )
         db.execute(
             "UPDATE agent_runs SET artifacts=? WHERE id=?",
@@ -186,12 +260,16 @@ def apply(db, state, action, payload, user, now, revision, planning=None):
         # Mixed-domain and whole-institution work never belongs to an individual room.
         target = outputs[0]["residentId"] if involved == {"care"} else ""
         context = for_person(state, target)
+        if resolved and not target and resolved["roomId"]:
+            context["room"] = resolved["label"]
         db.execute(
             "INSERT INTO agent_audit_scope(runId,grants,residentId,room) VALUES(?,?,?,?)",
             (run_id, grants, context["residentId"], context["room"]),
         )
         return "协作任务已生成待确认简报", run_id
     row = get_row(db, user, payload.get("runId"))
+    if "region" in payload:
+        raise ValueError("审核必须使用运行时锁定的区域")
     if row["status"] != "awaiting_approval":
         raise ValueError("此任务已处理")
     log = Trace(db, row["id"], at)
@@ -203,6 +281,7 @@ def apply(db, state, action, payload, user, now, revision, planning=None):
                     **artifact,
                     "id": new_id("suggest"),
                     "runId": row["id"],
+                    "region": summary(row)["region"],
                     "ruleVersion": 1,
                     "date": row["started"][:10],
                     "status": "待审核",

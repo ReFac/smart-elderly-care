@@ -420,7 +420,7 @@ export function beds(ctx) {
       if (!visible.length) continue;
       const rooms = new Map();
       for (const bed of visible) {
-        const room = bed.room || bed.label.split('-')[0];
+        const room = bed.room || bed.label.replace(/-[^-]+$/, '');
         if (!rooms.has(room)) rooms.set(room, []);
         rooms.get(room).push(bed);
       }

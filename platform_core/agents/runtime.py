@@ -40,12 +40,16 @@ FIELDS = {
 }
 
 
-def scoped_records(state, spec, resident_id):
+def scoped_records(state, spec, resident_id, member_ids=None):
     data = {}
     for collection in spec.collections:
         records = state[collection]
+        key = "id" if collection == "residents" else "residentId"
+        if member_ids is not None:
+            if spec.key not in {"care", "finance"}:
+                raise PermissionError("此工具尚未登记区域数据归属")
+            records = [row for row in records if row.get(key) in member_ids]
         if resident_id and spec.key == "care":
-            key = "id" if collection == "residents" else "residentId"
             records = (row for row in records if row.get(key) == resident_id)
         data[collection] = [
             {k: row[k] for k in FIELDS[collection] if k in row} for row in records
@@ -153,6 +157,7 @@ def execute(
     planner: Planner | None = None,
     tools: ToolProvider | None = None,
     provider_plan: dict | None = None,
+    member_ids: frozenset | None = None,
 ):
     allowed = {s.key: s for s in available}
     planned = (
@@ -181,7 +186,7 @@ def execute(
         spec = allowed[key]
         trace.append(key, "handoff", "接收" + spec.title + "子任务", "coordinator")
         target = resident_id if spec.key == "care" else ""
-        inputs = scoped_records(state, spec, target)
+        inputs = scoped_records(state, spec, target, member_ids)
         allowed_ids = {
             name: {row["id"] for row in rows} for name, rows in inputs.items()
         }

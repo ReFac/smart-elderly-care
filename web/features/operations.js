@@ -23,6 +23,20 @@ import {
 } from './shared.js';
 import { monthlyPanel } from './monthly.js';
 
+function addItem(ctx) {
+  runForm(ctx, {
+    title: '建立物资品目',
+    description: '品目建立后，在入库流水中登记期初实存数量。',
+    action: 'ops.addItem',
+    fields: [
+      field('name', '物资名称', { maxLength: 80 }),
+      field('unit', '计量单位', { maxLength: 16, placeholder: '如：盒、包、瓶' }),
+      field('minimum', '库存下限', { type: 'number', min: 0, max: 999999999, step: 1, value: 0 }),
+    ],
+    submitLabel: '建立品目',
+  });
+}
+
 function stock(ctx, type, itemId) {
   runForm(ctx, {
     title: '登记' + type,
@@ -63,8 +77,16 @@ export function inventory(ctx) {
     '仓储物资',
     '管理护理物品存量、领用与补货记录。',
     choose(
-      btn(ctx, '登记出库', () => stock(ctx, '出库')),
-      btn(ctx, '登记入库', () => stock(ctx, '入库'), 'primary')
+      canAct(ctx, 'ops.addItem')
+        ? btn(
+            ctx,
+            '建立物资品目',
+            () => addItem(ctx),
+            state.inventory.length ? 'secondary' : 'primary'
+          )
+        : null,
+      state.inventory.length ? btn(ctx, '登记出库', () => stock(ctx, '出库')) : null,
+      state.inventory.length ? btn(ctx, '登记入库', () => stock(ctx, '入库'), 'primary') : null
     ),
     tabs('inventory', [
       [

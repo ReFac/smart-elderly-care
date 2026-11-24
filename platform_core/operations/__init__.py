@@ -4,12 +4,13 @@ from .assistants import generate_suggestion, review_suggestion
 from .billing import CARE_RATES, deposit, generate_bill, pay
 from .demo import seed
 from .reports import generate_report
-from .resources import assign_shift, record_stock
+from .resources import add_item, assign_shift, record_stock
 
 
 __all__ = ["CARE_RATES", "apply", "seed"]
 
 ACTIONS = {
+    "ops.addItem": add_item,
     "ops.stock": record_stock,
     "ops.shift": assign_shift,
     "ops.bill": generate_bill,

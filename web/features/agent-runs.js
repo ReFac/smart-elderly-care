@@ -10,6 +10,7 @@ const names = {
 const icons = { care: 'care', inventory: 'box', finance: 'chart' };
 const events = {
   'run.started': '接单',
+  'region.selected': '锁定区域',
   'planner.selected': '选择规划器',
   'plan.created': '拟定计划',
   handoff: '分派任务',
@@ -59,12 +60,12 @@ function composer(ctx, tools) {
   const resident = node('select', 'fx-input');
   resident.setAttribute('aria-label', '照护对象');
   resident.add(new Option('全院照护', ''));
-  if (tools.some((t) => t.agent === 'care')) {
+  if (!ctx.agentRegion && tools.some((t) => t.agent === 'care')) {
     for (const r of ctx.state.residents.filter((r) => r.status === '在住'))
       resident.add(new Option(r.name + ' · ' + r.id, r.id));
   } else resident.hidden = true;
   scope.addEventListener('change', () => {
-    if (!tools.some((t) => t.agent === 'care')) return;
+    if (ctx.agentRegion || !tools.some((t) => t.agent === 'care')) return;
     resident.hidden = !['auto', 'care'].includes(scope.value);
     if (resident.hidden) resident.value = '';
   });
@@ -100,12 +101,29 @@ function composer(ctx, tools) {
         scope: scope.value,
         planning: mode.value,
         residentId: resident.value,
+        ...(ctx.agentRegion
+          ? {
+              region: Object.fromEntries(
+                Object.entries(ctx.agentRegion).filter(([key]) => key !== 'label')
+              ),
+            }
+          : {}),
       });
     } finally {
       start.disabled = false;
     }
   });
-  form.append(title, input, examples, controls);
+  const region = node('div', 'agent-region');
+  region.append(
+    ctx.ui.icon('location', 16),
+    node('strong', '', ctx.agentRegion?.label || ctx.state.uiSettings.institutionName)
+  );
+  if (ctx.available('rooms'))
+    region.append(
+      ctx.ui.button(ctx.agentRegion ? '更换区域' : '选择楼层或房间', () => ctx.go('rooms'), 'text')
+    );
+  if (ctx.agentRegion) region.append(ctx.ui.button('清除区域', ctx.clearAgentRegion, 'text'));
+  form.append(title, region, input, examples, controls);
   return form;
 }
 
@@ -189,6 +207,14 @@ export async function showRun(ctx, row) {
         ' · 来源数据版本 ' +
         data.sourceRevision
     ),
+    ...(data.region
+      ? [
+          node('p', 'agent-region', [
+            ctx.ui.icon('location', 15),
+            '运行范围 · ' + data.region.label,
+          ]),
+        ]
+      : []),
     results,
     trace,
   ]);
@@ -213,8 +239,72 @@ export async function showRun(ctx, row) {
   }
 }
 
+function roomTasks(ctx, roomId) {
+  const title = node('summary', '', '本房间可提交变更的工单');
+  const body = node('div', 'agent-targets');
+  const details = node('details', 'agent-target-list', [title, body]);
+  let loaded = false;
+  async function load(offset = 0) {
+    try {
+      const response = await ctx.get(
+        '/api/agent/room-context?' + new URLSearchParams({ roomId, offset: String(offset) })
+      );
+      if (!offset) body.replaceChildren();
+      if (!response.targets.length && !offset)
+        body.append(node('p', 'fx-muted', '本房间暂无可申请完成的到期工单。'));
+      for (const target of response.targets) {
+        const act = ctx.ui.button(
+          '拟写执行记录',
+          () => {
+            const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+              b.toString(16).padStart(2, '0')
+            ).join('');
+            ctx.dialog({
+              title: '提交区域工单草稿',
+              description:
+                ctx.agentRegion.label + ' · ' + target.label + '。提交后由授权人员核对。',
+              fields: [
+                {
+                  name: 'note',
+                  label: '拟写入的执行记录',
+                  type: 'textarea',
+                  required: true,
+                  maxLength: 1000,
+                },
+              ],
+              submitLabel: '提交人工确认',
+              onSubmit: (v) =>
+                ctx.proposeRoom({ roomId, taskId: target.id, note: v.note, requestId }),
+            });
+          },
+          'text'
+        );
+        body.append(
+          node('div', 'agent-target', [node('span', '', target.date + ' · ' + target.label), act])
+        );
+      }
+      if (response.nextOffset != null) {
+        const more = ctx.ui.button('加载更多', () => {
+          more.remove();
+          load(response.nextOffset);
+        });
+        body.append(more);
+      }
+      loaded = true;
+    } catch (error) {
+      ctx.toast(error.message);
+    }
+  }
+  details.addEventListener('toggle', () => {
+    if (details.open && !loaded) load();
+  });
+  return details;
+}
+
 export function agentDesk(ctx) {
-  const tools = ctx.state.agentCapabilities?.tools || [];
+  const tools = (ctx.state.agentCapabilities?.tools || []).filter(
+    (t) => !ctx.agentRegion || t.agent !== 'inventory'
+  );
   const runs = ctx.state.agentRuns || [];
   const home = node('div', 'agent-home', [composer(ctx, tools), teamPanel(ctx, tools)]);
   const list = table(ctx, {
@@ -238,5 +328,9 @@ export function agentDesk(ctx) {
       },
     ],
   });
-  return node('div', 'agent-desk', [home, list]);
+  const targets =
+    ctx.agentRegion?.roomId && ctx.state.allowedActions.includes('gw.propose')
+      ? roomTasks(ctx, ctx.agentRegion.roomId)
+      : null;
+  return node('div', 'agent-desk', [home, targets, list]);
 }

@@ -7,7 +7,7 @@ from pathlib import Path
 import sqlite3
 import sys
 
-from platform_core import provider
+from platform_core import activity, provider
 
 
 def main():
@@ -49,12 +49,37 @@ def main():
             ).fetchone():
                 raise ValueError("请选择实际机构工作区数据库")
             provider.init(db)
+            change = None
             if args.command == "grant":
                 provider.grant(db, args.name, args.tokens, args.expires)
+                change = f"调整套餐 {args.name}，本期额度 {args.tokens} token，有效至 {args.expires}"
             elif args.command == "disable":
                 provider.disable(db)
+                change = "停用云端规划套餐"
             elif args.command == "reconcile":
                 provider.reconcile(db, args.actor, args.request, args.tokens)
+                change = f"完成单笔云端用量对账，结算 {args.tokens} token"
+            if change:
+                activity.init(db)
+                db.execute("UPDATE workspace SET revision=revision+1 WHERE id=1")
+                revision = db.execute(
+                    "SELECT revision FROM workspace WHERE id=1"
+                ).fetchone()[0]
+                operator = {
+                    "id": "platform-operator",
+                    "username": "platform-operator",
+                    "displayName": "平台运营方",
+                }
+                activity.write(
+                    db,
+                    revision,
+                    provider.local_time().isoformat(timespec="seconds"),
+                    "platform.plan." + args.command,
+                    change,
+                    operator,
+                    {},
+                    {},
+                )
             if args.command == "unsettled":
                 entries = db.execute("""SELECT planId,actor,request,model,status,allowance,createdAt FROM api_usage
                     WHERE status IN ('pending','uncertain') ORDER BY createdAt""")

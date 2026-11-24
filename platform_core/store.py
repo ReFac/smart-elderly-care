@@ -7,10 +7,22 @@ from pathlib import Path
 import sqlite3
 from zoneinfo import ZoneInfo
 
-from . import access, activity, agents, care, dossier, gateways, operations, provider
+from .room_context import room_context, validate_proposal
+from .bootstrap import empty_workspace
+from . import (
+    access,
+    activity,
+    agents,
+    care,
+    dossier,
+    facility,
+    gateways,
+    operations,
+    provider,
+)
 
 TIMEZONE = ZoneInfo("Asia/Shanghai")
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class Conflict(Exception):
@@ -37,15 +49,18 @@ def viewer(db, token):
 
 
 class Store:
-    def __init__(self, path, now=clock):
+    def __init__(self, path, now=clock, *, facility_policy=None, initial_data="demo"):
+        if initial_data not in ("demo", "empty"):
+            raise ValueError("请选择 demo 或 empty 初始化模式")
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.now = now
+        self.facility_policy = facility_policy
         with closing(self.connect()) as db, db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("BEGIN IMMEDIATE")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, 4, SCHEMA_VERSION):
                 raise RuntimeError(f"数据库版本 {version} 需要迁移")
             db.execute(
                 "CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, data TEXT NOT NULL)"
@@ -53,7 +68,11 @@ class Store:
             activity.init(db)
             if not db.execute("SELECT 1 FROM workspace WHERE id=1").fetchone():
                 day = now().date().isoformat()
-                data = operations.seed(day, care.seed(day))
+                data = (
+                    operations.seed(day, care.seed(day))
+                    if initial_data == "demo"
+                    else empty_workspace()
+                )
                 db.execute("INSERT INTO workspace VALUES (1, 0, ?)", (encode(data),))
             access.init(db)
             if version < 4:
@@ -62,7 +81,19 @@ class Store:
             gateways.init(db)
             agents.init(db)
             provider.init(db)
+            facility.init(
+                db,
+                json.loads(
+                    db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+                ),
+            )
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+
+    def actor(self, db, token):
+        actor = viewer(db, token)
+        if self.facility_policy is not None:
+            actor = {**actor, "facilityScope": self.facility_policy(db, actor)}
+        return actor
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=8)
@@ -88,7 +119,7 @@ class Store:
     def version(self, token):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            user = viewer(db, token)
+            user = self.actor(db, token)
             return {
                 "userId": user["id"],
                 "today": self.now().date().isoformat(),
@@ -100,12 +131,19 @@ class Store:
     def snapshot(self, token):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            user = viewer(db, token)
+            user = self.actor(db, token)
             row = db.execute(
                 "SELECT revision,data FROM workspace WHERE id=1"
             ).fetchone()
             today = self.now().date().isoformat()
             data = access.project(db, json.loads(row["data"]), user)
+            if user.get("facilityScope"):
+                data["suggestions"] = [
+                    item
+                    for item in data["suggestions"]
+                    if item.get("runId")
+                    and agents.region_visible(db, user, item["runId"])
+                ]
             dossier.project(db, data, user, today)
             gateways.project(db, data, user)
             if access.has(user, "assistants"):
@@ -135,23 +173,92 @@ class Store:
     def activity(self, token, **filters):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            return activity.page(db, viewer(db, token), **filters)
+            return activity.page(db, self.actor(db, token), **filters)
 
     def photo(self, token, doc_id):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            return dossier.photo(db, doc_id, viewer(db, token))
+            return dossier.photo(db, doc_id, self.actor(db, token))
+
+    def facility_resource(self, token, resource, key="", **filters):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            user = self.actor(db, token)
+            state = (
+                json.loads(
+                    db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+                )
+                if resource != "tour"
+                else {}
+            )
+            if resource == "directory":
+                return facility.directory(db, state, user)
+            if resource == "floor":
+                return facility.floor(db, state, user, key)
+            if resource == "room":
+                return facility.room(db, state, user, key)
+            if resource == "search":
+                return facility.search(db, state, user, **filters)
+            if resource == "tour":
+                return facility.tour(db, state, user, **filters)
+            if resource == "agent-context":
+                access.require(user, "assistants")
+                return room_context(
+                    db, state, user, filters, self.now().date().isoformat()
+                )
+            raise FileNotFoundError("未登记的院区资源")
+
+    def tour_media(self, token, path):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            return facility.can_read_media(db, {}, self.actor(db, token), path)
 
     def agent_capabilities(self, db, user):
         result = agents.capabilities(user)
         result["plan"] = provider.status(db, user, self.now())
+        if "rooms" in user["routes"]:
+            result["facilityTools"] = [
+                {
+                    "id": "rooms.search",
+                    "method": "GET",
+                    "path": "/api/facility/search",
+                    "arguments": ["q", "buildingId", "floorId", "roomId", "limit"],
+                    "cloudTokens": 0,
+                },
+                {
+                    "id": "rooms.context",
+                    "method": "GET",
+                    "path": "/api/agent/room-context",
+                    "arguments": ["roomId", "limit", "offset"],
+                    "cloudTokens": 0,
+                },
+                {
+                    "id": "rooms.tour",
+                    "method": "GET",
+                    "path": "/api/facility/tour",
+                    "arguments": ["buildingId", "floorId", "roomId"],
+                    "cloudTokens": 0,
+                },
+            ]
+            if "gw.propose" in access.allowed_actions(user):
+                result["facilityTools"].append(
+                    {
+                        "id": "rooms.propose",
+                        "method": "POST",
+                        "path": "/api/agent/room-proposals",
+                        "arguments": ["roomId", "requestId", "taskId", "note"],
+                        "effect": "awaiting_human_confirmation",
+                        "cloudTokens": 0,
+                    }
+                )
+        result["businessCommandNames"] = access.allowed_actions(user)
         result["planningModes"] = ["local", "platform"]
         return result
 
     def agent_resource(self, token, name, run_id=None):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            user = viewer(db, token)
+            user = self.actor(db, token)
             access.require(user, "assistants")
             if name == "capabilities":
                 return self.agent_capabilities(db, user)
@@ -162,7 +269,7 @@ class Store:
     def capabilities(self, token, capability=None):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            user = viewer(db, token)
+            user = self.actor(db, token)
             catalog = gateways.catalog()
             if user["kind"] != "owner":
                 catalog = [
@@ -180,38 +287,45 @@ class Store:
             return record
 
     def plan_agent(self, payload, revision, token):
-        def authorize(db):
-            actor = viewer(db, token)
-            access.require(actor, "assistants")
-            row = db.execute("SELECT revision FROM workspace WHERE id=1").fetchone()
+        def inspect(db):
+            actor = self.actor(db, token)
+            row = db.execute(
+                "SELECT revision,data FROM workspace WHERE id=1"
+            ).fetchone()
             if type(revision) is not int or revision != row["revision"]:
                 raise Conflict("数据已更新，请核对最新内容后重新提交")
-            return actor
+            return actor, agents.preflight(db, json.loads(row["data"]), actor, payload)
 
-        if payload.get("scope", "auto") != "auto":
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            _, check = inspect(db)
+        if check["prior"]:
+            return None
+        if check["args"]["scope"] != "auto":
             return {
                 "mode": "local",
                 "reason": "explicit_scope",
                 "model": "",
                 "specialistIds": [],
             }
-        with closing(self.connect()) as db:
-            user = authorize(db)
-            prior = db.execute(
-                "SELECT 1 FROM agent_runs WHERE actor=? AND request=?",
-                (user["id"], payload.get("requestId")),
-            ).fetchone()
-            if prior:
-                return None
+
+        def authorize(db):
+            actor, current = inspect(db)
+            if not current["prior"] and current["specs"] != check["specs"]:
+                raise PermissionError("协作范围或岗位授权已更新，请重新核对")
+            return actor
+
         return provider.plan(
             self.connect,
             authorize,
-            payload.get("goal"),
-            payload.get("requestId"),
+            check["args"]["goal"],
+            check["request"],
+            allowed_specs=check["specs"],
+            scope_key=check["fingerprintScope"],
             now=self.now(),
         )
 
-    def execute(self, action, payload, revision, token):
+    def execute(self, action, payload, revision, token, *, room_bound=False):
         planning = None
         if (
             action == "agent.start"
@@ -221,7 +335,7 @@ class Store:
             planning = self.plan_agent(payload, revision, token)
         with closing(self.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            user = viewer(db, token)
+            user = self.actor(db, token)
             if not isinstance(action, str) or not isinstance(payload, dict):
                 raise ValueError("操作及表单内容格式错误")
             row = db.execute(
@@ -229,12 +343,31 @@ class Store:
             ).fetchone()
             data = json.loads(row["data"])
             access.authorize(user, action, payload, data)
+            if user.get("facilityScope") and action in ("ops.review", "ops.suggest"):
+                linked = next(
+                    (
+                        r.get("runId")
+                        for r in data["suggestions"]
+                        if r["id"] == payload.get("id")
+                    ),
+                    None,
+                )
+                if (
+                    action == "ops.suggest"
+                    or not linked
+                    or not agents.region_visible(db, user, linked)
+                ):
+                    raise PermissionError("请通过授权区域的 Agent 任务办理")
             if type(revision) is not int or revision < 0:
                 raise ValueError("缺少有效的数据版本，请刷新页面")
             if row["revision"] != revision:
                 raise Conflict("数据已更新，请核对最新内容后重新提交")
             now = self.now()
             today = now.date().isoformat()
+            if room_bound:
+                if action != "gw.propose":
+                    raise ValueError("未登记的区域工具")
+                payload = validate_proposal(db, data, user, payload, today)
             previous = activity.locate(db, data, action, payload, user)
             domain = action.partition(".")[0]
             try:
@@ -258,6 +391,8 @@ class Store:
                     summary, run_id = agents.apply(
                         db, data, action, payload, user, now, revision, planning
                     )
+                elif domain == "facility":
+                    summary = facility.apply(db, data, action, payload, user, today)
                 elif domain == "access":
                     summary = access.apply(db, data, action, payload, user)
                 elif domain in ("gw", "dossier"):

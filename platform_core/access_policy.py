@@ -33,6 +33,7 @@ PRESETS = {
         "audit",
     ],
     "护士": [
+        "assistants",
         "residents",
         "care",
         "clinical",
@@ -56,6 +57,8 @@ ROUTE_GRANTS = {
     "care": ("care", "clinical"),
     "medications": ("clinical",),
     "beds": ("intake", "care"),
+    "rooms": ("intake", "care", "clinical", "residents"),
+    "tour": (),
     "inventory": ("inventory",),
     "billing": ("finance",),
     "shifts": ("shifts",),
@@ -85,6 +88,7 @@ ACTION_GRANTS = {
     "care.resolveVital": "clinical",
     "care.archive": "clinical",
     "ops.stock": "inventory",
+    "ops.addItem": "inventory",
     "ops.shift": "shifts",
     "ops.bill": "finance",
     "ops.deposit": "finance",
@@ -120,6 +124,16 @@ COLLECTION_GRANTS = {
     "payments": "finance",
     "reports": "reports",
 }
+FACILITY_COMMANDS = (
+    "facility.addBuilding",
+    "facility.addFloor",
+    "facility.addRoom",
+    "facility.addBeds",
+    "facility.linkBed",
+    "facility.setLayout",
+    "facility.setScene",
+    "facility.withdrawScene",
+)
 DEFAULT_UI = {
     "brandName": "安康医养平台",
     "institutionName": "安康家园",
@@ -141,7 +155,7 @@ def require(user, permission):
 
 def resolve_routes(user):
     if user["kind"] == "family":
-        return ["family"]
+        return ["family", "tour"]
     routes = [
         route
         for route, grants in ROUTE_GRANTS.items()
@@ -158,6 +172,10 @@ def authorize(user, action, payload, state):
         raise PermissionError("请先登录")
     if not isinstance(action, str) or not isinstance(payload, dict):
         raise ValueError("业务操作格式无效")
+    if action in FACILITY_COMMANDS:
+        if user["kind"] != "owner":
+            raise PermissionError("仅机构总管理员可以维护院区")
+        return
     if action.startswith("access."):
         if user["kind"] != "owner":
             raise PermissionError("仅总管理员可管理账号与系统设置")
@@ -208,6 +226,7 @@ def allowed_actions(user):
         actions.append("dossier.relative")
     if user["kind"] == "owner":
         actions += [
+            *FACILITY_COMMANDS,
             "access.create",
             "access.update",
             "access.password",

@@ -202,3 +202,43 @@
     max-width: 130px;
   }
 }
+
+.agent-region {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--muted);
+}
+.agent-region strong {
+  color: var(--ink);
+}
+.agent-region .btn {
+  font-size: 12px;
+  min-height: 25px;
+  padding: 2px 6px;
+}
+
+.agent-target-list {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 12px 18px;
+}
+.agent-target-list summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.agent-targets {
+  display: grid;
+  gap: 4px;
+}
+.agent-target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}

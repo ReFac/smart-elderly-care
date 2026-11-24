@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from ..bootstrap import OPERATIONS_COLLECTIONS
 from .assistants import generate_suggestion
 from .billing import CARE_RATES, deposit, generate_bill
 from .records import parse_day
@@ -10,22 +11,7 @@ from .resources import assign_shift, record_stock
 
 
 def seed(today: str, state: dict) -> dict:
-    state.update(
-        {
-            key: []
-            for key in (
-                "inventory",
-                "transactions",
-                "bills",
-                "deposits",
-                "depositEntries",
-                "payments",
-                "shifts",
-                "reports",
-                "suggestions",
-            )
-        }
-    )
+    state.update({key: [] for key in OPERATIONS_COLLECTIONS})
     for index, (name, unit, quantity, minimum) in enumerate(
         (
             ("医用检查手套", "盒", 36, 15),

@@ -12,7 +12,7 @@ import re
 import sqlite3
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from platform_core import access
+from platform_core import access, facility
 from platform_core.store import Conflict, SignedOut, Store, encode
 
 ROOT = Path(__file__).resolve().parent
@@ -38,10 +38,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        media = " ".join(facility.media_origins())
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-            "media-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            f"img-src 'self' data: blob: {media}; media-src 'self' blob:; "
+            "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         )
         if cookie:
             self.send_header("Set-Cookie", cookie)
@@ -126,6 +128,47 @@ class Handler(BaseHTTPRequestHandler):
 
     def read_resource(self, path):
         token = self.token()
+        geo = ("buildingId", "floorId", "roomId")
+        if path == "/api/facility":
+            return self.send_json(200, self.store.facility_resource(token, "directory"))
+        if path in (
+            "/api/facility/search",
+            "/api/facility/tour",
+            "/api/agent/room-context",
+        ):
+            kind = path.rsplit("/", 1)[1]
+            extras = {
+                "search": ("q", "limit"),
+                "tour": (),
+                "room-context": ("limit", "offset"),
+            }
+            allowed = ("roomId",) if kind == "room-context" else geo
+            params = parse_qs(
+                urlsplit(self.path).query, max_num_fields=8, keep_blank_values=True
+            )
+            if any(
+                k not in (*allowed, *extras[kind]) or len(v) != 1
+                for k, v in params.items()
+            ):
+                raise ValueError("院区查询参数无效")
+            filters = {k: v[0] for k, v in params.items()}
+            if kind == "search" and "q" not in filters:
+                raise ValueError("请提供房号或姓名查询词")
+            return self.send_json(
+                200,
+                self.store.facility_resource(
+                    token,
+                    "agent-context" if kind == "room-context" else kind,
+                    **filters,
+                ),
+            )
+        match = re.fullmatch(r"/api/facility/(floors|rooms)/([a-zA-Z0-9_-]+)", path)
+        if match:
+            return self.send_json(
+                200, self.store.facility_resource(token, match[1][:-1], match[2])
+            )
+        if path.startswith("/tour-media/"):
+            return self.tour_image(token, path)
         if path == "/api/branding":
             return self.send_json(200, self.store.branding())
         if path == "/api/health":
@@ -160,13 +203,39 @@ class Handler(BaseHTTPRequestHandler):
             image, mime = self.store.photo(token, match[1])
             return self.respond(200, image, mime)
         target = (WEB / (path.lstrip("/") or "index.html")).resolve()
-        if not target.is_relative_to(WEB) or not target.is_file():
+        if (
+            not target.is_relative_to(WEB)
+            or target.is_relative_to(WEB / "tour-media")
+            or not target.is_file()
+        ):
             raise FileNotFoundError("找不到此资源")
         self.respond(
             200,
             target.read_bytes(),
             mimetypes.guess_type(str(target))[0] or "application/octet-stream",
         )
+
+    def tour_image(self, token, path):
+        if not self.store.tour_media(token, path):
+            raise FileNotFoundError("该环境场景尚未发布")
+        root = Path(
+            os.environ.get("NH_TOUR_MEDIA_DIR") or ROOT / ".local" / "tour-media"
+        ).resolve()
+        target = (root / path.removeprefix("/tour-media/")).resolve()
+        mime = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+        }.get(target.suffix.lower())
+        if (
+            not mime
+            or not target.is_relative_to(root)
+            or not target.is_file()
+            or target.stat().st_size > 32 * 1024 * 1024
+        ):
+            raise FileNotFoundError("未找到可用的环境照片")
+        self.respond(200, target.read_bytes(), mime)
 
     def write_resource(self, path):
         if path == "/api/auth/login":
@@ -184,6 +253,22 @@ class Handler(BaseHTTPRequestHandler):
             self.read_json(2048)
             self.store.logout(self.token())
             return self.send_json(200, {"ok": True}, self.session_cookie(None))
+        if path == "/api/agent/room-proposals":
+            if not self.token():
+                raise SignedOut("请先登录")
+            body = self.read_json(SMALL_BODY)
+            if set(body) != {"payload", "revision"}:
+                raise ValueError("请提交修订号及区域草稿")
+            return self.send_json(
+                200,
+                self.store.execute(
+                    "gw.propose",
+                    body["payload"],
+                    body["revision"],
+                    self.token(),
+                    room_bound=True,
+                ),
+            )
         if path == "/api/commands":
             if not self.token():
                 raise SignedOut("请先登录")
@@ -240,6 +325,12 @@ def main():
         "--public-origin",
         help="通过机构 HTTPS 反向代理访问时的完整源，例如 https://care.example.org",
     )
+    parser.add_argument(
+        "--initial-data",
+        choices=("empty", "demo"),
+        default="demo",
+        help="仅新数据库使用。empty 创建空白机构，demo 创建演示样本",
+    )
     args = parser.parse_args()
     origin = (args.public_origin or "").rstrip("/") or None
     if origin:
@@ -257,7 +348,7 @@ def main():
     os.environ.setdefault(
         "NH_DEEPSEEK_KEY_FILE", str(ROOT / ".local" / "platform" / "deepseek.key")
     )
-    store = Store(args.db)
+    store = Store(args.db, initial_data=args.initial_data)
     handler = partial(Handler, store=store, public_origin=origin)
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
         print(f"安康医养平台已启动  http://127.0.0.1:{server.server_port}", flush=True)

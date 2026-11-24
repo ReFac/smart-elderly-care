@@ -128,6 +128,11 @@ def page(db, user, room="", actor="", before=None, limit=50):
         item = dict(record)
         initiator = item.pop("agentInitiator")
         grants = (item.pop("agentGrants") or "").split()
+        if user.get("facilityScope") and item["action"].startswith("agent."):
+            from .agents import region_visible
+
+            if not region_visible(db, user, item["agentRunId"]):
+                continue
         if access.can_view_audit(
             user, item["action"], agent_initiator=initiator, agent_grants=grants
         ):

@@ -19,6 +19,7 @@ const root = document.getElementById('app');
 
 let state, revision, route;
 let branding = {};
+let agentRegion = null;
 let epoch = 0,
   refreshing = false;
 const seenAlerts = new Set();
@@ -36,6 +37,7 @@ function permitted(permission) {
 function signedOut() {
   epoch++;
   state = null;
+  agentRegion = null;
   revision = null;
   route = null;
   seenAlerts.clear();
@@ -140,20 +142,20 @@ async function readState() {
 
 let saving = false;
 
-async function command(action, payload) {
+async function command(action, payload, endpoint = '/api/commands') {
   if (saving) {
     toast('上一笔操作正在保存');
     return false;
   }
   saving = true;
   try {
-    const response = await fetch('/api/commands', {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        action,
+        ...(action ? { action } : {}),
         payload,
         revision,
       }),
@@ -188,9 +190,23 @@ function context() {
     state,
     get,
     available,
+    agentRegion,
+    startScopedAgent(place) {
+      if (!available('assistants')) return;
+      const region = {};
+      for (const key of ['buildingId', 'floorId', 'roomId'])
+        if (place[key]) region[key] = place[key];
+      agentRegion = { ...region, label: place.label };
+      go('assistants', 'runs');
+    },
+    clearAgentRegion() {
+      agentRegion = null;
+      render();
+    },
     permitted,
     go,
     command,
+    proposeRoom: (payload) => command(null, payload, '/api/agent/room-proposals'),
     dialog: formDialog,
     detail,
     toast,
@@ -227,7 +243,7 @@ function sidebar() {
     section.append(head, ...items.map(moduleLink));
     nav.append(section);
   }
-  const shortcuts = ['inbox', 'residents', 'care', 'reports'].filter(
+  const shortcuts = ['rooms', 'inbox', 'residents', 'reports'].filter(
     (id) => available(id) && routes.get(id).group !== groupName
   );
   if (shortcuts.length) {
@@ -390,7 +406,10 @@ function masthead() {
   mark.src = '/assets/mark.svg';
   mark.alt = '';
   const words = el('span', 'brand-words');
-  words.append(el('strong', '', state.uiSettings.brandName), el('small', '', state.uiSettings.institutionName));
+  words.append(
+    el('strong', '', state.uiSettings.brandName),
+    el('small', '', state.uiSettings.institutionName)
+  );
   brand.append(mark, words);
   const categories = el('nav', 'primary-nav');
   categories.setAttribute('aria-label', '业务分区');

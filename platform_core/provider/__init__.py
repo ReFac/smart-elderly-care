@@ -205,19 +205,33 @@ def replay(row, allowed, fingerprint, now):
     return decision("local", row["reason"] or "uncertain", row["model"])
 
 
-def plan(connect, authorize, goal, request_id, *, now=None, transport=None):
+def plan(
+    connect,
+    authorize,
+    goal,
+    request_id,
+    *,
+    now=None,
+    transport=None,
+    allowed_specs=None,
+    scope_key="",
+):
     when = local_time(now)
     if not isinstance(goal, str) or not 1 <= len(goal.strip()) <= 500:
         raise ValueError("任务目标须为 1 至 500 字")
     if not isinstance(request_id, str) or not 1 <= len(request_id.strip()) <= 100:
         raise ValueError("规划请求编号无效")
     goal, request_id = goal.strip(), request_id.strip()
-    fingerprint = hashlib.sha256(goal.encode("utf-8")).hexdigest()
+    identity = json.dumps([goal, scope_key], ensure_ascii=False) if scope_key else goal
+    fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     with closing(connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
         user = authorize(db)
         access_policy.require(user, "assistants")
         specs = specialists(user)
+        if allowed_specs is not None:
+            granted = {s.key for s in allowed_specs}
+            specs = tuple(s for s in specs if s.key in granted)
         allowed = tuple(s.key for s in specs)
         if not allowed:
             raise PermissionError("尚未分配协作业务域")
