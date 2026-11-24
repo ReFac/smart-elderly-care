@@ -15,7 +15,7 @@ PRIVATE = re.compile(
     r"\b(?:do not|don['’]t|never) (?:go online|browse|search|use the (?:internet|web))\b|"
     r"我院|本院|院里|院内|本机构|我们(?:院|的|现在)|咱们|该住户|病人姓名|这(?:个|位|名)老人|"
     r"我的(?:父|母|爷爷|奶奶|病|家属|账户|账单)|我(?:爸|妈|家老人)|患者.{0,8}岁|"
-    r"工单|账单|档案号|病历号|病房号|房间号|床位号|医嘱|病例编号|(?<!\d)\d{1,4}\s*(?:号房|床|病房|号楼|单元)|"
+    r"(?:发布|下发|创建|提交|发送).{0,16}(?:通知|任务|申请)|工单|账单|档案号|病历号|病房号|房间号|床位号|医嘱|病例编号|(?<!\d)\d{1,4}\s*(?:号房|床|病房|号楼|单元)|"
     r"身份证|银行卡|验证码|密码|密钥|手机号|邮箱地址|联系方式|家庭住址|微信号|"
     r"上文|刚才|上一条|刚刚说|上面(?:的|提到)|这些长者|那位|该患者|忽略.{0,10}指令|"
     r"\b(?:our (?:home|facility|residents?|patients?|staff|inventory)|my (?:patient|mother|father|account)|"
@@ -45,6 +45,16 @@ class SearchFailure(Exception):
 
 def normalized(value):
     return unicodedata.normalize("NFKC", value).strip().casefold()
+
+
+def requests_public_site(text):
+    return bool(
+        re.search(
+            r"官网|官方网站|公开网站|政府网站|政府门户|official (?:web)?site",
+            text,
+            re.I,
+        )
+    )
 
 
 def eligible(db, state, text, actions):
@@ -155,7 +165,9 @@ def public_response(answer, sources):
         answer,
     )
     return re.sub(
-        r"https?://[^\s\u3000-\u9fff)\]]+", lambda m: by_url.get(m[0], ""), answer
+        r"https?://[^\s<>()\]\[，。；、！？」』]+",
+        lambda m: by_url.get(m[0], ""),
+        answer,
     ).strip()
 
 

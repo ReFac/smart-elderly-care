@@ -273,6 +273,11 @@ class NetworkChatTests(unittest.TestCase):
         system = self.prompts[-1]["messages"][0]["content"]
         self.assertIn(self.now.isoformat(timespec="minutes"), system)
         self.assertIn("不要顺带列电话", system)
+        opened = self.ask("打开汝州市政府官网", "gov-site", webSearch=True)["messages"][
+            -1
+        ]
+        self.assertTrue(opened["webSearched"])
+        self.assertIsNone(opened["action"])
 
     def test_user_opt_out_wins_over_checkbox_and_roster_identifiers_stay_private(self):
         with closing(self.store.connect()) as db, db:

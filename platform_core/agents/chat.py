@@ -387,6 +387,13 @@ def reply(store, token, data, *, transport=None):
         ):
             topics += " " + last["question"]
         actions = permitted_actions(user, routes, text, selected)
+        if (
+            web_enabled
+            and actions
+            and set(actions.values()) == {"navigate"}
+            and chat_web.requests_public_site(text)
+        ):
+            actions = {}
 
         def private_body(db, state):
             facts = ctx.evidence(store, db, user, state, selected, hours, topics)
