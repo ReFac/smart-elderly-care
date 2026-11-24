@@ -310,6 +310,10 @@ def restore_snapshot(source, target_db, recovery_key_file):
             # Child delivery rows precede parent points. Old schemas may lack these tables.
             local_tables = (
                 "sessions",
+                "backup_retrievals",
+                "backup_restores",
+                "backup_imports",
+                "backup_exports",
                 "backup_deliveries",
                 "backup_checks",
                 "backup_points",

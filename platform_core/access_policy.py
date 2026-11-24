@@ -52,6 +52,7 @@ PRESETS = {
 # Empty grants is still a valid employee account.
 ROUTE_GRANTS = {
     "overview": (),
+    "history": (),
     "assistants": ("assistants",),
     "intake": ("intake",),
     "residents": ("residents", "intake", "care", "clinical"),
@@ -80,6 +81,7 @@ ACTION_GRANTS = {
     "care.assess": "care",
     "care.approvePlan": "care",
     "care.addTask": "care",
+    "care.timelineSettings": "care",
     "care.completeTask": "care",
     "care.quality": "care",
     "care.handover": "care",

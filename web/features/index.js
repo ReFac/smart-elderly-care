@@ -12,6 +12,7 @@ import { renderAccess } from './access.js';
 import { accountCenter } from './account.js';
 import { renderDossier } from './dossier.js';
 import { renderGateways } from './gateways.js';
+import { recentChanges } from './recent-changes.js';
 import { activityPage } from './activity.js';
 
 import { roomsPage, tourPage } from './rooms.js';
@@ -27,6 +28,7 @@ const features = {
   integrations: (ctx) => renderGateways('integrations', ctx),
   inbox: (ctx) => renderGateways('inbox', ctx),
   activity: activityPage,
+  history: recentChanges,
   intake,
   residents,
   beds,

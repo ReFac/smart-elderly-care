@@ -686,3 +686,14 @@
     grid-template-columns: 1fr;
   }
 }
+.backup-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.backup-navigation { justify-content: flex-end; margin-top: 12px; }
+.backup-settings-form { display: grid; gap: 14px; }
+.backup-settings-form h3 { font-size: 15px; margin: 8px 0 0; }
+.backup-settings-form .backup-targets { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.backup-facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0 0 14px; }
+.backup-facts dt { color: var(--muted); }
+.backup-facts dd { margin: 0; overflow-wrap: anywhere; }
+.backup-differences { max-height: 32vh; overflow: auto; }
+.backup-preview .dialog-actions { margin-top: 14px; }
+@media(max-width:720px) { .backup-settings-form .backup-targets {grid-template-columns:1fr;} }

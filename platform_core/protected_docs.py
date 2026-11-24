@@ -76,6 +76,9 @@ def export(store, token, spec, revision=None):
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
         actor = store.actor(db, token)
+        from . import history
+
+        history.watch(db, "document.export")
         rev, data = db.execute(
             "SELECT revision,data FROM workspace WHERE id=1"
         ).fetchone()

@@ -7,9 +7,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .room_context import room_context, validate_proposal
+from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, storage_assets
 from .bootstrap import empty_workspace
-from . import backups
+from . import backups, history
 from .access_policy import can_record_scale
 from . import (
     access,
@@ -26,7 +27,7 @@ from . import (
 )
 
 TIMEZONE = ZoneInfo("Asia/Shanghai")
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 class Conflict(Exception):
@@ -99,6 +100,7 @@ class Store:
                 db.execute("UPDATE workspace SET data=? WHERE id=1", (encode(data),))
             facility.init(db, data)
             backups.init(db)
+            history.prune(db, self.now())
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         self.backups = backups.BackupService(self)
 
@@ -211,6 +213,13 @@ class Store:
             people = (
                 campus_access.resident_ids(state, beds) if beds is not None else None
             )
+            if beds is not None:
+                data["tasks"] = [
+                    t
+                    for t in data.get("tasks", [])
+                    if t.get("residentId") in people
+                    and (not t.get("executionBedId") or t["executionBedId"] in beds)
+                ]
             gateways.project(db, data, user, beds, people)
             if access.has(user, "assistants"):
                 data["agentRuns"] = agents.listing(db, user)
@@ -262,6 +271,15 @@ class Store:
             return access.preview(
                 db, self.actor(db, token), payload, self.facility_policy
             )
+
+    def history(self, token, **filters):
+        return history.page(self, token, **filters)
+
+    def history_change(self, token, revision):
+        return history.detail(self, token, revision)
+
+    def undo_change(self, token, target_revision, revision, *, comment=""):
+        return history.undo(self, token, target_revision, revision, comment)
 
     def activity(self, token, **filters):
         with closing(self.connect()) as db, db:
@@ -559,7 +577,10 @@ class Store:
             now=self.now(),
         )
 
-    def execute(self, action, payload, revision, token, *, room_bound=False):
+    def execute(
+        self, action, payload, revision, token, *, room_bound=False, comment=""
+    ):
+        comment = history.comment_text(comment)
         if action == "dossier.ocr":
             from . import document_ocr
 
@@ -607,10 +628,13 @@ class Store:
                     raise ValueError("未登记的区域工具")
                 payload = validate_proposal(db, data, user, payload, today)
             campus_access.authorize_command(db, user, action, payload, data)
+            history.watch(db, action)
             previous = activity.locate(db, data, action, payload, user)
             domain = action.partition(".")[0]
             try:
-                if action == "care.handover":
+                if action == "care.timelineSettings":
+                    summary = care_timeline.configure(db, data, user, payload)
+                elif action == "care.handover":
                     summary = handovers.create(
                         db, data, payload, user, now, self.facility_policy
                     )
@@ -682,6 +706,14 @@ class Store:
                     raise ValueError("未登记的操作")
             except KeyError as error:
                 raise ValueError("操作名称或必填字段无效") from error
+            if action == "care.completeTask":
+                care_timeline.stamp_execution(db, data, payload["taskId"], now)
+            elif action == "gw.confirm":
+                task_id = db.execute(
+                    "SELECT task_id FROM gateway_voice WHERE id=?",
+                    (payload["proposalId"],),
+                ).fetchone()[0]
+                care_timeline.stamp_execution(db, data, task_id, now)
             current = activity.locate(db, data, action, payload, user)
             if action == "care.admit":
                 current = activity.for_person(data, data["residents"][-1]["id"])
@@ -694,7 +726,7 @@ class Store:
                 "UPDATE workspace SET revision=?,data=? WHERE id=1",
                 (new_revision, encode(data)),
             )
-            activity.write(
+            affected = activity.write(
                 db,
                 new_revision,
                 now.isoformat(timespec="seconds"),
@@ -703,5 +735,6 @@ class Store:
                 user,
                 current,
                 previous,
+                comment=comment,
             )
-            return {"revision": new_revision, "summary": summary}
+            return {"revision": new_revision, "summary": summary, "affected": affected}

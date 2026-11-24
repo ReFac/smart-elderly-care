@@ -31,6 +31,8 @@ const paths = {
   plus: 'M12 5v14M5 12h14',
   building: 'M4 21V5h11v16m0-13h5v13M2 21h20 M7 9h1m3 0h1m-5 4h1m3 0h1m-3 8v-4h3v4',
   location: 'M12 22S4 14 4 9a8 8 0 1 1 16 0c0 5-8 13-8 13z M12 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6',
+  history: 'M3 11a9 9 0 1 1 2.6 7M3 4v7h7m2-4v5l3 2',
+  undo: 'M3 4v7h7M4 10a8 8 0 1 1 2 9',
   clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 7v5l3 2',
   check: 'm4 12 5 5L20 6',
   pulse: 'M2 13h5l3-9 4 16 3-9 2 2h3',

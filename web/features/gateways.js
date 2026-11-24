@@ -1,3 +1,4 @@
+import { commentInput } from '../lib/change-review.js';
 import { voiceProposal } from './speech-input.js';
 import {
   node,
@@ -181,13 +182,18 @@ async function confirmProposal(ctx, row, trigger) {
     return;
   }
   const task = ctx.state.tasks.find((t) => t.id === row.taskId);
+  const comment = commentInput();
   const approve = btn(
     ctx,
     '确认并完成工单',
     async () => {
       approve.disabled = true;
       try {
-        await ctx.command('gw.confirm', { proposalId: row.id });
+        await ctx.command(
+          'gw.confirm',
+          { proposalId: row.id },
+          { confirmed: true, comment: comment.read() },
+        );
       } finally {
         approve.disabled = false;
       }
@@ -222,6 +228,7 @@ async function confirmProposal(ctx, row, trigger) {
       node('blockquote', '', row.transcript),
     ]),
     changePreview(ctx, task, row),
+    comment.element,
     node('footer', 'gw-confirm-foot', [
       node('small', '', '确认后写入工单并从共用队列移除。'),
       choose(dismiss, approve),

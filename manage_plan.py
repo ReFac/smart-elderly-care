@@ -58,6 +58,9 @@ def main():
             ).fetchone():
                 raise ValueError("请选择实际机构工作区数据库")
             provider.init(db)
+            from platform_core import history
+
+            history.watch(db, "platform.plan")
             change = None
             if args.command == "grant":
                 provider.grant(db, args.name, args.tokens, args.expires)

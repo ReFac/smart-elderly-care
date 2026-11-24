@@ -2,7 +2,7 @@
 
 import json
 
-from . import access, campus_access
+from . import access, campus_access, history
 
 
 def init(db):
@@ -23,6 +23,7 @@ def init(db):
             db.execute(f"ALTER TABLE audit ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
     db.execute("CREATE INDEX IF NOT EXISTS audit_actor ON audit(actorId,revision)")
     db.execute("CREATE INDEX IF NOT EXISTS audit_room ON audit(room,revision)")
+    history.init(db)
 
 
 # Resolve audit context from the actual business target, never from unrelated form fields.
@@ -78,6 +79,23 @@ def for_person(data, resident_id):
 
 
 def locate(db, data, action, payload, actor):
+    if action == "care.timelineSettings":
+        if payload.get("residentId"):
+            return for_person(data, payload["residentId"])
+        if isinstance(payload.get("roomId"), str) and payload["roomId"]:
+            from .facility import room
+
+            place = room(db, data, actor, payload["roomId"])
+            return {
+                "room": " / ".join(
+                    (
+                        place["campusName"],
+                        place["buildingName"],
+                        place["floorLabel"],
+                        place["number"],
+                    )
+                )
+            }
     if action in RELATED:
         key, collection = RELATED[action]
         target = next((r for r in data[collection] if r["id"] == payload.get(key)), {})
@@ -96,7 +114,19 @@ def locate(db, data, action, payload, actor):
     return {}
 
 
-def write(db, revision, timestamp, action, summary, actor, current, previous):
+def write(
+    db,
+    revision,
+    timestamp,
+    action,
+    summary,
+    actor,
+    current,
+    previous,
+    *,
+    comment="",
+    undo_of=None,
+):
     db.execute(
         """INSERT INTO audit(revision,at,action,summary,actorId,actorName,actorLogin,residentId,room,previousRoom,agentRunId)
                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
@@ -113,6 +143,9 @@ def write(db, revision, timestamp, action, summary, actor, current, previous):
             previous.get("room") or "",
             current.get("agentRunId", ""),
         ),
+    )
+    return history.record(
+        db, revision, timestamp, action, actor, current, previous, comment, undo_of
     )
 
 

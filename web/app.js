@@ -1,5 +1,6 @@
 import { loginScreen } from './features/access.js';
 import * as ui from './lib/ui.js';
+import { changePreview, confirmChange } from './lib/change-review.js';
 
 import { detail, formDialog } from './lib/dialogs.js';
 
@@ -24,6 +25,16 @@ let agentRegion = null;
 let epoch = 0,
   refreshing = false;
 const seenAlerts = new Set();
+let historyScope = {};
+let focusIds = [];
+let reviewing = false;
+function openChanges(filters = {}) {
+  if (!available('history')) return;
+  historyScope = { ...filters };
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+  if (route === 'history') render();
+  else go('history');
+}
 function available(id) {
   return state?.user.routes.includes(id) && !state.uiSettings.hiddenRoutes.includes(id);
 }
@@ -42,6 +53,8 @@ function signedOut() {
   revision = null;
   route = null;
   seenAlerts.clear();
+  historyScope = {};
+  focusIds = [];
   closeMenu();
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   document.documentElement.removeAttribute('data-theme');
@@ -148,23 +161,67 @@ async function readState() {
 
 let saving = false;
 
-async function command(action, payload, endpoint = '/api/commands') {
-  if (saving) {
-    toast('上一笔操作正在保存');
+function changesReceipt(result) {
+  toast(result.summary || '改动已保存');
+  if (!available('history') || !result.revision) return;
+  const host = document.getElementById('announcer');
+  const view = el('button', 'change-receipt-link', '查看本次改动');
+  view.type = 'button';
+  view.onclick = () => openChanges({ revision: result.revision });
+  host.append(view);
+}
+
+async function undoRevision(change) {
+  return submitChange({
+    action: 'history.undo',
+    url: '/api/history/' + change.revision + '/undo',
+    payload: {},
+    review: {
+      title: '撤销这次改动',
+      target: change.summary,
+      confirmLabel: '确认撤销',
+      fields: [
+        ['原版本', 'v' + change.revision],
+        ['原经办人', change.actorName],
+        ['执行结果', '恢复可撤销字段，并新增一条撤销记录。'],
+      ],
+    },
+  });
+}
+
+async function command(action, payload, options = {}) {
+  return submitChange({ action, url: '/api/commands', payload, review: options });
+}
+
+async function submitChange({ action, url, payload, review = {} }) {
+  if (saving || reviewing) {
+    toast('请先完成当前改动');
     return false;
+  }
+  const beforeVersion = revision;
+  const previousEpoch = epoch;
+  const prior = state;
+  let choice;
+  if (review.confirmed) choice = { comment: review.comment || '' };
+  else {
+    reviewing = true;
+    try {
+      choice = await confirmChange(
+        changePreview(state, action, payload, { allowComment: true, ...review }),
+      );
+    } finally {
+      reviewing = false;
+    }
+    if (!choice || previousEpoch !== epoch || !state) return;
   }
   saving = true;
   try {
-    const response = await fetch(endpoint, {
+    const envelope =
+      url === '/api/commands' ? { action, payload } : action === 'history.undo' ? {} : { payload };
+    const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        ...(action ? { action } : {}),
-        payload,
-        revision,
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...envelope, comment: choice.comment, revision: beforeVersion }),
     });
     const result = await response.json();
     if (response.status === 401) {
@@ -184,8 +241,27 @@ async function command(action, payload, endpoint = '/api/commands') {
     }
     if (!(await readState())) return true;
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+    const effectIds = (result.affected || []).map((r) => r.entityId);
+    focusIds = [
+      ...new Set([...effectIds, payload.taskId, payload.residentId, payload.id].filter(Boolean)),
+    ];
+    let destination = null;
+    if (['gw.confirm', 'care.completeTask'].includes(action) && available('care')) {
+      const original = prior.voiceQueue?.find((r) => r.id === payload.proposalId);
+      if (original?.taskId) focusIds.unshift(original.taskId);
+      destination = ['care', 'completed'];
+    } else if (action === 'agent.publish' && available('assistants'))
+      destination = ['assistants', 'ledger'];
+    else if (action === 'history.undo') historyScope.revision = result.revision;
+    if (destination) {
+      selectTab(...destination);
+      if (route !== destination[0]) window.history.pushState(null, '', '#' + destination[0]);
+    }
     render();
-    toast(result.summary);
+    if (!review.quiet) changesReceipt(result);
+    const target = document.querySelector('.change-focus');
+    if (target) target.scrollIntoView({ block: 'nearest' });
+    focusIds = [];
     return true;
   } catch (error) {
     toast(error.message || '连接失败，请刷新后核对记录。');
@@ -204,6 +280,11 @@ function context() {
   return {
     state,
     get,
+    historyScope,
+    openChanges,
+    undoRevision,
+    confirmChange,
+    focusIds,
     async refreshWorkspace() {
       if (await readState()) render();
     },
@@ -225,7 +306,8 @@ function context() {
     permitted,
     go,
     command,
-    proposeRoom: (payload) => command(null, payload, '/api/agent/room-proposals'),
+    proposeRoom: (payload) =>
+      submitChange({ action: 'gw.propose', payload, url: '/api/agent/room-proposals' }),
     dialog: formDialog,
     detail,
     toast,

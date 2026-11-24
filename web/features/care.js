@@ -1,3 +1,4 @@
+import { careTimeline } from './care-timeline.js';
 import {
   canAct,
   hasGrant,
@@ -272,6 +273,12 @@ export function taskForm(ctx) {
       field('title', '任务名称'),
       field('assignee', '执行人员'),
       select('kind', '服务类型', options(['日常照护', '巡视', '康复服务', '膳食服务', '医嘱执行'])),
+      select('routineActivity', '完成后时间线归类', [
+        { value: 'auto', label: '按标准服务名称' },
+        { value: 'water', label: '饮水照护' },
+        { value: 'meal', label: '用餐陪护' },
+        { value: 'separate', label: '单独展示' },
+      ]),
       field('date', '执行日期', {
         type: 'date',
         value: today(ctx),
@@ -328,36 +335,62 @@ function quality(ctx, row) {
   });
 }
 
-function taskHistory(ctx) {
-  const rows = [...ctx.state.tasks].sort(
-    (a, b) =>
-      Number(b.date === today(ctx)) - Number(a.date === today(ctx)) ||
-      b.date.localeCompare(a.date) ||
-      a.time.localeCompare(b.time)
+function serviceProof(ctx, id) {
+  const task = ctx.state.tasks.find((r) => r.id === id);
+  if (!task) return ctx.toast('工单已更新，请重新载入');
+  const checks = (ctx.state.qualityChecks || []).filter((r) => r.taskId === id);
+  ctx.detail(
+    '服务凭证',
+    node('div', 'fx-profile', [
+      facts([
+        ['工单编号', task.id],
+        ['任务', task.title],
+        ['服务对象', residentName(ctx, task.residentId)],
+        ['执行人', task.operator || '未登记'],
+        ['执行记录', task.note],
+        ['床位核验', task.checkedBedId || '未登记'],
+        [
+          '实际完成',
+          task.executedAt?.replace('T', ' ').slice(0, 19) || task.completedAt || '未登记',
+        ],
+        ['计划时间', task.date + ' ' + task.time],
+      ]),
+      section(
+        '服务抽检',
+        records(checks, (r) =>
+          named(
+            [r.source || '服务抽检', r.rating && r.rating + ' 分', r.note]
+              .filter(Boolean)
+              .join(' · '),
+            r.reviewer,
+          ),
+        ),
+      ),
+      canAct(ctx, 'care.quality') ? btn(ctx, '登记抽检', () => quality(ctx, task)) : null,
+    ]),
   );
+}
+
+function taskHistory(ctx) {
+  const rows = ctx.state.tasks
+    .filter((r) => r.status !== '已完成')
+    .sort(
+      (a, b) =>
+        Number(b.date === today(ctx)) - Number(a.date === today(ctx)) ||
+        b.date.localeCompare(a.date) ||
+        a.time.localeCompare(b.time),
+    );
   return table(ctx, {
-    title: '照护工单',
+    title: '待办工单',
     rows,
     search: personSearch(ctx, (r) => r.title + ' ' + r.assignee),
     filter: statusFilter,
     cols: [
-      {
-        label: '任务',
-        view: (r) => named(r.title, r.kind),
-      },
+      { label: '任务', view: (r) => named(r.title, r.kind) },
       personCol(ctx),
-      {
-        label: '执行时间',
-        view: (r) => named(r.time, r.date),
-      },
-      {
-        label: '责任人',
-        view: (r) => r.assignee,
-      },
-      {
-        label: '状态',
-        view: (r) => badge(ctx, r.status),
-      },
+      { label: '计划时间', view: (r) => named(r.time, r.date) },
+      { label: '责任人', view: (r) => r.assignee },
+      { label: '状态', view: (r) => badge(ctx, r.status) },
       {
         label: '操作',
         align: 'end',
@@ -366,36 +399,10 @@ function taskHistory(ctx) {
             ? r.date > today(ctx)
               ? '未到执行日'
               : link(ctx, '登记执行', () => completeTask(ctx, r))
-            : r.status === '已完成'
-              ? link(ctx, '查看凭证', () => {
-                  const checks = (ctx.state.qualityChecks || []).filter((c) => c.taskId === r.id);
-                  const proof = node('div', 'fx-profile', [
-                    facts([
-                      ['任务', r.title],
-                      ['服务对象', residentName(ctx, r.residentId)],
-                      ['执行人', r.operator || r.assignee],
-                      ['执行记录', r.note],
-                      ['床位核验', r.checkedBedId || '未登记'],
-                      ['执行日期', r.completedAt || r.date],
-                    ]),
-                    section(
-                      '服务抽检',
-                      records(checks, (c) =>
-                        named(
-                          [c.source || '服务抽检', c.rating && c.rating + ' 分', c.note]
-                            .filter(Boolean)
-                            .join(' · '),
-                          c.reviewer
-                        )
-                      )
-                    ),
-                    btn(ctx, '登记抽检', () => quality(ctx, r)),
-                  ]);
-                  ctx.detail('服务凭证', proof);
-                })
-              : '—',
+            : '—',
       },
     ],
+    empty: '没有符合条件的待办工单。',
   });
 }
 
@@ -499,7 +506,10 @@ export function care(ctx) {
     canAct(ctx, 'care.addTask') ? '执行照护工单并登记班次交接。' : '登记体征测量与异常处理结果。',
     canAct(ctx, 'care.addTask') ? btn(ctx, '新建任务', () => taskForm(ctx), 'primary') : null,
     tabs('care', [
-      ...(canAct(ctx, 'care.completeTask') ? [['tasks', '照护工单', () => taskHistory(ctx)]] : []),
+      ...(canAct(ctx, 'care.completeTask') ? [
+        ['tasks', '照护工单', () => taskHistory(ctx)],
+        ['completed', '已完成服务', () => careTimeline(ctx, 'work', '', (id) => serviceProof(ctx, id))],
+      ] : []),
       ...(canAct(ctx, 'care.vital') ? [['vitals', '健康体征', () => vitals(ctx)]] : []),
       ...(canAct(ctx, 'care.screen')
         ? [

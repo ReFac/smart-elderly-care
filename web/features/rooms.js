@@ -1,3 +1,4 @@
+import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import { active, canAct, choose, node, page } from './shared.js';
 import { admit, profile, transfer } from './residency.js';
 import { chooseAdmin } from './room-admin.js';
@@ -6,6 +7,21 @@ import { button, statusText, pathName, heading, lookup, failure } from './room-e
 export { tourPage, openFacilityTour } from './room-tour.js';
 
 const memory = new Map();
+
+export async function goToRoom(ctx, id) {
+  try {
+    const room = await lookup(ctx, '/rooms/' + encodeURIComponent(id));
+    memory.set(ctx.state.user.id, {
+      campusId: room.campusId,
+      buildingId: room.buildingId,
+      floorId: room.floorId,
+      roomId: room.id,
+    });
+    ctx.go('rooms');
+  } catch (error) {
+    ctx.toast(error.message);
+  }
+}
 
 function scopedAgent(ctx, place, label) {
   return ctx.available('assistants') && ctx.startScopedAgent
@@ -284,7 +300,7 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
     const body = [
       ctx.ui.icon('bed', 18),
       node('span', '', [node('small', '', bed.label + ' 床'), node('strong', '', name)]),
-      resident || allocatable ? ctx.ui.icon('chevron', 14) : null
+      resident || allocatable ? ctx.ui.icon('chevron', 14) : null,
     ];
     const row = resident
       ? button('查看' + name + '的档案', () => profile(ctx, resident), 'room-bed-row', body)
@@ -299,19 +315,28 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
       node('span', 'room-pin', ctx.ui.icon('location', 22)),
       node('div', '', [
         node('small', '', pathName(room.campusName, room.buildingName, room.floorLabel)),
-        node('h2', '', room.number + ' 房')
-      ])
+        node('h2', '', room.number + ' 房'),
+      ]),
     ]),
     node('div', 'room-detail-meta', [node('span', '', '照护区'), node('strong', '', room.ward)]),
     node('div', 'room-detail-meta', [
       node('span', '', '入住床位'),
-      node('strong', '', room.occupiedCount + ' / ' + room.bedCount + ' 床')
+      node('strong', '', room.occupiedCount + ' / ' + room.bedCount + ' 床'),
     ]),
     node('section', 'room-bed-list', [
       node('h3', '', '床位明细'),
-      room.beds.length ? people : statusText('尚未设置床位')
+      room.beds.length ? people : statusText('尚未设置床位'),
     ]),
     node('div', 'room-room-actions', [
+      canAct(ctx, 'care.completeTask')
+        ? ctx.ui.button(
+            '房间照护记录',
+            () => ctx.detail(room.number + ' 房 · 照护记录', careTimeline(ctx, 'room', room.id)),
+            'secondary',
+            'calendar'
+          )
+        : null,
+      scopedHistoryButton(ctx, 'room', room.id),
       ctx.available('tour')
         ? ctx.ui.button('查看房间环境', openTour, 'secondary', 'location')
         : null,
@@ -319,8 +344,8 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
         ctx,
         { buildingId: room.buildingId, floorId: room.floorId, roomId: room.id },
         pathName(room.campusName, room.buildingName, room.floorLabel, room.number + ' 房')
-      )
-    ])
+      ),
+    ]),
   ]);
 }
 

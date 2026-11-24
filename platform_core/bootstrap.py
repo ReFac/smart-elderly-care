@@ -12,6 +12,7 @@ CARE_COLLECTIONS = (
     "handovers",
     "leaves",
     "qualityChecks",
+    "careTimelineSettings",
     "bedMoves",
     "archives",
     "followups",

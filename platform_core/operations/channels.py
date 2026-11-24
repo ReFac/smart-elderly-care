@@ -178,6 +178,9 @@ def receive(store, channel, headers, raw_body):
         raise ValueError("渠道通知缺少有效的交易字段") from None
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
+        from .. import history
+
+        history.watch(db, "ops.importReceipt")
         revision, encoded = db.execute(
             "SELECT revision,data FROM workspace WHERE id=1"
         ).fetchone()

@@ -17,6 +17,18 @@ async function post(action, body, type) {
 }
 
 export async function downloadDocument(ctx, source) {
+  if (
+    !(await ctx.confirmChange({
+      title: '导出授权资料',
+      target: source.kind === 'referral' ? '院外转介' : '民政报送',
+      fields: [
+        ['导出文件', '加密文档 .akdoc'],
+        ['记录', source.exportId || source.id],
+      ],
+      confirmLabel: '确认导出',
+    }))
+  )
+    return;
   try {
     const response = await post(
       'export',

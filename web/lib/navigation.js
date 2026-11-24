@@ -5,6 +5,7 @@ export const groups = [
       ['assistants', 'Agent 工作台', 'spark'],
       ['overview', '运营总览', 'grid'],
       ['inbox', '预警与确认', 'bell'],
+      ['history', '最近改动', 'history'],
     ],
   ],
   [

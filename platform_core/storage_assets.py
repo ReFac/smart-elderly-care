@@ -40,6 +40,9 @@ def canonical(name):
 
 
 def import_asset(db, namespace, name, file):
+    from . import history
+
+    history.watch(db, "storage.import")
     name = canonical(name)
     if namespace not in {"tour", "archive"}:
         raise ValueError("未知附件类型")

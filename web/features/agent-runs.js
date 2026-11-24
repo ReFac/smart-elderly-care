@@ -1,3 +1,4 @@
+import { commentInput } from '../lib/change-review.js';
 import { node, table, named, badge, btn, link, choose } from './shared.js';
 import { showHandover } from './handovers.js';
 
@@ -267,10 +268,16 @@ export async function showRun(ctx, row) {
   const dialog = ctx.detail('协作运行详情', body);
   if (data.status === 'awaiting_approval') {
     dialog.dataset.agentRunId = data.id;
+    const comment = commentInput();
     const publish = btn(
       ctx,
       '确认发布到建议台账',
-      () => ctx.command('agent.publish', { runId: data.id }),
+      () =>
+        ctx.command(
+          'agent.publish',
+          { runId: data.id },
+          { confirmed: true, comment: comment.read() },
+        ),
       'primary',
     );
     const cancel = btn(ctx, '取消此任务', () => ctx.command('agent.cancel', { runId: data.id }));
@@ -280,6 +287,7 @@ export async function showRun(ctx, row) {
         'agent-confirm-note',
         '确认后将以上草稿逐项写入建议台账，保留来源单据与本次运行编号。',
       ),
+      comment.element,
       choose(cancel, publish),
     );
   }

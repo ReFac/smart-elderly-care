@@ -126,6 +126,15 @@ def projection(db, state, user):
 
 
 def authorize_command(db, user, action, payload, state):
+    if action in ("care.completeTask", "care.quality") and user.get("facilityScope"):
+        task = next(
+            (t for t in state["tasks"] if t["id"] == payload.get("taskId")), None
+        )
+        require_resident(db, user, task["residentId"] if task else None, state)
+        if action == "care.quality" and task and task.get("executionBedId"):
+            beds = allowed_beds(db, user, include_rooms=True)
+            if beds is not None and task["executionBedId"] not in beds:
+                raise PermissionError("执行凭证不在本人授权区域")
     if not bound(user):
         return
     from . import activity
@@ -192,8 +201,8 @@ def authorize_command(db, user, action, payload, state):
         if not any(r["id"] == payload.get("handoverId") for r in records):
             raise PermissionError("交班不在本人获授权的分院范围内")
         return
-    if action == "care.handover":
-        # The handover module checks the intersection of sender and recipient areas.
+    if action in ("care.handover", "care.timelineSettings"):
+        # Both modules check the actual target against the deployment and branch scopes.
         return
     if action in activity.PERSON_ACTIONS:
         person(payload.get("residentId"))

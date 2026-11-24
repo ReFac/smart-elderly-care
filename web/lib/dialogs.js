@@ -107,8 +107,9 @@ export function formDialog({
     submit.disabled = true;
     try {
       const values = Object.fromEntries(new FormData(form));
-      if (await onSubmit(values)) dialog.close();
-      else
+      const saved = await onSubmit(values);
+      if (saved) dialog.close();
+      else if (saved === false)
         error.textContent =
           document.getElementById('announcer').textContent || '保存失败，请核对表单。';
     } catch (ex) {

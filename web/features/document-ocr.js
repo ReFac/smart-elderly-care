@@ -216,8 +216,11 @@ export async function reviewOcr(ctx, doc) {
   ctx.detail('核对文书与回填档案', form);
 }
 
-export async function recognizeDocument(ctx, residentId, reference) {
-  if (!(await ctx.command('dossier.ocr', { residentId, ...reference, consent: true }))) return;
+export async function recognizeDocument(ctx, residentId, reference, confirmed = false) {
+  if (
+    !(await ctx.command('dossier.ocr', { residentId, ...reference, consent: true }, { confirmed }))
+  )
+    return;
   const snapshot = await ctx.get('/api/state');
   if (snapshot.data.user.id !== ctx.state.user.id) return;
   if (!snapshot.data.allowedActions.includes('dossier.reviewDocument')) return;

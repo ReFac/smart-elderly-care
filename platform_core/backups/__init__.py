@@ -13,7 +13,7 @@ import time
 from uuid import uuid4
 
 from . import cloud
-from .. import activity, secure_storage
+from .. import activity, history, secure_storage
 
 PERIOD = 12 * 60 * 60
 SHANGHAI_OFFSET = 8 * 3600
@@ -25,6 +25,9 @@ def slot_for(stamp):
 
 
 def init(db):
+    from . import exchange
+
+    exchange.init(db)
     db.execute(
         "CREATE TABLE IF NOT EXISTS backup_checks(point TEXT PRIMARY KEY, checked INTEGER NOT NULL)"
     )
@@ -79,7 +82,7 @@ def require_owner(store, db, token):
     return actor
 
 
-def audit(db, store, actor, action, summary):
+def audit(db, store, actor, action, summary, comment=""):
     revision = db.execute(
         "UPDATE workspace SET revision=revision+1 WHERE id=1 RETURNING revision"
     ).fetchone()[0]
@@ -92,6 +95,7 @@ def audit(db, store, actor, action, summary):
         actor,
         {},
         {},
+        comment=comment,
     )
 
 
@@ -134,8 +138,9 @@ class BackupService:
         self.stopping = threading.Event()
         self.wake = threading.Event()
         self.threads = []
+        self.next_cleanup = 0
 
-    def request(self, token, key):
+    def request(self, token, key, note=""):
         if not isinstance(key, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{12,80}", key):
             raise ValueError("需要有效的操作编号")
         with closing(self.store.connect()) as db, db:
@@ -147,12 +152,15 @@ class BackupService:
             ).fetchone()
             if prior:
                 return {"id": prior[0]}
+            history.watch(db, "backup.create")
             point = queued(db, request, int(time.time()), actor["id"])
-            audit(db, self.store, actor, "backup.create", "请求创建完整加密时间点")
+            audit(
+                db, self.store, actor, "backup.create", "请求创建完整加密时间点", note
+            )
         self.wake.set()
         return {"id": point}
 
-    def link(self, token, provider):
+    def link(self, token, provider, note=""):
         with closing(self.store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             actor = require_owner(self.store, db, token)
@@ -164,6 +172,7 @@ class BackupService:
                 "SELECT signature FROM backup_locations WHERE provider=?", (provider,)
             ).fetchone()
             if not previous or previous[0] != fingerprint:
+                history.watch(db, "backup.link")
                 db.execute(
                     """INSERT INTO backup_locations VALUES(?,?,?)
                     ON CONFLICT(provider) DO UPDATE SET signature=excluded.signature,linked=excluded.linked""",
@@ -175,12 +184,17 @@ class BackupService:
                     actor,
                     "backup.link",
                     "连接加密副本位置 " + cloud.PROVIDERS[provider],
+                    note,
                 )
             enqueue_deliveries(db)
         self.wake.set()
         return {"linked": True}
 
-    def status(self, token):
+    def status(self, token, before=0):
+        from .exchange import policy
+
+        if type(before) is not int or not 0 <= before < 2**63:
+            raise ValueError("快照分页游标无效")
         now = int(time.time())
         with closing(self.store.connect()) as db, db:
             db.execute("BEGIN")
@@ -197,10 +211,15 @@ class BackupService:
             }
             points = [
                 dict(r)
-                for r in db.execute("""SELECT id,created,state,revision,bytes,captured,error,
-                 CASE WHEN owner='' THEN 'automatic' ELSE 'manual' END AS kind FROM backup_points
-                 ORDER BY created DESC,rowid DESC LIMIT 50""")
+                for r in db.execute(
+                    """SELECT rowid AS cursor,id,created,state,revision,bytes,captured,error,
+                 CASE WHEN request LIKE 'import:%' THEN 'import' WHEN request LIKE 'protection:%' THEN 'protection' WHEN owner='' THEN 'automatic' ELSE 'manual' END AS kind FROM backup_points
+                 WHERE (?=0 OR rowid<?) ORDER BY rowid DESC LIMIT 51""",
+                    (before, before),
+                )
             ]
+            more = len(points) > 50
+            points = points[:50]
             for p in points:
                 checked = db.execute(
                     "SELECT checked FROM backup_checks WHERE point=?", (p["id"],)
@@ -236,9 +255,11 @@ class BackupService:
                 )
             return {
                 "intervalHours": 12,
+                "policy": policy(db),
                 "nextAutomatic": slot_for(now) + PERIOD,
                 "locations": locations,
                 "points": points,
+                "nextCursor": points[-1]["cursor"] if more else None,
                 "configError": config_error,
             }
 
@@ -257,7 +278,7 @@ class BackupService:
             db.execute("DELETE FROM backup_checks WHERE point=?", (point,))
         self.wake.set()
 
-    def verify(self, token, point):
+    def verify(self, token, point, note=""):
         with closing(self.store.connect()) as db, db:
             require_owner(self.store, db, token)
             row = db.execute(
@@ -274,26 +295,49 @@ class BackupService:
             raise ValueError("恢复出的业务版本不一致")
         with closing(self.store.connect()) as db, db:
             actor = require_owner(self.store, db, token)
+            history.watch(db, "backup.verify")
             db.execute(
                 "INSERT OR REPLACE INTO backup_checks VALUES(?,?)",
                 (point, int(time.time())),
             )
-            audit(db, self.store, actor, "backup.verify", "已完成隔离恢复核验 " + point)
+            audit(
+                db,
+                self.store,
+                actor,
+                "backup.verify",
+                "已完成隔离恢复核验 " + point,
+                note,
+            )
         return {"verified": True}
 
-    def retry(self, token):
+    def retry(self, token, note=""):
         with closing(self.store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             actor = require_owner(self.store, db, token)
+            history.watch(db, "backup.retry")
             db.execute("UPDATE backup_deliveries SET retry=0 WHERE state='failed'")
             db.execute("UPDATE backup_points SET retry=0 WHERE state='failed'")
-            audit(db, self.store, actor, "backup.retry", "请求重新核验未完成的备份")
+            audit(
+                db, self.store, actor, "backup.retry", "请求重新核验未完成的备份", note
+            )
         self.wake.set()
         return {"queued": True}
 
     def capture(self, now=None, *, wait=False):
         with process_lock(self.folder, "capture", wait) as locked:
-            return self._capture(now) if locked else False
+            if not locked:
+                return False
+            captured = self._capture(now)
+            stamp = int(time.time()) if now is None else now
+            if stamp >= self.next_cleanup:
+                from . import exchange
+
+                try:
+                    exchange.cleanup(self, stamp)
+                except (OSError, cloud.TransferError) as error:
+                    logging.error("快照保留策略待重试 (%s)", type(error).__name__)
+                self.next_cleanup = stamp + 300
+            return captured
 
     def _capture(self, now):
         stamp = int(time.time()) if now is None else now

@@ -196,7 +196,11 @@ def add_task(state, p, today):
         clock = time.fromisoformat(clock).strftime("%H:%M")
     except (TypeError, ValueError):
         raise ValueError("执行时间须为有效时刻。") from None
+    from .timeline import routine_selection
+
     title = required_field(p, "title", "工单名称")
+    kind = text_field(p.get("kind") or "日常照护", "任务类型")
+    group = routine_selection(p.get("routineActivity", "auto"), kind, title)
     append_task(
         state,
         resident["id"],
@@ -204,8 +208,9 @@ def add_task(state, p, today):
         required_field(p, "assignee", "责任人"),
         day,
         clock,
-        text_field(p.get("kind") or "日常照护", "任务类型"),
+        kind,
         note=text_field(p.get("note"), "执行说明"),
+        **({"routineActivity": group} if group != "auto" else {}),
     )
     return f"为{resident['name']}派发工单「{title}」"
 

@@ -18,6 +18,15 @@ function bitmap(matrix) {
 }
 
 async function show(ctx, order) {
+  if (
+    !(await ctx.confirmChange({
+      title: '申请渠道收款码',
+      target: order.channel + ' · ' + order.id,
+      fields: [['金额', money(order.amount)]],
+      confirmLabel: '确认申请',
+    }))
+  )
+    return;
   const body = node('div', 'fx-page');
   const message = node('p', 'fx-muted', '正在向机构签约渠道申请收款码…');
   message.setAttribute('role', 'status');

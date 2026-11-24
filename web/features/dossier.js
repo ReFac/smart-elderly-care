@@ -1,3 +1,4 @@
+import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import { previewSummary } from './dossier-summary.js';
 import { pendingDocument, recognizeDocument, reviewReceipt } from './document-ocr.js';
 import {
@@ -412,10 +413,26 @@ function newDocument(ctx, resident) {
               (x) => x.toString(16).padStart(2, '0')
             ).join('')
           : '';
-      if (!(await ctx.command('dossier.document', payload)))
+      const archived = await ctx.command('dossier.document', payload, {
+        title: imageHash ? '存档并提交 DeepSeek OCR' : '存档医疗文书',
+        target: resident.name,
+        fields: [
+          ['文书', kind.value],
+          ['日期', event.value],
+          ['原件', file?.name || '手工补录'],
+          ['来源', source.value],
+          [
+            '处理方式',
+            imageHash ? '先加密保存原图，随后将本页发送至 DeepSeek 识别。' : description.value,
+          ],
+        ],
+        quiet: Boolean(imageHash),
+      });
+      if (archived === false)
         err.textContent =
           document.querySelector('#announcer')?.textContent || '存档失败，请核对后重试。';
-      else if (imageHash) await recognizeDocument(ctx, resident.id, { imageHash });
+      else if (archived && imageHash)
+        await recognizeDocument(ctx, resident.id, { imageHash }, true);
     } catch (error) {
       err.textContent = error.message;
     } finally {
@@ -585,6 +602,9 @@ export function openDossier(ctx, resident) {
     actions.append(btn(ctx, '存档医疗文书', () => newDocument(ctx, resident), 'primary'));
   if (ctx.state.allowedActions.includes('dossier.signSummary'))
     actions.append(btn(ctx, '核对动态档案摘要', () => previewSummary(ctx, resident, showDocument)));
+  const recentChanges = scopedHistoryButton(ctx, 'resident', resident.id);
+  if (recentChanges) actions.append(recentChanges);
+  if (allowed(ctx, 'care')) contents.append(careTimeline(ctx, 'resident', resident.id));
   if (allowed(ctx, 'medical')) contents.append(timeline(ctx, resident));
   if (allowed(ctx, 'residents') || allowed(ctx, 'intake'))
     side.append(

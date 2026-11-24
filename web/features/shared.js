@@ -216,7 +216,7 @@ export function runForm(
     submitLabel,
     onSubmit: (values) => {
       const clean = Object.fromEntries(Object.entries(values).filter(([, value]) => value !== ''));
-      return ctx.command(action, map ? map(clean) : clean);
+      return ctx.command(action, map ? map(clean) : clean, { title });
     }
   });
 }
@@ -302,6 +302,9 @@ export function table(
     count.textContent = subset.length + ' 条';
     const pages = Math.max(1, Math.ceil(subset.length / pageSize));
     currentPage = Math.min(Math.max(0, currentPage), pages - 1);
+    const focus = (ctx.focusIds || []).find((id) => subset.some((row) => row.id === id));
+    if (focus && !panel.isConnected)
+      currentPage = Math.floor(subset.findIndex((row) => row.id === focus) / pageSize);
     const start = currentPage * pageSize;
     pagination.hidden = pages === 1;
     pageInfo.textContent = '第 ' + (currentPage + 1) + ' 页 / 共 ' + pages + ' 页';
@@ -311,7 +314,7 @@ export function table(
       ...subset.slice(start, start + pageSize).map((row) =>
         node(
           'tr',
-          '',
+          focus && row.id === focus ? 'change-focus' : '',
           cols.map((col) => {
             const cell = node('td', col.align === 'end' ? 'fx-end' : '', col.view(row) ?? '—');
             cell.dataset.label = col.label;

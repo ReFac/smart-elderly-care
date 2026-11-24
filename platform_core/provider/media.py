@@ -156,6 +156,27 @@ def invoke(kind, raw, filename, mime, key):
         ) from None
 
 
+def audit_asr(db, actor, task, now, summary):
+    from .. import activity
+
+    data = json.loads(db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0])
+    person = next((t.get("residentId") for t in data["tasks"] if t["id"] == task), "")
+    scope = activity.for_person(data, person)
+    revision = db.execute(
+        "UPDATE workspace SET revision=revision+1 WHERE id=1 RETURNING revision"
+    ).fetchone()[0]
+    activity.write(
+        db,
+        revision,
+        now.isoformat(timespec="seconds"),
+        "media.asr",
+        summary,
+        actor,
+        scope,
+        {},
+    )
+
+
 def execute(
     store,
     token,
@@ -207,6 +228,10 @@ def execute(
         except (OSError, ValueError):
             raise MediaError("平台托管凭据不可用，请联系平台运营方") from None
         call = uuid4().hex
+        if kind == "asr":
+            from .. import history
+
+            history.watch(db, "media.asr")
         db.execute(
             """INSERT INTO media_usage (id,plan,kind,actor,fingerprint,at,state,reserved,original,reference)
           VALUES(?,?,?,?,?,?,'pending',?,?,?)""",
@@ -222,6 +247,8 @@ def execute(
                 reference,
             ),
         )
+        if kind == "asr":
+            audit_asr(db, actor, reference, now, "保存语音原件，提交 DeepSeek 转写")
     try:
         obj = invoke(kind, upload if upload is not None else raw, filename, mime, key)
         result, units, source_id = parse(obj)
@@ -237,22 +264,38 @@ def execute(
     except (ValueError, KeyError, TypeError, OverflowError) as e:
         firm = isinstance(e, MediaError) and not e.uncertain
         with closing(store.connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            if kind == "asr":
+                history.watch(db, "media.asr")
             db.execute(
                 "UPDATE media_usage SET state=? WHERE id=? AND state='pending'",
                 ("failed" if firm else "uncertain", call),
             )
+            if kind == "asr":
+                audit_asr(
+                    db,
+                    actor,
+                    reference,
+                    store.now(),
+                    "登记语音转写失败或待核对回执",
+                )
         raise (
             e
             if isinstance(e, MediaError)
             else MediaError("回复无法完整核对，请平台核实渠道回执", uncertain=True)
         ) from None
     with closing(store.connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        if kind == "asr":
+            history.watch(db, "media.asr")
         if not db.execute(
             """UPDATE media_usage SET state='complete',result=?,charged=?,vendor_id=?
                          WHERE id=? AND state='pending'""",
             (json.dumps(result, ensure_ascii=False), units, source_id, call),
         ).rowcount:
             raise ValueError("识别已进入平台对账")
+        if kind == "asr":
+            audit_asr(db, actor, reference, store.now(), "记录 DeepSeek 语音转写回执")
     with closing(store.connect()) as db:
         authorize(db, token)
     return result

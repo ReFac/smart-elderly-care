@@ -1,3 +1,4 @@
+import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import {
   hasGrant,
   canAct,
@@ -224,6 +225,14 @@ export function profile(ctx, row) {
     );
   if (row.summary) add(summary, section('档案摘要', node('p', '', row.summary)));
   const shortcuts = choose();
+  const changes = scopedHistoryButton(ctx, 'resident', row.id);
+  if (changes) shortcuts.append(changes);
+  if (hasGrant(ctx, 'care'))
+    shortcuts.append(
+      btn(ctx, '照护时间线', () =>
+        ctx.detail(row.name + ' · 照护记录', careTimeline(ctx, 'resident', row.id)),
+      ),
+    );
   if (state.user.routes.includes('dossier'))
     shortcuts.append(btn(ctx, '打开详细档案', () => openDossier(ctx, row), 'primary'));
   if (hasGrant(ctx, 'care', 'clinical'))

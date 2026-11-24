@@ -11,6 +11,7 @@ import re
 from platform_core.secure_storage import OPERATIONAL_ERRORS
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from platform_core.backups import exchange
 from platform_core import access, facility
 from platform_core.store import Conflict, SignedOut, Store, encode
 
@@ -133,14 +134,63 @@ class Handler(BaseHTTPRequestHandler):
         voice = re.fullmatch(r"/api/voice-proposals/([a-f0-9]{32})", path)
         if voice:
             return self.send_json(200, self.store.voice_proposal(token, voice[1]))
+        if path == "/api/backups/download":
+            params = parse_qs(urlsplit(self.path).query, max_num_fields=1)
+            ticket = params.get("ticket", [""])[0]
+            src, size, name = exchange.open_download(self.store.backups, token, ticket)
+            with src:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(size))
+                self.send_header(
+                    "Content-Disposition", 'attachment; filename="' + name + '"'
+                )
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                import shutil
+
+                shutil.copyfileobj(src, self.wfile, 1024 * 1024)
+            return
         if path == "/api/backups":
-            return self.send_json(200, self.store.backups.status(token))
+            params = parse_qs(urlsplit(self.path).query, max_num_fields=1)
+            return self.send_json(
+                200,
+                self.store.backups.status(token, int(params.get("before", ["0"])[0])),
+            )
         if path == "/api/payments/checkout/channels":
             return self.send_json(200, self.store.payment_channels(token))
         match = re.fullmatch(r"/api/payments/checkout/orders/(NH-[a-f0-9]{16})", path)
         if match:
             return self.send_json(200, self.store.payment_order_status(token, match[1]))
         geo = ("campusId", "buildingId", "floorId", "roomId")
+        if path.startswith("/api/care-timeline/"):
+            from platform_core.care import timeline
+
+            match = re.fullmatch(
+                r"/api/care-timeline/(?:(work)|(resident|room)/([a-zA-Z0-9_-]{1,120}))",
+                path,
+            )
+            if not match:
+                raise FileNotFoundError("未找到照护时间线")
+            query = parse_qs(
+                urlsplit(self.path).query, max_num_fields=4, keep_blank_values=True
+            )
+            if any(
+                k not in {"day", "offset", "revision", "q"} or len(v) != 1
+                for k, v in query.items()
+            ):
+                raise ValueError("无效的时间线查询")
+            return self.send_json(
+                200,
+                timeline.read(
+                    self.store,
+                    token,
+                    match[1] or match[2],
+                    match[3] or "",
+                    **{k: v[0] for k, v in query.items()},
+                ),
+            )
         if path == "/api/facility":
             return self.send_json(200, self.store.facility_resource(token, "directory"))
         if path == "/api/care/handover-recipients":
@@ -224,6 +274,23 @@ class Handler(BaseHTTPRequestHandler):
                     token, match[1], int(query["offset"][0]), int(query["revision"][0])
                 ),
             )
+        if path == "/api/history":
+            query = parse_qs(urlsplit(self.path).query, max_num_fields=7)
+            allowed = {"residentId", "roomId", "actorId", "before", "limit", "q", "day"}
+            if query.keys() - allowed or any(
+                len(values) != 1 for values in query.values()
+            ):
+                raise ValueError("变更记录筛选条件无效")
+            filters = {key: values[0] for key, values in query.items()}
+            for key in ("before", "limit"):
+                if key in filters:
+                    filters[key] = int(filters[key])
+            return self.send_json(200, self.store.history(token, **filters))
+        history_point = re.fullmatch(r"/api/history/([1-9][0-9]{0,17})", path)
+        if history_point:
+            return self.send_json(
+                200, self.store.history_change(token, int(history_point[1]))
+            )
         if path == "/api/activity":
             query = parse_qs(urlsplit(self.path).query, max_num_fields=5)
             filters = {k: query[k][0] for k in ("room", "actor") if k in query}
@@ -289,6 +356,19 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, image, mime)
 
     def write_resource(self, path):
+        undo = re.fullmatch(r"/api/history/([1-9][0-9]{0,17})/undo", path)
+        if undo:
+            body = self.read_json(SMALL_BODY)
+            if body.keys() - {"revision", "comment"}:
+                raise ValueError("撤销参数无效")
+            result = self.store.undo_change(
+                self.token(),
+                int(undo[1]),
+                body.get("revision"),
+                comment=body.get("comment", ""),
+            )
+            return self.send_json(200, result)
+
         if path in ("/api/secure-documents/export", "/api/secure-documents/open"):
             from platform_core import protected_docs
 
@@ -306,13 +386,74 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(
                 200, protected_docs.open_package(self.store, token, packet)
             )
+        if path == "/api/backups/imports/preview":
+            if self.headers.get_content_type() != "application/octet-stream":
+                raise InvalidMedia("请选择 .akbak 加密文件")
+            result = exchange.preview_file(
+                self.store.backups,
+                self.token(),
+                self.rfile,
+                int(self.headers.get("Content-Length", "0")),
+            )
+            return self.send_json(200, result)
+        imported = re.fullmatch(r"/api/backups/imports/([a-f0-9]{32})/confirm", path)
+        if imported:
+            body = self.read_json(SMALL_BODY)
+            return self.send_json(
+                200,
+                exchange.confirm_import(
+                    self.store.backups,
+                    self.token(),
+                    imported[1],
+                    body.get("comment", ""),
+                ),
+            )
+        point_op = re.fullmatch(
+            r"/api/backups/points/(ak-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{32})/(preview|apply|export|fetch)",
+            path,
+        )
+        if point_op:
+            body = self.read_json(SMALL_BODY)
+            service = self.store.backups
+            if point_op[2] == "preview":
+                result = exchange.preview_point(service, self.token(), point_op[1])
+            elif point_op[2] == "fetch":
+                result = exchange.fetch_replica(
+                    service,
+                    self.token(),
+                    point_op[1],
+                    body.get("provider"),
+                    body.get("comment", ""),
+                )
+            elif point_op[2] == "apply":
+                result = exchange.apply_point(service, self.token(), point_op[1], body)
+            else:
+                result = exchange.prepare_export(
+                    service, self.token(), point_op[1], body.get("comment", "")
+                )
+            return self.send_json(200, result)
+        if path in ("/api/backups/settings", "/api/backups/locations/unlink"):
+            body = self.read_json(SMALL_BODY)
+            if path.endswith("/settings"):
+                result = exchange.change_policy(self.store.backups, self.token(), body)
+            else:
+                result = exchange.unlink(
+                    self.store.backups,
+                    self.token(),
+                    body.get("provider"),
+                    body.get("comment", ""),
+                )
+            return self.send_json(200, result)
         verify = re.fullmatch(
             r"/api/backups/points/(ak-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{32})/verify", path
         )
         if verify:
-            self.read_json(SMALL_BODY)
+            body = self.read_json(SMALL_BODY)
             return self.send_json(
-                200, self.store.backups.verify(self.token(), verify[1])
+                200,
+                self.store.backups.verify(
+                    self.token(), verify[1], body.get("comment", "")
+                ),
             )
         if path in (
             "/api/backups/points",
@@ -321,11 +462,15 @@ class Handler(BaseHTTPRequestHandler):
         ):
             body = self.read_json(SMALL_BODY)
             if path.endswith("/points"):
-                result = self.store.backups.request(self.token(), body.get("requestId"))
+                result = self.store.backups.request(
+                    self.token(), body.get("requestId"), body.get("comment", "")
+                )
             elif path.endswith("/locations"):
-                result = self.store.backups.link(self.token(), body.get("provider"))
+                result = self.store.backups.link(
+                    self.token(), body.get("provider"), body.get("comment", "")
+                )
             else:
-                result = self.store.backups.retry(self.token())
+                result = self.store.backups.retry(self.token(), body.get("comment", ""))
             return self.send_json(200, result)
         asr = re.fullmatch(r"/api/media/asr/([a-zA-Z0-9_-]{1,100})", path)
         if asr:
@@ -392,7 +537,11 @@ class Handler(BaseHTTPRequestHandler):
             if not self.token():
                 raise SignedOut("请先登录")
             body = self.read_json(SMALL_BODY)
-            if set(body) != {"payload", "revision"}:
+            if not {"payload", "revision"} <= body.keys() or body.keys() - {
+                "payload",
+                "revision",
+                "comment",
+            }:
                 raise ValueError("请提交修订号及区域草稿")
             return self.send_json(
                 200,
@@ -402,6 +551,7 @@ class Handler(BaseHTTPRequestHandler):
                     body["revision"],
                     self.token(),
                     room_bound=True,
+                    comment=body.get("comment", ""),
                 ),
             )
         if path == "/api/commands":
@@ -418,6 +568,7 @@ class Handler(BaseHTTPRequestHandler):
                 body.get("payload"),
                 body.get("revision"),
                 self.token(),
+                comment=body.get("comment", ""),
             )
             if body.get("action") == "account.changePassword":
                 return self.send_json(200, result, self.session_cookie(None))

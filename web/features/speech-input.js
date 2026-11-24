@@ -160,12 +160,22 @@ export function voiceProposal(ctx, tasks, requestId) {
     busy = true;
     send.disabled = task.disabled = file.disabled = record.disabled = submit.disabled = true;
     try {
+      if (
+        !(await ctx.confirmChange({
+          title: '发送录音到 DeepSeek',
+          target: task.selectedOptions[0]?.textContent,
+          fields: [['处理方式', '本段音频将使用机构 ASR 额度转写。']],
+          confirmLabel: '确认发送',
+        }))
+      )
+        return;
       const reply = await fetch('/api/media/asr/' + encodeURIComponent(task.value), {
         method: 'POST',
         headers: { 'Content-Type': 'application/octet-stream', 'X-DeepSeek-Consent': 'yes' },
         body: audio
       });
       const result = await reply.json();
+      await ctx.refreshWorkspace();
       if (!reply.ok) throw new Error(result.error || '识别失败');
       if (!dialog.open) return;
       transcript.value = result.text;
