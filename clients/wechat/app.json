@@ -1,0 +1,9 @@
+{
+  "pages": ["pages/home/index"],
+  "window": {
+    "navigationBarTitleText": "安康医养平台",
+    "navigationBarBackgroundColor": "#172b50",
+    "navigationBarTextStyle": "white"
+  },
+  "sitemapLocation": "sitemap.json"
+}

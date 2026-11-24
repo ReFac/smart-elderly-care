@@ -1,0 +1,65 @@
+.family-role-picker {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #d8e2e6;
+  border-radius: 10px;
+}
+.family-role-picker legend {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.family-role-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.25rem 1rem 0.25rem 0;
+}
+.family-contact-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  border: 1px solid #dce4ea;
+  border-radius: 10px;
+  background: var(--panel, white);
+}
+.family-contact-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.family-contact-card p {
+  margin: 0;
+}
+.family-contact-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.nav-item .family-unread {
+  margin-inline-start: auto;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.family-round-inbox > .fx-profile {
+  padding: 1rem;
+  gap: 1rem;
+}
+.family-round-inbox .fx-toolbar {
+  padding: 0;
+  border: 0;
+}
+.family-round-inbox p {
+  margin: 0;
+}
+
+.dossier-form { display:grid; gap:14px }
+.dossier-form-group { margin:0; min-width:0; border:1px solid var(--line); border-radius:8px; padding:12px }
+.dossier-form-group legend { color:var(--ink); font-weight:650; padding:0 4px }
+.dossier-form-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:10px }
+.dossier-form-grid .field { min-width:0 }
+.dossier-form-group .fx-muted {margin:0 0 7px}

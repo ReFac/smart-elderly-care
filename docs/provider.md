@@ -1,0 +1,53 @@
+# 平台托管的 AI 套餐
+
+机构按套餐使用 DeepSeek 对话、业务建议、长者巡查和经办复核。运营方核验收款后发放模型 token、OCR 页数及 ASR 秒数。[识别工具](media.md)
+
+## 谁可以做什么
+
+| 身份 | 职责 |
+| --- | --- |
+| 平台运营方 | 在平台控制的服务器保管供应商凭据，核实客户付款，按机构数据库发放、停用与对账。 |
+| 机构总管理员 | 查看本院套餐的到期日、额度、已用量和在途预留量，给员工分配 Agent 和业务域权限。 |
+| 获授权员工 | 在任何业务页面使用「询问 AI 助理」。服务端依据其账号、岗位和区域选择可用资料。 |
+| 家属等其他账号 | 使用各自获授权的机构功能。 |
+
+对外销售采用平台托管服务。每个客户对应独立机构数据库，客户使用浏览器、Electron 或手机入口。供应商密钥在平台后端，机构客户端只持有受限的登录会话。将整个后端、数据库管理员权限及密钥交由客户控制的私有化部署，应另行实施平台托管的计量网关。
+
+## 开通与对账
+
+1. 启动机构工作台，确定该机构实际使用的 SQLite 文件。
+2. 平台运维人员可用 `python3 manage_secrets.py set-deepseek` 将供应商凭据写入独立加密运维库，或在服务环境中注入 `DEEPSEEK_API_KEY`。POSIX 主机也可以用 `NH_DEEPSEEK_KEY_FILE` 指定服务账号所有、权限为 0600 的普通文件。如需在本机持久保存凭据，执行 `python3 manage_secrets.py set-deepseek` 写入独立的 SQLCipher 运维密库。旧版平台凭据迁移与独立恢复材料见[加密存储与恢复](storage.md)。文字推理统一使用平台设置的 `deepseek-flash`。
+3. 运营方核实付款及约定的服务期后，在该机构数据库上执行开通命令。下例的额度与日期均为示例，以实际订单为准。
+
+```bash
+python3 manage_plan.py --db .local/workspace.sqlite3 grant --name "机构 AI 套餐" --tokens 100000 --expires 2026-12-31
+python3 manage_plan.py --db .local/workspace.sqlite3 status
+```
+
+额度是当前服务期的 token 总量。有效期内再次执行 `grant` 将调整本期总额并保留原有用量。到期日按上海时区计算，含当日。到期后再次开通产生新服务期，旧用量保留在其原期。额度与供应商账户的人民币余额分别核算。
+
+```bash
+python3 manage_plan.py --db .local/workspace.sqlite3 disable
+python3 manage_plan.py --db .local/workspace.sqlite3 unsettled
+python3 manage_plan.py --db .local/workspace.sqlite3 reconcile --actor ACCOUNT_ID --request REQUEST_ID --tokens CONFIRMED_USAGE
+```
+
+`disable` 停止本期的新请求。并发调用在发送前通过 SQLite 写事务预留额度，服务端在网络等待期间释放数据库写锁。成功响应按供应商返回的 `usage.total_tokens` 结算，未用的预留额度返还。已明确拒绝的请求释放预留。超时、用量缺失和发送阶段意外重启时保留相应额度。运营方可用 `unsettled` 获取账号、请求编号、时间和预留值，再根据供应商账单用 `reconcile` 录入实际用量。
+
+若运营方已结算而供应商随后才返回不同用量，`unsettled` 会以 `late_receipt` 列出原结算、供应商总量及差额。按原请求号用 `reconcile --tokens` 输入对账确认的**实际总量**。系统保留原结算，另存本次调整。补扣差额在核对前预留，退款差额在核对后释放；同一张迟到回执重复送达只产生一次调整。迟到答复不会写入对话或业务建议。
+
+## 会传给模型的内容
+
+对话发送用户主动输入的消息、该账号在当前授权范围内的近期统计和当前会话历史。物资与财务简报使用已授权的品目、数量、金额等指标；照护巡查发送当日计划、完成、待办和逾期数量。临床岗位和定时巡查另行生成临床提示，只使用风险登记和体征待复核的标志、已核对的咳嗽时段统计。普通护工的调用仅使用护理进度，二者独立生成和展示。长者姓名、具体工单的经办人和病历原文不进入巡查提示。语音使用 DeepSeek ASR，文书原件使用单独的 OCR 办理流程。
+
+关键业务操作提交时，同一数据库事务核对数据约束并保存凭据。后台将业务类别和校验项目送至 DeepSeek 撰写复核说明。经办人可以在「最近改动」查看独立的云端回执。历史记录和归档老人保留原版本。用量不足、服务超时或无效回复会显示当前状态；自动巡查和复核留在队列等待可用的云服务。
+
+使用 DeepSeek Chat Completions JSON 输出与非思考模式。截至 2026-11-24，官方 `deepseek-flash` 对应 DeepSeek-V4.1-Flash-1017。平台在聊天请求中显式传入该别名，后续版本以供应商模型表为准。[官方模型表](https://api-docs.deepseek.com/quick_start/pricing/) · [Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) · [JSON 输出](https://api-docs.deepseek.com/guides/json_mode/) · [思考模式开关](https://api-docs.deepseek.com/guides/thinking_mode/)
+
+## 验收
+
+```bash
+python3 -W error::ResourceWarning -m unittest discover -s tests -p test_provider.py -v
+```
+
+模拟供应商响应可重复检验云端开通、请求最小化、并发限额、幂等、撤权、供应商异常、续期和对账。真实凭据联调应使用虚构任务与平台批准的预算。供应商密钥、原始请求、数据库及本地环境文件由部署端保管。

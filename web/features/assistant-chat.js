@@ -1,0 +1,579 @@
+import { el, icon } from '../lib/ui.js';
+import { node } from './shared.js';
+import { holdToSpeak, voiceServiceReason } from './agent-voice.js';
+import { openPriorReports } from './assistants.js';
+import { openAssistantAction } from './assistant-actions.js';
+
+const path = '/api/assistant/chat';
+const dayLabel = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  timeZone: 'Asia/Shanghai',
+});
+
+function control(label, glyph, className, onClick, iconOnly = false) {
+  const button = el('button', className);
+  button.type = 'button';
+  button.append(icon(glyph, iconOnly ? 17 : 16));
+  if (iconOnly) {
+    button.title = label;
+    button.setAttribute('aria-label', label);
+  } else button.append(document.createTextNode(label));
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function mark(size = 18) {
+  return node('span', 'assistant-mark', [icon('spark', size)]);
+}
+
+function messageBody(text) {
+  const block = el('div', 'assistant-message-text');
+  // Allow light typographical emphasis. The model's output always enters the DOM as text.
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const heading = /^#{1,4}\s+/.test(line);
+    const bullet = /^[-*]\s+/.test(line);
+    const part = el(heading ? 'h3' : 'p', bullet ? 'assistant-bullet' : '');
+    for (const piece of line.replace(/^(?:#{1,4}|[-*])\s+/, '').split(/(\*\*[^*]+\*\*)/))
+      part.append(
+        piece.startsWith('**') && piece.endsWith('**')
+          ? el('strong', '', piece.slice(2, -2))
+          : document.createTextNode(piece),
+      );
+    block.append(part);
+  }
+  return block;
+}
+
+function actorSignature(ctx, scoped) {
+  const membership =
+    scoped || ctx.state.user.facilityScope
+      ? (ctx.state.residents || []).map((r) => [r.id, r.bedId, r.status])
+      : null;
+  return JSON.stringify([ctx.state.user, ctx.state.uiSettings.hiddenRoutes, membership]);
+}
+
+export function chatLauncher(open) {
+  const launch = control('询问 AI 助理', 'spark', 'assistant-launch', open);
+  launch.id = 'assistant-launch';
+  launch.setAttribute('aria-haspopup', 'dialog');
+  launch.setAttribute('aria-controls', 'assistant-chat');
+  launch.setAttribute('aria-expanded', String(Boolean(current && !current.panel.hidden)));
+  return launch;
+}
+
+let current;
+export function clearChat() {
+  current?.destroy();
+  current = null;
+}
+export function checkChatUser(ctx) {
+  if (current && current.actor !== actorSignature(ctx, current.area)) clearChat();
+}
+
+// The panel lives outside the page renderer so changing business tabs does not erase a draft.
+export function toggleChat(getContext) {
+  if (current && !current.panel.hidden) current.hide();
+  else openChat(getContext);
+}
+
+export function openChat(getContext, place = null) {
+  const ctx = getContext();
+  const region = Object.fromEntries(
+    ['campusId', 'buildingId', 'floorId', 'roomId']
+      .filter((key) => place?.[key])
+      .map((key) => [key, place[key]]),
+  );
+  const area = new URLSearchParams(region).toString();
+  const actor = actorSignature(ctx, area);
+  if (current && (current.actor !== actor || current.area !== area)) clearChat();
+  if (!current) current = buildChat(getContext, actor, area, region, place?.label || '');
+  current.show();
+}
+
+function buildChat(getContext, actor, area, region, label) {
+  const ctx = getContext();
+  const panel = el('aside', 'assistant-drawer');
+  panel.id = 'assistant-chat';
+  panel.hidden = true;
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-labelledby', 'assistant-name');
+  const name = el('h2', '', 'AI 助理');
+  name.id = 'assistant-name';
+  const scope = el('span', 'assistant-scope', label || ctx.state.uiSettings.institutionName);
+  const titles = node('div', 'assistant-titles', [name, scope]);
+  if (label) {
+    scope.title = label;
+    const resetScope = control('返回机构对话', 'undo', 'assistant-exit-scope', () =>
+      openChat(getContext),
+    );
+    titles.append(resetScope);
+  }
+  const recents = control(
+    '历史业务简报',
+    'history',
+    'assistant-icon-control',
+    () => openPriorReports(getContext()),
+    true,
+  );
+  recents.hidden = !(ctx.state.agentRuns?.length || ctx.state.suggestions?.length);
+  const reset = control('新对话', 'plus', 'assistant-new', () => restart());
+  const close = control('收起助理', 'close', 'assistant-icon-control', hide, true);
+  const header = node('header', 'assistant-header', [mark(), titles, recents, reset, close]);
+  const log = el('section', 'assistant-log');
+  log.setAttribute('role', 'log');
+  log.setAttribute('aria-label', '对话记录');
+  log.setAttribute('aria-live', 'polite');
+  log.setAttribute('aria-relevant', 'additions');
+  const composer = el('form', 'assistant-composer');
+  composer.setAttribute('aria-label', '给助理发消息');
+  const input = el('textarea', 'assistant-input');
+  input.rows = 2;
+  input.maxLength = 12000;
+  input.placeholder = '问点什么，或按住下方说话…';
+  input.setAttribute('aria-label', '消息内容');
+  const send = control('发送', 'send', 'assistant-send', () => {}, true);
+  send.type = 'submit';
+  const note = el('p', 'assistant-status');
+  note.setAttribute('role', 'status');
+  const error = el('div', 'assistant-error');
+  error.setAttribute('role', 'alert');
+  const auto = el('input');
+  auto.type = 'checkbox';
+  const pref = 'assistant:auto-send:' + ctx.state.user.id;
+  try {
+    auto.checked = localStorage.getItem(pref) === 'yes';
+  } catch {}
+  auto.addEventListener('change', () => {
+    try {
+      localStorage.setItem(pref, auto.checked ? 'yes' : 'no');
+    } catch {}
+  });
+  const autoLabel = node('label', 'assistant-auto', [auto, '语音转写后自动发送']);
+  const keys = el('span', 'assistant-enter-hint', 'Enter 发送');
+  let messages = [],
+    scopeKey = '',
+    generation = '',
+    loaded = false,
+    waiting = false,
+    sending = false;
+  let voicePhase = 'idle',
+    request,
+    retry,
+    lastFocused,
+    destroyed = false;
+  const requestURL = path + (area ? '?' + area : '');
+  let voice;
+  async function json(url, options) {
+    const response = await fetch(url, { cache: 'no-store', ...options });
+    const data = await response.json();
+    if (response.status === 401) {
+      await getContext().refreshWorkspace();
+      throw new Error('登录已过期，请重新登录。');
+    }
+    if (!response.ok)
+      throw Object.assign(new Error(data.error || '暂时无法连接助理，请重试。'), {
+        status: response.status,
+      });
+    return data;
+  }
+  function voiceService() {
+    const state = getContext().state;
+    return state.assistantVoice ?? state.agentCapabilities?.voiceInput;
+  }
+  voice = holdToSpeak({
+    available: () => voiceServiceReason(voiceService()),
+    onState(phase, text = '') {
+      voicePhase = phase;
+      note.textContent = text;
+      sync();
+    },
+    upload: (blob, signal) =>
+      json(voiceService().path + (area ? '?' + area : ''), {
+        method: 'POST',
+        signal,
+        headers: { 'Content-Type': 'application/octet-stream', 'X-DeepSeek-Consent': 'yes' },
+        body: blob,
+      }),
+    onText(result) {
+      if (destroyed || panel.hidden || !result.text) return;
+      input.value = [input.value.trim(), result.text.trim()].filter(Boolean).join('\n');
+      adjustInput();
+      if (input.value.length > input.maxLength) {
+        note.textContent = '转写内容较长，请拆分后发送。';
+      } else if (auto.checked) composer.requestSubmit();
+      else {
+        note.textContent = '已转写，可以编辑后发送。';
+        input.focus();
+      }
+    },
+  });
+  const tools = node('div', 'assistant-compose-tools', [voice.control, send]);
+  const composeBox = node('div', 'assistant-compose-box', [input, tools]);
+  composer.append(
+    error,
+    note,
+    composeBox,
+    node('div', 'assistant-composer-foot', [autoLabel, keys]),
+  );
+  panel.append(header, log, composer);
+  document.body.append(panel);
+
+  function sync() {
+    const blocked = !loaded || waiting || sending;
+    input.disabled = !loaded || waiting;
+    input.readOnly = sending;
+    send.disabled =
+      blocked ||
+      !input.value.trim() ||
+      input.value.length > input.maxLength ||
+      voicePhase !== 'idle';
+    reset.disabled = !loaded || waiting || sending || voicePhase !== 'idle' || !messages.length;
+    if (voice) voice.control.disabled = blocked;
+  }
+  function adjustInput() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(128, Math.max(52, input.scrollHeight)) + 'px';
+    sync();
+  }
+  function emptyState() {
+    const personal = getContext().state.user.kind === 'family';
+    const welcome = node('div', 'assistant-welcome', [
+      mark(28),
+      el('h3', '', '有什么想了解的？'),
+      el(
+        'p',
+        '',
+        label
+          ? '可以从' + label + '的近况问起。'
+          : personal
+            ? '可以问我怎样查看照护消息和院内服务。'
+            : '可以从院里的近况问起，也可以让我帮您找到办理入口。',
+      ),
+    ]);
+    const examples = personal
+      ? [
+          ['heart', '在哪里查看照护消息？'],
+          ['building', '在哪里查看院内环境？'],
+        ]
+      : label
+        ? [
+            ['pulse', '这里过去24小时有哪些变化？'],
+            ['care', '有什么照护事项需要跟进？'],
+          ]
+        : [['pulse', '今天养老院情况怎么样？']];
+    if (!personal && !label && getContext().available('inventory'))
+      examples.push(['box', '今天的护理用具状况如何？']);
+    if (!personal && !label && getContext().available('intake'))
+      examples.push(['intake', '在哪里办理老人入住？']);
+    const suggestions = el('div', 'assistant-starters');
+    for (const [glyph, text] of examples) {
+      const b = control(text, glyph, 'assistant-starter', () => transmit(text));
+      b.append(icon('chevron', 14));
+      suggestions.append(b);
+    }
+    welcome.append(suggestions);
+    return welcome;
+  }
+  function row(item) {
+    const mine = item.role === 'user';
+    const body = node('div', 'assistant-turn-body', [messageBody(item.content)]);
+    if (item.action && !mine) {
+      const action = item.action;
+      const trigger = control(
+        action.kind === 'navigate'
+          ? '前往' + action.title
+          : action.kind === 'notice'
+            ? '核对通知'
+            : '核对工单',
+        action.kind === 'navigate' ? 'location' : 'file',
+        'assistant-action',
+        () => perform(action),
+      );
+      body.append(trigger);
+    }
+    return node(
+      'article',
+      'assistant-turn ' + (mine ? 'from-user' : 'from-assistant'),
+      mine ? [body] : [mark(14), body],
+    );
+  }
+  function draw(scroll = 'preserve') {
+    const wasAt = log.scrollTop;
+    const following = log.scrollHeight - log.clientHeight - wasAt < 32;
+    const turns = document.createDocumentFragment();
+    let previousDay = '';
+    for (const message of messages) {
+      const date = new Date(message.at);
+      const day = Number.isFinite(date.getTime()) ? dayLabel.format(date) : '';
+      if (day && day !== previousDay) turns.append(el('p', 'assistant-log-day', day));
+      previousDay = day;
+      turns.append(row(message));
+    }
+    log.replaceChildren(turns);
+    if (!messages.length && loaded && !waiting && !sending) log.append(emptyState());
+    if (sending) {
+      log.append(row({ role: 'user', content: retry.text }));
+      const pending = node('div', 'assistant-waiting', [mark(14), '正在整理回答…']);
+      log.append(pending);
+    }
+    if (waiting && !messages.length) log.append(el('p', 'assistant-loading', '正在读取对话…'));
+    if (scroll === 'start') log.scrollTop = 0;
+    else if (following && scroll !== 'preserve') {
+      const last = log.lastElementChild;
+      const padding = parseFloat(getComputedStyle(log).paddingTop) || 0;
+      if (
+        scroll === 'answer' &&
+        last?.classList.contains('from-assistant') &&
+        last.offsetHeight > log.clientHeight - 2 * padding
+      ) {
+        const question = last.previousElementSibling;
+        const first =
+          question?.classList.contains('from-user') &&
+          question.offsetHeight < Math.min(70, log.clientHeight / 5)
+            ? question
+            : last;
+        log.scrollTop +=
+          first.getBoundingClientRect().top - log.getBoundingClientRect().top - padding;
+      } else log.scrollTop = log.scrollHeight;
+    } else log.scrollTop = wasAt;
+    sync();
+  }
+  function update(result) {
+    messages = result.messages;
+    scopeKey = result.scopeKey;
+    generation = result.generation || '';
+    loaded = true;
+  }
+  function problem(message, callback, label = '重试') {
+    error.replaceChildren(el('span', '', message));
+    if (callback) error.append(control(label, 'undo', 'assistant-retry', callback));
+  }
+  async function load() {
+    waiting = true;
+    const before = messages.at(-1);
+    error.replaceChildren();
+    draw();
+    request = new AbortController();
+    try {
+      const result = await json(requestURL, { signal: request.signal });
+      if (!destroyed) update(result);
+    } catch (e) {
+      if (!destroyed) {
+        loaded = false;
+        messages = [];
+        problem(e.message, load);
+      }
+    } finally {
+      if (!destroyed) {
+        waiting = false;
+        const latest = messages.at(-1);
+        const changed = !before || before.at !== latest?.at || before.content !== latest?.content;
+        draw(changed ? 'answer' : 'preserve');
+        if (loaded && !panel.hidden && document.activeElement === close)
+          input.focus({ preventScroll: true });
+      }
+    }
+  }
+  async function reloadConflict(message) {
+    loaded = false;
+    messages = [];
+    scopeKey = '';
+    retry = null;
+    await load();
+    if (!destroyed && loaded) problem(message);
+  }
+  async function restart() {
+    if (reset.disabled) return;
+    waiting = true;
+    error.replaceChildren();
+    draw();
+    request = new AbortController();
+    try {
+      const result = await json(path + '/reset', {
+        method: 'POST',
+        signal: request.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scopeKey, generation, region }),
+      });
+      if (destroyed) return;
+      update(result);
+      retry = null;
+      input.value = '';
+      note.textContent = '';
+    } catch (e) {
+      if (destroyed) return;
+      if (e.status === 409) await reloadConflict('此对话已更新，已显示最新消息。');
+      else problem(e.message);
+    } finally {
+      if (!destroyed) {
+        waiting = false;
+        draw(messages.length ? 'preserve' : 'start');
+        adjustInput();
+        input.focus();
+      }
+    }
+  }
+  function hide() {
+    panel.hidden = true;
+    voice.cancel();
+    const launch = document.getElementById('assistant-launch');
+    launch?.setAttribute('aria-expanded', 'false');
+    (lastFocused?.isConnected ? lastFocused : launch)?.focus({ preventScroll: true });
+  }
+  async function perform(action) {
+    try {
+      if (!(await getContext().refreshWorkspace()) || destroyed || panel.hidden) return;
+      hide();
+      await openAssistantAction(getContext(), action);
+    } catch (e) {
+      if (!destroyed) getContext().toast(e.message);
+    }
+  }
+  async function transmit(raw) {
+    const text = raw.trim();
+    if (
+      !loaded ||
+      waiting ||
+      sending ||
+      voicePhase !== 'idle' ||
+      !text ||
+      text.length > input.maxLength
+    )
+      return;
+    const page = location.hash.slice(1) || 'overview';
+    if (!retry || retry.text !== text || retry.page !== page)
+      retry = { text, page, id: crypto.randomUUID() };
+    sending = true;
+    input.value = '';
+    note.textContent = '';
+    error.replaceChildren();
+    adjustInput();
+    draw('pending');
+    request = new AbortController();
+    let action,
+      received = false;
+    try {
+      const result = await json(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: request.signal,
+        body: JSON.stringify({
+          text,
+          requestId: retry.id,
+          page: retry.page,
+          region,
+          scopeKey,
+          generation,
+        }),
+      });
+      if (destroyed) return;
+      update(result);
+      received = true;
+      if (messages.at(-2)?.content === text && page === (location.hash.slice(1) || 'overview'))
+        action = messages.at(-1)?.action;
+      retry = null;
+    } catch (e) {
+      if (destroyed) return;
+      if (!input.value) input.value = text;
+      if (e.status === 409) {
+        sending = false;
+        await reloadConflict('对话或权限已变化，已重新读取，请核对后发送。');
+      } else if (e.status === 403) {
+        loaded = false;
+        scopeKey = '';
+        messages = [];
+        retry = null;
+        problem(e.message, load, '重新读取');
+      } else {
+        if (e.status === 503) retry = null;
+        try {
+          const latest = await json(requestURL, { signal: request.signal });
+          if (destroyed) return;
+          if (latest.scopeKey !== scopeKey) {
+            loaded = false;
+            messages = [];
+            retry = null;
+            problem('当前可查看的区域已变化，请重新打开对话。', load, '重新读取');
+            return;
+          }
+          update(latest);
+        } catch {
+          /* Keep the draft when reconnecting is also unavailable. */
+        }
+        if (!destroyed) problem(e.message);
+      }
+    } finally {
+      if (!destroyed) {
+        sending = false;
+        draw(received ? 'answer' : 'preserve');
+        adjustInput();
+      }
+    }
+    if (!destroyed && !panel.hidden && action && !document.querySelector('dialog[open]'))
+      perform(action);
+  }
+  composer.addEventListener('submit', (event) => {
+    event.preventDefault();
+    transmit(input.value);
+  });
+  input.addEventListener('input', adjustInput);
+  let composing = false;
+  input.addEventListener('compositionstart', () => {
+    composing = true;
+  });
+  input.addEventListener('compositionend', () => {
+    composing = false;
+  });
+  input.addEventListener('keydown', (event) => {
+    if (
+      event.key !== 'Enter' ||
+      event.shiftKey ||
+      event.isComposing ||
+      composing ||
+      event.keyCode === 229
+    )
+      return;
+    event.preventDefault();
+    if (!event.repeat && !send.disabled) composer.requestSubmit();
+  });
+  panel.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !event.isComposing && !composing) {
+      event.preventDefault();
+      event.stopPropagation();
+      hide();
+    }
+  });
+  function loseWindow() {
+    if (voicePhase === 'starting' || voicePhase === 'recording') voice.cancel();
+  }
+  window.addEventListener('blur', loseWindow);
+  return {
+    panel,
+    actor,
+    area,
+    hide,
+    show() {
+      if (!panel.hidden) {
+        if (!input.disabled) input.focus();
+        return;
+      }
+      lastFocused = document.activeElement;
+      panel.hidden = false;
+      document.getElementById('assistant-launch')?.setAttribute('aria-expanded', 'true');
+      if (!sending && !waiting) load();
+      if (loaded && !waiting) input.focus({ preventScroll: true });
+      else close.focus({ preventScroll: true });
+    },
+    destroy() {
+      destroyed = true;
+      voice.cancel();
+      request?.abort();
+      window.removeEventListener('blur', loseWindow);
+      panel.remove();
+      document.getElementById('assistant-launch')?.setAttribute('aria-expanded', 'false');
+    },
+  };
+}

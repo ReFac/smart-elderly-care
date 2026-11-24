@@ -1,0 +1,13 @@
+{
+  "name": "yihe-care-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "package": "node package.cjs"
+  },
+  "devDependencies": {
+    "electron": "45.4.1"
+  }
+}

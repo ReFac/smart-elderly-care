@@ -1,355 +1,188 @@
-# 智能养老管理项目（Smart Elderly Care）
+# 安康医养平台 · 安康家园
 
-> **给后续 SOTA / 高级模型的接手说明**  
-> 本文整理截至 `33728f9`（2026-11-23）的架构、进度、预留接口与替换点。  
-> 仓库：[ReFac/smart-elderly-care](https://github.com/ReFac/smart-elderly-care)  
-> 临床声学 / 预诊专项契约：[`docs/clinical-intel-sota.md`](docs/clinical-intel-sota.md)
+打开运营总览或任一业务页面，点右上角「询问 AI 助理」即可了解院内近况、追问库存或定位入住入口。对话使用 DeepSeek Flash，服务端根据登录账号的岗位和分院取数。办理入住、照护、用药、物资、财务和排班的表单均可直接使用。演示库包含虚构的 3 个照护区、24 张床和 19 位在住长者。
 
-本地可运行的养老院 **一体化主控台**：运营业务 CRUD、家属/员工移动端、Python Agent Runtime、临床智能（声学异常 + AI 预诊）接口预留、右侧 Codex 风格 Agent、高权限密码确认。
+[全局对话实拍](docs/previews/assistant-chat.jpg) · [护理用具工单审核](docs/previews/assistant-work-order.jpg) · [两个分院的 101 房](docs/previews/campus-rooms.jpg) · [运营总览](docs/previews/operations.jpg)
 
----
+## 启动与验证
 
-## 1. 一句话目标
-
-用 **模块化、可热配、可替换模型** 的方式，把养老院运营、照护、医护、家属透明、床头感知与 Agent 编排放在同一产品里；生产级 ASR / 咳嗽检测 / 医学 LLM 等 **SOTA 以独立服务接入**，不改主业务状态机。
-
----
-
-## 2. 基础架构
-
-### 2.1 拓扑
-
-```text
-┌─────────────────┐   ┌──────────────────┐   ┌────────────────────┐
-│ Admin :5173     │   │ Family H5 :5174  │   │ Desktop (Electron) │
-│ Vue3 + EP       │   │ 手机/微信优先     │   │ 壳加载 Admin       │
-│ 右侧 Agent Rail │   │ 导览公开可免登    │   └────────────────────┘
-└────────┬────────┘   └────────┬─────────┘
-         │ /api proxy          │ /api proxy
-         ▼                     ▼
-┌──────────────────────────────────────────┐
-│ NestJS API :3000/api                     │
-│ Prisma · SQLite(dev) / Postgres(opt)     │
-│ control · portal · tours · clinical · …  │
-└───────────────────┬──────────────────────┘
-                    │ AGENT_BASE_URL
-                    ▼
-┌──────────────────────────────────────────┐
-│ Python Agent Runtime :8100               │
-│ Harness · MCP · Hook · Skill · DeepSeek  │
-└──────────────────────────────────────────┘
-         ▲
-         │ 可选 SOTA
-┌────────┴─────────┐  ┌────────────────────┐
-│ Acoustic SOTA    │  │ Medical / LLM SOTA │
-│ /v1/acoustic/…   │  │ 预诊 JSON 契约     │
-└──────────────────┘  └────────────────────┘
-```
-
-### 2.2 Monorepo 布局
-
-```text
-nursing-home/
-├── apps/
-│   ├── api/          # NestJS 业务 API + Prisma
-│   ├── admin/        # 管理主控台（2026 UI + Agent 侧栏）
-│   ├── family/       # 用户/家属/护理员 H5（移动 + 微信公众号适配）
-│   ├── agent/        # Python Agent Runtime
-│   └── desktop/      # Electron 壳
-├── packages/
-│   └── shared/       # FEATURE_REGISTRY、枚举、模糊搜索
-├── docs/
-│   └── clinical-intel-sota.md   # 声学/预诊 SOTA 接入全文
-├── pnpm-workspace.yaml
-└── package.json      # dev / db:setup 脚本
-```
-
-### 2.3 技术栈
-
-| 层 | 技术 |
-|---|---|
-| 包管理 | pnpm workspace（`@nh/api` `@nh/admin` `@nh/family` `@nh/shared` …） |
-| API | NestJS 10、Prisma 6、JWT、class-validator |
-| DB | 默认 SQLite `apps/api/prisma/dev.db`；可选 Postgres + Redis（`docker-compose.yml`） |
-| Admin | Vue 3、Vite 6、Element Plus、Pinia、Vue Router |
-| Family | Vue 3 移动 H5（Chrome / Safari / 微信内置浏览器） |
-| Agent | FastAPI、Harness/MCP/Skill、可选 DeepSeek（OpenAI 兼容） |
-| 共享 | `packages/shared` 功能注册表，驱动侧栏与模糊搜索 |
-
-### 2.4 端口与账号
-
-| 服务 | 地址 |
-|---|---|
-| API | http://localhost:3000/api |
-| Admin | http://localhost:5173 |
-| Family | http://localhost:5174 |
-| Agent | http://localhost:8100 |
-
-演示密码均为 **`123456`**：
-
-| 账号 | 角色 | 入口 |
-|---|---|---|
-| `admin` | 主管理员 | Admin |
-| `nurse` | 护士 | Admin |
-| `caregiver` | 护理员 | Family 照护 |
-| `finance` | 财务 | Admin |
-| `family` | 家属 | Family 账单/餐食/导览 |
-
-种子：216 床、多栋楼、演示老人、当日照护、账单、食谱、导览、临床提示词与灵敏度默认配置。
-
----
-
-## 3. 快速启动
+Web 工作台需要 Python 3.10 或更高版本、SQLCipher、系统时区数据和现代浏览器。服务端使用加密 SQLite，前端使用浏览器原生模块。文书识别和语音转写使用 DeepSeek 官方 OCR / ASR，渠道验签需安装 cryptography。Electron 桌面外壳的安装、打包和机构 HTTPS 连接见[客户端说明](docs/clients.md)。当前优先验收电脑工作台。
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-cd nursing-home
-pnpm install
-pnpm --filter @nh/shared build
-pnpm db:setup          # prisma generate + db push + seed
-pnpm dev               # API :3000 + Admin :5173 + Family :5174
-
-# 可选
-pnpm dev:agent         # Agent :8100
-pnpm dev:desktop       # Electron（需先有 Admin）
+python3 -m pip install -r requirements-storage.txt
+python3 server.py
 ```
 
-代理推送 GitHub 若超时，可按环境使用本地 HTTP 代理（本机常见 `http://127.0.0.1:7897`）。
+打开[本地工作台](http://127.0.0.1:8765)，使用首位总管理员账号 `owner` 登录。在交互终端首次创建机构库时按提示设置口令，自动部署可在首次启动前注入 `NH_OWNER_PASSWORD`。已有账号和口令可在升级后继续使用。员工和顾客从登录页通过已登记的邮箱或手机设置自己的密码。[账号目录、首次绑定和验证码投递配置](docs/access.md)
 
----
-
-## 4. 进度总览（成熟度）
-
-图例：`✅` 可用 · `◐` Stub/预留可演示 · `⬜` 未做
-
-| 域 | 状态 | 说明 |
-|---|---|---|
-| 认证 JWT / 角色 | ✅ | 登录、`/auth/me`、高权限 `POST /auth/reauth` |
-| 组织床位楼栋 | ✅ | 216 床种子、床态视图 |
-| 老人档案 | ✅ | 建档、健康、合同、调床、情绪记录 |
-| 照护计划/打卡/工单/探视 | ✅ | 核心流程可跑 |
-| 收费账单/缴费 | ✅ | 含家属透明账单 |
-| 食堂餐食 | ✅ | 周食谱、忌口 |
-| 医护体征/药品/医嘱等 | ✅ | CRUD 脚手架，可深化 |
-| 长护险 | ✅ | 评估/留痕/对账导出脚手架 |
-| 物资 / 人事 / 安防 / 报表 | ✅ | 模块 + CRUD |
-| 功能注册表 + 模糊搜索 | ✅ | `@nh/shared` + `/api/extensions/search` |
-| 学习与噪声 | ✅ | 人工修正 → 噪声样本；对接 Agent feedback |
-| Control Plane | ✅ | 变量 / 服务 / API 元数据热配 |
-| Portal 用户/员工 | ✅ | `/portal/user/home`、`/portal/employee/home` |
-| 3D/全景房态导览 | ✅ | 管理端 + 公开 `/tours/public`；简易拖拽舞台 |
-| Family 移动/微信适配 | ✅ | viewport、safe-area、微信 UA、导览 Tab |
-| 临床智能（咳嗽/碰撞/预诊） | ◐ | 完整 API + stub 分类/预诊；**等 SOTA** |
-| Admin 2026 UI + Agent 侧栏 | ✅ | Codex 风格；高权限甄别框 + 密码 |
-| OCR / 支付 / GPS / 硬件 webhook | ◐ | 接口占位 |
-| 真麦克风 SDK / 微信实发 / 小程序 | ⬜ | 通道适配器未接 |
-| 生产医学 LLM 严格 JSON | ⬜ | 现用 stub 组装 + PromptTemplate |
-
-### 提交里程碑（main）
-
-| Commit | 内容 |
-|---|---|
-| `9bda45a` | MVP：档案/床位/照护/账单/餐食 |
-| `d1f9b4d` | 九大业务域脚手架 CRUD |
-| `b4fc58b` | Python Agent Runtime |
-| `0cf8df4` | 统一主控台、模糊搜索、噪声学习 |
-| `f5f6281` | Control Plane、Portal、3D Tour |
-| `bacf0e2` | 临床智能接口预留 + SOTA 文档 |
-| `33728f9` | 管理端 UI 重构 + 右侧 Agent + 高权限确认 |
-
----
-
-## 5. API 模块地图（Nest）
-
-前缀均为 `/api`。源码：`apps/api/src/<module>/`。
-
-| 前缀 | 职责 |
-|---|---|
-| `/auth` | 登录、me、**reauth（高权限）** |
-| `/org` | 楼栋/楼层/房间/床位 |
-| `/elders` | 老人档案 |
-| `/care` | 照护 |
-| `/billing` `/meals` | 财务、食堂 |
-| `/medical` `/ltc` | 医护、长护险 |
-| `/inventory` `/hr` `/security` `/reports` | 后勤、人事、安防、报表 |
-| `/dashboard` `/settings` | 看板、设置 |
-| `/ai` `/payment` `/gps` `/upload` | 预留 / 上传 |
-| `/extensions` | 功能目录、动态注册、**learning** |
-| `/agent` | 桥接 Python Agent；**`/agent/console/chat|execute`** |
-| `/control` | 变量、服务、API 元数据总控 |
-| `/portal` | 用户端 / 员工端聚合 |
-| `/tours` | 3D/全景导览（含 public） |
-| `/clinical` | 声学事件、预诊、推送、提示词、敏捷度 |
-
-发现契约（无需业务背景）：
-
-- `GET /api/clinical/contract`
-- `GET /api/agent/manifest`（需 Agent 进程）
-- Admin 功能树：`packages/shared/src/registry.ts`
-
----
-
-## 6. 关键设计要点（接手必读）
-
-### 6.1 模块化与敏捷
-
-- **一域一 Nest Module**，避免跨域大爆炸改 Prisma。
-- 运行参数优先进 **`SystemVariable` / `AcousticSensitivityConfig` / `PromptTemplate`**，少改代码。
-- 新功能登记 **`FEATURE_REGISTRY`**，侧栏与搜索自动出现。
-- 新模型 = **新 HTTP 服务 + 填 URL**（如 `inferenceBaseUrl`），主流程只认统一 JSON。
-
-### 6.2 Control Plane
-
-管理端路径：`/control-plane`  
-API：`/api/control/snapshot|variables|services|apis`  
-可改：品牌/Agent/家属/移动/临床等运行变量；服务启停与探测；API 元数据启停。
-
-### 6.3 临床智能（SOTA 主替换面）
-
-管理端：`/clinical-intel`  
-文档：[docs/clinical-intel-sota.md](docs/clinical-intel-sota.md)
-
-流水线：
-
-1. 麦克风网关 → `POST /api/clinical/events/ingest`
-2. 若配置了 `inferenceBaseUrl` → `POST {url}/v1/acoustic/classify`，否则 stub
-3. 病理事件 → `ClinicalFinding` + 更新 `ElderHealth.clinicalNotes`
-4. 默认 **院内** `ClinicalPush` + `Alert`；家属须 `approve-family`
-5. `POST /api/clinical/prediagnosis/generate` 一键预诊（提示词已入库）
-6. 误报标注 → `/clinical/events/:id/label` → 建议转发 learning / agent feedback
-
-**Stub 行为（勿当生产模型）**：急促咳嗽 / 硬碰撞 → pathological；软碰撞默认忽略。
-
-### 6.4 Admin Agent 侧栏（类 Codex）
-
-- UI：`apps/admin/src/components/AgentRail.vue`
-- 对话：`POST /api/agent/console/chat`
-- 高权限执行：`POST /api/agent/console/execute`
-- 流程：Agent 产出 `ProposedAction`（含 `changes[]` before/after）→ **甄别框** → **每次管理员密码**（`/auth/reauth` 发 120s elevate token）→ 执行
-- 试指令：「调整咳嗽灵敏度」「停用 agent 服务」「打开临床智能」
-
-### 6.5 Python Agent Runtime
-
-详见 [`apps/agent/README.md`](apps/agent/README.md)。
-
-能力摘要：感知融合、语音照护、会议纪要、床位记忆、分级路由、告警反馈噪声、Typeless、健康自动草稿、`acoustic_anomaly` skill（转发 Nest clinical）。
-
-策略：`apps/agent/policies/runtime.yaml`  
-环境：`apps/agent/.env.example`（`LLM_API_KEY`、`NEST_TOKEN` 等）
-
-### 6.6 家属 / 员工端
-
-- 手机优先；Safari / Chrome；微信 UA 增加底部安全区。
-- Tab：首页 / **导览** / 账单 / 餐食 / 照护。
-- `/tour` 可走公开导览 API；业务页需登录。
-- 聚合：`/api/portal/user/home`、`/employee/home`。
-
----
-
-## 7. 数据模型（与 SOTA 相关的表）
-
-Prisma：`apps/api/prisma/schema.prisma`
-
-| 模型 | 用途 |
-|---|---|
-| `AcousticDevice` | 床头麦登记 |
-| `AcousticEvent` | 咳嗽/碰撞等事件 + modelId/version |
-| `ClinicalFinding` | 病理性特征 → 档案 |
-| `PrediagnosisReport` | AI 预诊草稿 |
-| `ClinicalPush` | 院内/家属推送与审批 |
-| `PromptTemplate` | 系统提示词（可后台改） |
-| `AcousticSensitivityConfig` | 灵敏度 + SOTA URL |
-| `SystemVariable` / `ServiceRegistry` / `ApiEndpointMeta` | 总控 |
-| `RoomTour` / `RoomTourHotspot` | 导览 |
-| `ElderHealth.clinicalNotes` / `acousticRiskTags` | 自动维护摘要 |
-
-重置开发库：
+加密数据库默认保存在 `.local/workspace.sqlite3`。升级明文旧库、独立保管恢复密钥和演练恢复的步骤见[加密存储与恢复](docs/storage.md)。业务日期使用上海时区。机构工作台和 API 共用一个本地回环端口。带权限的业务日志位于「系统管理 → 操作日志」，可按房间和操作者组合筛选。
 
 ```bash
-rm -f apps/api/prisma/dev.db*
-pnpm db:setup
+# 单独开一个空白的演示库，首次打开时生成独立样本
+python3 server.py --port 8766 --db .local/walkthrough.sqlite3
+
+# 回归测试使用独立样本和临时数据库
+python3 -W error::ResourceWarning tests/run.py -v
 ```
 
----
+### 从零开设真实试点
 
-## 8. SOTA / 高级模型接手清单
+使用独立目录创建试点库，避免沿用演示住户或凭据。首次启动后，安康家园本部主楼包含 1、2、3、5、6、7 层。总管理员进入「照护业务 → 房间工作台 → 空间管理」，按实地门牌建房建床，再办理第一位长者入住。仓储人员可在「物资仓储」建立品目、登记期初入库。在有实测底图和环境素材时可登记房间位置、发布参观视点。初始化方式仅在创建新库时生效。
 
-按优先级建议：
+```bash
+python3 server.py --db .local/pilot/workspace.sqlite3 --port 8766 --initial-data empty
+```
 
-1. **声学分类服务**  
-   实现 `POST /v1/acoustic/classify`（契约见 clinical 文档）→ Admin 填 `inferenceBaseUrl`。  
-   验收：急促咳嗽病理写档案；软碰撞不病理；`model_id` 落库。
+### 从本部扩建到分院
 
-2. **医学预诊 LLM**  
-   消费 `clinical.prediagnosis.v1` + 档案/体征/事件上下文，严格输出 JSON  
-   （`situation` / `medicalAdvice` / `riskHints` / `inferences`）。  
-   替换点：`ClinicalIntelService.generatePrediagnosis` 内 stub。
+1. 总管理员进入「照护业务 → 房间工作台 → 空间管理 → 新增分院」。填写名称及选填地址，切换到新分院，再新增楼栋、楼层和房间。分院与楼栋可以更名，每间房有独立编号，两院使用相同房号时仍可分别查房。升级后原楼栋自动归入本部。
+2. 在「系统管理 → 账号与权限」为员工选择工作分院和岗位。分院护士按楼层图、房号或姓名中的一个字定位住户，点击床位上的姓名进入「长者档案 → 打开详细档案 → 医疗记录时间线」，按岗位查阅原件及复核记录。分院有照护或财务授权的 Agent 可以在所选区域内核对任务或账单。对话分析通过机构的云端套餐结算。
+3. 跨院转床由获授权的全机构账号办理。调院后，原分院失去该长者的档案与医疗原件访问权。监管报送、机构支出、库存及排班由总部相应岗位负责，备份由总管理员负责。独立商业客户应使用各自的部署、数据库、密钥与备份位置。[分院授权及接口](docs/facility.md) · [平台套餐与用量](docs/provider.md)
 
-3. **噪声学习闭环**  
-   导出 `AcousticEvent` + 人工 label，离线重训；在线调阈可接现有 Agent `alert_feedback`。
+## 确认、最近改动与备份交换
 
-4. **通道适配器**  
-   `ClinicalPush.channel`：微信公众号 / 短信实发；审批状态机已具备。
+- 在业务表单填写内容后，核对确认窗中的目标、字段和可选的变更说明。点击「返回」可以继续编辑。提交成功后可直接查看本次改动。勾选云端转写或识别时，确认窗也会标明将发送的资料。[确认窗实拍](docs/previews/confirm-change.jpg)
+- 「工作空间 → 最近改动」提供独立的 60 天变更视图。选择一次提交，查看经办人、说明、时间与改动前后的字段。长者及房间页面可直接打开该对象的变更。可撤销的记录会提供「撤销这次改动」，并把撤销登记为新版本。[变更回溯与撤销规则](docs/history.md) · [电脑端实拍](docs/previews/recent-changes.jpg)
+- 在「照护服务 → 已完成服务」展开合并记录可查看每一张执行工单。长者和房间都可独立设置合并方式和时间窗。新工单按实际执行的地点与时刻汇总。
+- 总管理员在「系统管理 → 机构设置 → 备份与恢复」导出加密包、预览导入内容或恢复已核验的时间点。在线恢复前会建立保护点，保留当前授权、审计及已发生的业务凭证。[备份交换、策略和异地恢复](docs/backups.md)
 
-5. **真设备**  
-   床头麦 SDK → ingest（带 `audioUri` / `features`）；设备表已有。
+## 按 PDF 验收电脑版
 
-6. **Agent 侧栏增强**  
-   将 `console/chat` 从规则意图升级为工具调用型（仍必须走 privilege 甄别框）。
+按原件的 10 页顺序可查到每个功能的办理入口、测试方式和仍需院方参与的环节。[逐页验收表](docs/roadmap.md#按原始资料追踪需求) · [出院小结核对实拍](docs/previews/document-ocr-review.jpg) · [长者医嘱查阅实拍](docs/previews/resident-portal.jpg)
 
-**不要做的事（除非产品明确要求）**
+- 护士录入正式量表或纸表分项，复核派工，记录随访效果。出院资料保留照片、中文识别行及人工确认凭证。[照护与院外衔接](docs/care-pathways.md) · [文书归档](docs/dossier.md)
+- 总管理员可分别为长者本人和亲属开通服务清单、工单进度或用药凭证。使用者可评价本人绑定的已完成服务。[账号与授权](docs/access.md)
+- 财务可从月度实收下钻到单据，向右上角的助理询问近期财务情况。统计人员可冻结报送版本，登记受理结果或退回原因。[财务与报送](docs/finance-reports.md)
 
-- 让模型直接写死诊断结论或自动给家属发「确诊」文案。  
-- 绕过 `approve-family` 推家属。  
-- 在业务 Module 里硬编码厂商 SDK（应放独立服务）。
+## 每日照护巡查与语音输入
 
----
+在右上角打开助理，按住说话，松开后自动转写。默认可编辑，勾选「语音转写后自动发送」即可松开发送；键盘 Enter 发送，Shift+Enter 换行。总管理员可设置每日巡查频率和提醒时间，护士在档案查看「近期变化与建议」，家属按授权订阅。[巡查说明](docs/rounds.md) · [语音识别](docs/media.md)
 
-## 9. 演示路径（回归）
+## 从一次院务提问开始
 
-1. `admin` 登录 → 新 UI 看板；右侧 Agent 开着。  
-2. Agent 输入「调整咳嗽灵敏度」→ 甄别框 → 密码 `123456` → 执行。  
-3. `/clinical-intel` 模拟急促咳嗽 / 软碰撞；老人详情「一键 AI 预诊」。  
-4. `/room-tours` 发布场景；Family `/tour` 拖拽浏览。  
-5. `/control-plane` 改变量、探测服务。  
-6. `family` 看账单；`caregiver` 打卡。  
-7. （可选）`pnpm dev:agent` → `/agent` 页与 manifest。
+1. 问“今天养老院情况怎么样”，可再问“过去 48 小时呢”或“今天护理用具状况如何”。系统区分时间窗内的操作和当前台账数量。
+2. 接着说“创建工单护理用具”，在审核窗核对用具、执行人和执行日期，点击「确认发布」。执行人从铃铛查看待办，仓储岗位在「物资仓储 → 护理用具工单」跟进。
+3. 说“创建老人入住”会直接定位档案名册。说“发布全员通知”会打开通知审核窗，发布后员工可从铃铛查看。[对话和扩展接口](docs/agent-runtime.md)
 
----
+在「账号与权限」可将员工管理委派给院长或指定员工，编辑时点「预览工作台权限」可核对该账号的实际入口与操作。员工和家属都可在[个人中心](http://127.0.0.1:8765/#account)查看自己的权限、修改密码。家属的已完成服务记录由总管理员按账号单独授权。[授权编辑实拍](docs/previews/staff-permissions.jpg) · [员工个人中心](docs/previews/personal-account.jpg) · [家属服务](docs/previews/family-services.jpg)
 
-## 10. 文档索引
+## 两个账号走完一次交班
 
-| 文档 | 内容 |
-|---|---|
-| **本 README** | 架构、进度、接手总览 |
-| [docs/clinical-intel-sota.md](docs/clinical-intel-sota.md) | 声学/预诊/推送/学习完整契约 |
-| [apps/agent/README.md](apps/agent/README.md) | Agent Runtime 启动与能力 |
-| `packages/shared/src/registry.ts` | 功能与路由真源 |
-| `apps/api/prisma/schema.prisma` | 数据真源 |
+1. 总管理员先在「账号与权限」创建第二个具有照护权限的员工账号。交班人在「照护服务 → 班次交接」选择接班账号、全院或一位在住长者，填写要点并提交。系统保存当时的当日待办、已办和逾期工单数量。
+2. 接班人登录后，从顶部铃铛打开「待我签收的交班」，核对交接要点并签收，可留下备注。签收只认指定账号，两名同名员工也能区分。原有手填姓名的记录可以查阅。
+3. 交班人可在交班详情核对签收人、时间和备注。签收前如遇排班变化，原交班人可说明原因、撤回，再向实际接班人交班。有审计权限的人员可按经办人或房间回查。[桌面签收回执实拍](docs/previews/handover.jpg)
+4. 从右上角询问当日照护整体情况，或直接到「照护服务 → 班次交接」核对和签收交班。
 
----
+## 档案、收银和账号
 
-## 11. 可选：切换 PostgreSQL
+- 「长者档案」默认列出未入住档案。姓名片段可搜索全部状态，工作人员可从档案入住和转床。在「床位管理」可切换全部床位和平面图。退住档案封存 365 天。[场地和档案说明](docs/facility.md)
+- 长者资料分列院方收费、费用来源和养老金，子女经济支持按人登记。「长期护理保险」登记参保、申请、评估和待遇凭证。[选项、地址和长护险](docs/dossier.md)
+- 「财务结算」按约定项目逐行核算，保存前可核对完整费用明细。院内审核 Agent 的复核结果可在「最近改动」查看。[收费与商户付款码](docs/finance-reports.md) · [收费确认实拍](docs/previews/itemized-invoice.jpg)
+- 总管理员在「账号与权限」管理员工和客户账户，密码变更通过本人已验证渠道完成。机构每日零点创建可独立恢复的压缩加密快照。[账号和验证码](docs/access.md) · [每日备份](docs/backups.md)
 
-1. `docker compose up -d`  
-2. `apps/api/.env` 中 `DATABASE_URL` 改为  
-   `postgresql://nursing:nursing@localhost:5432/nursing_home`  
-3. `schema.prisma` 的 `provider` 改为 `postgresql`  
-4. `pnpm db:setup`
+## 用一位长者验收机构业务
 
----
+| 步骤 | 在界面上怎么做 | 应看到的结果 |
+| --- | --- | --- |
+| 1. 建档与入住 | 在「长者档案」建立一份未入住档案，选中该档案办理入住并从可用床位中选床。有既存入住意向时可先关联后建档。 | 该档案转为在住，空床减少一张，床位表和平面图指向同一档案。 |
+| 2. 评估 | 在「能力评估」登记照护等级、起居/活动/沟通观察和复评日期。责任人可手工填写，也可留空让系统从当日本区排班中匹配。 | 生成一份待复核计划。匹配按同区人员当日待办量排序，缺少排班会提示补录。 |
+| 3. 派工 | 打开「照护计划」，核对责任人、服务项目和需求说明，使用获授权的当前账号复核后派发。 | 计划内的服务生成当日工单，复评生成预约日期的工单。档案中的照护等级同步更新。 |
+| 4. 执行 | 从长者档案打开「床头卡」。在「床位管理 → 床旁核验」输入卡号，或用键盘模式扫描枪录入，选择今天的任务并登记执行结果，系统记录实际登录人。 | 工单生成凭证，可登记抽检和满意度。转床会换发卡号，退住会释放床位。档案中的「家属记录预览」只列该长者已完成的服务。 |
+| 5. 结算 | 在「财务结算」生成当月账单，再登记部分预交金。 | 核算使用入住区间、床位日费、护理费、请假天数和套餐。到账后按最早欠款优先冲抵，剩余款留在预交账户。 |
+| 6. 复核月份 | 打开「统计报送」，生成该月草稿，查看数据集与校验项。切换「经营月报」并打开入款和工单明细。 | 报送草稿含入住、退住和期末在住人数，可导出 JSON。月报分别统计预交到账、线下收款和预交冲抵。 |
 
-## 12. 产品分期（历史规划，可按 SOTA 插入）
+## 模块与范围
 
-- **已完成主线**：MVP → 九域 CRUD → Agent → 统一主控台 → Control/Portal/Tour → 临床预留 → 2026 Admin UI  
-- **下一步（模型侧）**：声学 SOTA、医学 LLM、通道实发  
-- **再下一步（产品侧）**：小程序/鸿蒙、支付生产、GPS 围栏、硬件 webhook 实装  
+| 业务域 | 首稿可操作内容 |
+| --- | --- |
+| 机构总览 | 在住人数、床位使用率、当日工单、待缴账单、照护趋势和分区床态。顶部搜索可定位模块或长者。 |
+| 接待、床位与档案 | 意向转入住、转床、续住、请假、退住、历史档案、过敏与关注项、人工复核回填摘要、床头卡和服务记录预览。 |
+| 评估与照护 | 正式量表逐项计分、线上与纸表补录、生活能力分项观察、照护人员匹配、方案复核、复评安排、执行留痕、体征上报、异常处理、班次交接和抽检。 |
+| 用药 | 登记既有医嘱、药名与过敏文本匹配、同名重复检查、经专业岗位核准的配伍组合筛查、到时提醒、医护复核和执行凭证。 |
+| 物资与排班 | 物资出入库、库存下限、领用流水、排班冲突检查、按员工和日期查看工单量。 |
+| 财务与报送 | 按床位与照护等级分段计费、预交金、双渠道收款与核销、催缴、支出、经营环比、民政数据校验、冻结与回执。 |
+| AI 助理 | 在当前页面问近况、查库存或快速定位。带有明确发布意图的请求进入业务审核窗，执行人和发布时间可追溯。 |
+| 个人与医疗档案 | 详细登记身份、家庭、经济和联系人资料。亲属可维护自己的档案。CT、诊断记录等照片按文书日期归档，原图保留，结构化概括按次固化。 |
+| 设备与人工确认 | 模拟跌倒或持续卧床信号，按源事件去重，护士复核后归档。录音转写后发起变更，获授权人员一次确认后工单与审计同时落库。 |
+| 分院与建筑 | 总部维护分院、地址及楼栋。护士可查分院平面图和同号房间，按权限回看长者文书和操作历史。 |
+| 账号与设置 | 总管理员管理机构、界面、账号及机构外观，查看平台 AI 套餐用量；院长、护士、护工等岗位按授权查看和办理业务。 |
 
----
+对话、专项分析和巡查说明使用 DeepSeek Flash。中文文书 OCR、标准量表计分、院内给药提醒、跨来源预警复核、费用分段核算、经营月报及报送版本均可在电脑端验收。正式收款、外部消息、医联体或政府平台受理需要机构开通相应服务。优乐、雷达、米家和七有工牌保留接入契约。机构识别套餐、录音格式和复核流程见[DeepSeek OCR 与 ASR](docs/media.md)。
 
-## 13. 合规与安全摘要
+| 需要核对的内容 | 文档 |
+| --- | --- |
+| 两份 PDF 的需求、交付阶段与机构验收 | [智慧医养实施计划](docs/roadmap.md)、[工牌逐页映射及设备接口](docs/integrations.md) |
+| 协调 Agent、人工发布、运行轨迹、MCP/A2A/模型接口 | [Agent 运行时](docs/agent-runtime.md) |
+| 角色授权、会话、额外付费的机构 AI 套餐 | [账号与权限](docs/access.md)、[平台套餐与用量](docs/provider.md) |
+| 每日一次全量加密时间点、iCloud、115、百度网盘、异地恢复 | [备份与恢复操作手册](docs/backups.md) · [电脑端实拍](docs/previews/encrypted-backups.jpg) |
+| 长者与房间的照护时间线、工单合并和独立显示设置 | [照护时间线](docs/care-timeline.md) · [桌面实拍](docs/previews/care-timeline.jpg) |
+| 人员字段、亲属自助、照片存档及一次性概括 | [档案规范](docs/dossier.md) |
+| PC 工程与手机、微信入口 | [三端运行说明](docs/clients.md) |
 
-- 预诊 / 声学输出均为 **辅助信息**，不构成诊断或处方。  
-- 高权限控制台操作：**变更甄别 + 每次管理员密码**。  
-- 家属通知默认关闭，须院内人员批准。  
-- JWT Secret / LLM Key 仅存环境变量；勿提交 `.env`。
+## 代码结构
+
+```text
+server.py                     静态资源、会话、业务命令、原件、运行轨迹和接口目录
+platform_core/
+  store.py                    SQLite 初始化、数据版本、事务和审计
+  access.py / access_policy.py   账号、会话、角色授权、按权限投影
+  facility.py                 分院、建筑、楼层、房间、床位与导览
+  campus_access.py            工作分院授权、住户归属与业务对象校验
+  activity.py                 记名审计、历史房间与分页查询
+  agents/                     协调器、只读工具、证据、运行轨迹与人工确认
+  gateways/                   设备及语音契约、事件去重、确认队列
+  dossier.py                  详细档案、亲属自助、照片原件与概括
+  care/
+    __init__.py               护理域命令注册表
+    records.py                共享档案校验与记录查找
+    residency.py              入住、床位、床头卡和档案
+    plans.py                  评估、人员匹配、派工、执行、抽检
+    clinical.py               用药复核、体征异常、交班
+    demo.py                   虚构护理样本
+  operations/
+    __init__.py               运营域命令注册表
+    records.py                金额、日期和单据校验
+    resources.py              库存和排班
+    billing.py                计费、收款和核销
+    reports.py                民政草稿与校验
+    assistants.py             建议、数据依据和人工审核
+    demo.py                   关联运营样本
+web/
+  app.js                      页面切换、请求、错误与并发刷新
+  dashboard.js                指标、图表和院区总览
+  lib/                        导航配置、通用控件、详情和表单弹窗
+  features/                   业务页面、月报、床旁核验和家属预览
+  assets/                     本地品牌标识
+clients/                      Electron、手机 App 与微信小程序入口
+tests/                        领域规则、事务和并发回归
+docs/roadmap.md               PDF 需求映射、分期、依赖和验收
+```
+
+### 命令与一致性
+
+`GET /api/health` 检查服务。登录后工作台通过 `GET /api/state` 读取 `revision`、`today`、各业务集合 `data` 及最近 100 条 `audit`。业务主键跨页面复用，例如照护工单引用 `residentId`，核销流水引用 `billId`，评估、计划和工单通过各自的编号关联。
+
+`POST /api/commands` 接收 JSON。下面是新库中的一次意向登记，之后的请求应使用实际读取的最新版本。
+
+```json
+{
+  "action": "care.inquire",
+  "revision": 0,
+  "payload": {"name": "示例长者", "contact": "示例家属", "note": "预约参观"}
+}
+```
+
+成功响应含新版本和中文变更摘要。业务校验失败返回 400。两个页面同时修改旧版本时，后提交的一方收到 409，工作台载入最新记录，让操作者重新核对。每笔操作在 SQLite 写事务内保存业务状态、递增版本和审计行，任何一步失败都会回滚。快照返回最近 100 条获授权日志，操作日志页面通过 `GET /api/activity` 继续向前翻页。
+
+每家运营机构使用一套加密数据库，其分院共用同一事务边界。住户、床位和账单等业务集合使用带版本号的工作区快照。分院、建筑、房间、员工授权、医疗文书和 Agent 任务使用关系表。迁移为原楼栋补充分院归属并保留原有床号、账单与执行凭证。后续拆分业务集合时，以跨院转床、文档复核和财务核销回归样本核对关联关系。
+
+### 增加一个业务动作
+
+以“登记入库”为例，表单位于 `web/features/operations.js`，命令名为 `ops.stock`，校验及库存流水更新在 `platform_core/operations/resources.py`。页面从命令结果重新读取工作台，库存台账、流水和下一次生成的补货建议会使用同一批数据。
+
+1. 先确定动作允许的起始状态、必填字段、关联主键、拒绝条件和成功后应产生的凭证。
+2. 在服务端授权表登记动作所需的权限，在相应领域文件添加处理函数，在该包的 `__init__.py` 登记命令。函数接收事务内的工作副本、表单和业务日期，完成校验与变更并返回审计描述。
+3. 在 `web/features/` 添加表单或详情。新页面同时登记到 `features/index.js` 和 `lib/navigation.js`。通过共享表单提交命令，使错误提示、并发处理和保存后刷新保持一致。
+4. 增加成功、拒绝以及涉及其他模块的回归场景。新增必填储存字段时，在 `store.py` 引入有版本的迁移或定义可验证的旧记录默认值，用已有演示库验证升级。
+
+本次重构保留了 Git 历史。旧代码已从工作树移除，原开发数据库和本地环境文件移到被 Git 忽略的 `.local/legacy/`。新服务独立初始化，仅使用指定的新库。

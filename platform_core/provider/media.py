@@ -1,0 +1,322 @@
+"""Paid DeepSeek OCR pages and ASR seconds, metered independently from chat tokens."""
+
+from contextlib import closing
+from hashlib import sha256
+from http.client import HTTPException
+import json
+from uuid import uuid4
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+from . import latest, local_time, read_key
+
+ENDPOINT = "https://api.deepseek.com/v1/tools/"
+UNITS = {"ocr": "页", "asr": "秒"}
+
+
+class MediaError(ValueError):
+    """A safe provider error; an uncertain delivery must be reconciled before another upload."""
+
+    def __init__(self, message, *, uncertain=False):
+        super().__init__(message)
+        self.uncertain = uncertain
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args):
+        return None
+
+
+def init(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS media_quota (
+        plan INTEGER NOT NULL, kind TEXT NOT NULL, units INTEGER NOT NULL,
+        PRIMARY KEY(plan,kind))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS media_usage (
+        id TEXT PRIMARY KEY, plan INTEGER NOT NULL, kind TEXT NOT NULL,
+        actor TEXT NOT NULL, fingerprint TEXT NOT NULL, at INTEGER NOT NULL,
+        state TEXT NOT NULL, reserved INTEGER NOT NULL, charged INTEGER NOT NULL DEFAULT 0,
+        result TEXT, vendor_id TEXT, original BLOB, reference TEXT NOT NULL DEFAULT '')""")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS media_lookup ON media_usage(kind,fingerprint,state)"
+    )
+    db.execute("""CREATE TABLE IF NOT EXISTS media_policy (
+        id INTEGER PRIMARY KEY CHECK (id=1), ocr INTEGER NOT NULL, asr INTEGER NOT NULL)""")
+    db.execute("INSERT OR IGNORE INTO media_policy VALUES(1,1,1)")
+
+
+def amounts(db, plan, kind):
+    used, held = db.execute(
+        """SELECT coalesce(sum(charged),0),coalesce(sum(
+        CASE WHEN state IN ('pending','uncertain') THEN reserved ELSE 0 END),0)
+        FROM media_usage WHERE plan=? AND kind=?""",
+        (plan, kind),
+    ).fetchone()
+    quota = db.execute(
+        "SELECT units FROM media_quota WHERE plan=? AND kind=?", (plan, kind)
+    ).fetchone()
+    return {
+        "limit": quota[0] if quota else 0,
+        "used": used,
+        "held": held,
+        "unit": UNITS[kind],
+    }
+
+
+def grant(db, plan, kind, units):
+    if type(units) is not int or not 0 <= units <= 1_000_000_000:
+        raise ValueError("识别额度须为非负整数")
+    meter = amounts(db, plan, kind)
+    if units < meter["used"] + meter["held"]:
+        raise ValueError("额度不能低于实际使用和在途预留")
+    db.execute("INSERT OR REPLACE INTO media_quota VALUES(?,?,?)", (plan, kind, units))
+
+
+def overview(db):
+    plan = latest(db)
+    switches = db.execute("SELECT ocr,asr FROM media_policy WHERE id=1").fetchone()
+    return {
+        k: {**amounts(db, plan["id"] if plan else 0, k), "enabled": bool(switches[k])}
+        for k in UNITS
+    }
+
+
+def configure(db, user, p):
+    if user["kind"] != "owner":
+        raise PermissionError("仅总管理员可控制机构识别工具")
+    if set(p) != set(UNITS) or not all(type(v) is bool for v in p.values()):
+        raise ValueError("识别开关无效")
+    db.execute("UPDATE media_policy SET ocr=?,asr=? WHERE id=1", (p["ocr"], p["asr"]))
+    return "更新 DeepSeek 识别开关，OCR {}、ASR {}".format(
+        "启用" if p["ocr"] else "停用", "启用" if p["asr"] else "停用"
+    )
+
+
+def reconcile(db, call, charged, now):
+    row = db.execute("SELECT * FROM media_usage WHERE id=?", (call,)).fetchone()
+    if not row or not (
+        row["state"] == "uncertain"
+        or (row["state"] == "pending" and now.timestamp() - row["at"] > 600)
+    ):
+        raise ValueError("此识别调用无需对账")
+    if type(charged) is not int or not 0 <= charged <= row["reserved"]:
+        raise ValueError("结算数量超出预留")
+    db.execute(
+        "UPDATE media_usage SET state='reconciled',charged=? WHERE id=?",
+        (charged, call),
+    )
+
+
+def invoke(kind, raw, filename, mime, key):
+    boundary = "ankang-" + uuid4().hex
+    data = bytearray()
+    if kind == "ocr":
+        data.extend(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="purpose"\r\n\r\ntext_recognition\r\n'.encode()
+        )
+    data.extend(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\nContent-Type: {mime}\r\n\r\n'.encode()
+    )
+    data.extend(raw)
+    data.extend(f"\r\n--{boundary}--\r\n".encode())
+    req = Request(
+        ENDPOINT + kind,
+        data=bytes(data),
+        headers={
+            "Authorization": "Bearer " + key,
+            "Content-Type": "multipart/form-data; boundary=" + boundary,
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with build_opener(NoRedirect()).open(req, timeout=185) as reply:
+            body = reply.read(4 * 1024 * 1024 + 1)
+        if len(body) > 4 * 1024 * 1024:
+            raise MediaError("识别回复超过上限，请核对渠道用量", uncertain=True)
+        obj = json.loads(body)
+        if not isinstance(obj, dict):
+            raise ValueError
+        if "error" in obj:
+            raise MediaError("DeepSeek 未完成识别，可稍后重试或手工录入")
+        return obj
+    except HTTPError as e:
+        raise MediaError(
+            f"DeepSeek 返回 HTTP {e.code}，请检查服务额度与文件格式后重试",
+            uncertain=e.code >= 500 and kind == "asr",
+        ) from None
+    except (URLError, TimeoutError, HTTPException, OSError):
+        raise MediaError(
+            "识别连接中断，结果待平台对账；原件仍保留", uncertain=True
+        ) from None
+    except (ValueError, UnicodeError) as e:
+        if isinstance(e, MediaError):
+            raise
+        raise MediaError(
+            "识别回复格式未知，请平台核对渠道用量", uncertain=True
+        ) from None
+
+
+def audit_asr(db, actor, task, now, summary, scope):
+    from .. import activity
+
+    if scope is None:
+        data = json.loads(
+            db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+        )
+        person = next(
+            (t.get("residentId") for t in data["tasks"] if t["id"] == task), ""
+        )
+        scope = activity.for_person(data, person)
+    revision = db.execute(
+        "UPDATE workspace SET revision=revision+1 WHERE id=1 RETURNING revision"
+    ).fetchone()[0]
+    activity.write(
+        db,
+        revision,
+        now.isoformat(timespec="seconds"),
+        "media.asr" if not task.startswith("agent:") else "media.agentVoice",
+        summary,
+        actor,
+        scope,
+        {},
+    )
+
+
+def execute(
+    store,
+    token,
+    kind,
+    raw,
+    reserve,
+    filename,
+    mime,
+    authorize,
+    parse,
+    reference="",
+    upload=None,
+    audit_scope=None,
+):
+    """Persist the outbound reservation first. A crash or lost reply never causes an automatic re-send."""
+    now = store.now()
+    with closing(store.connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        actor = authorize(db, token)
+        identity = (
+            (actor["id"] + "\0" + reference + "\0").encode() if kind == "asr" else b""
+        )
+        digest = sha256(identity + raw).hexdigest()
+        prior = db.execute(
+            """SELECT id,state,result FROM media_usage WHERE kind=? AND fingerprint=?
+             AND state IN ('complete','pending','uncertain') ORDER BY rowid DESC LIMIT 1""",
+            (kind, digest),
+        ).fetchone()
+        if prior:
+            if prior["state"] == "complete":
+                return json.loads(prior["result"])
+            raise ValueError("识别正在处理或待平台核对，请稍后查看")
+        plan = latest(db)
+        day = local_time(now).date().isoformat()
+        if (
+            not plan
+            or not plan["enabled"]
+            or not plan["startsOn"] <= day <= plan["expiresOn"]
+        ):
+            raise ValueError("机构识别套餐尚未开通或已到期")
+        if not db.execute("SELECT ocr,asr FROM media_policy WHERE id=1").fetchone()[
+            kind
+        ]:
+            raise PermissionError("总管理员已停用该识别工具")
+        meter = amounts(db, plan["id"], kind)
+        if meter["used"] + meter["held"] + reserve > meter["limit"]:
+            raise ValueError("机构识别套餐剩余额度不足，请联系平台运营方")
+        try:
+            key = read_key()
+        except (OSError, ValueError):
+            raise MediaError("平台托管凭据不可用，请联系平台运营方") from None
+        call = uuid4().hex
+        if kind == "asr":
+            from .. import history
+
+            history.watch(db, "media.asr")
+        db.execute(
+            """INSERT INTO media_usage (id,plan,kind,actor,fingerprint,at,state,reserved,original,reference)
+          VALUES(?,?,?,?,?,?,'pending',?,?,?)""",
+            (
+                call,
+                plan["id"],
+                kind,
+                actor["id"],
+                digest,
+                int(now.timestamp()),
+                reserve,
+                raw if kind == "asr" else None,
+                reference,
+            ),
+        )
+        if kind == "asr":
+            audit_asr(
+                db,
+                actor,
+                reference,
+                now,
+                "保存语音原件，提交 DeepSeek 转写",
+                audit_scope,
+            )
+    try:
+        obj = invoke(kind, upload if upload is not None else raw, filename, mime, key)
+        result, units, source_id = parse(obj)
+        if kind == "asr":
+            result["transcriptId"] = call
+        if (
+            type(units) is not int
+            or not 1 <= units <= reserve
+            or not isinstance(source_id, str)
+            or not 0 < len(source_id) <= 200
+        ):
+            raise ValueError("识别用量或回执不符")
+    except (ValueError, KeyError, TypeError, OverflowError) as e:
+        firm = isinstance(e, MediaError) and not e.uncertain
+        with closing(store.connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            if kind == "asr":
+                history.watch(db, "media.asr")
+            db.execute(
+                "UPDATE media_usage SET state=? WHERE id=? AND state='pending'",
+                ("failed" if firm else "uncertain", call),
+            )
+            if kind == "asr":
+                audit_asr(
+                    db,
+                    actor,
+                    reference,
+                    store.now(),
+                    "登记语音转写失败或待核对回执",
+                    audit_scope,
+                )
+        raise (
+            e
+            if isinstance(e, MediaError)
+            else MediaError("回复无法完整核对，请平台核实渠道回执", uncertain=True)
+        ) from None
+    with closing(store.connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        if kind == "asr":
+            history.watch(db, "media.asr")
+        if not db.execute(
+            """UPDATE media_usage SET state='complete',result=?,charged=?,vendor_id=?
+                         WHERE id=? AND state='pending'""",
+            (json.dumps(result, ensure_ascii=False), units, source_id, call),
+        ).rowcount:
+            raise ValueError("识别已进入平台对账")
+        if kind == "asr":
+            audit_asr(
+                db,
+                actor,
+                reference,
+                store.now(),
+                "记录 DeepSeek 语音转写回执",
+                audit_scope,
+            )
+    with closing(store.connect()) as db:
+        authorize(db, token)
+    return result

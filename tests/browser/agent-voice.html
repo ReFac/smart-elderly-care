@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>助理对话与语音回归</title>
+<link rel="stylesheet" href="../../web/style.css">
+<link rel="stylesheet" href="../../web/agents.css">
+<body>
+<output id="result" role="status">运行中</output>
+<script type="module">
+  import { chatLauncher, toggleChat, clearChat, checkChatUser } from '../../web/features/assistant-chat.js';
+  import { holdToSpeak } from '../../web/features/agent-voice.js';
+  const check = (ok, label) => { if (!ok) throw new Error(label); };
+  async function until(checkValue, label) {
+    const end = performance.now() + 5000;
+    while (!checkValue() && performance.now() < end) await new Promise(resolve => setTimeout(resolve, 12));
+    check(checkValue(), label);
+  }
+  function press(button) { button.dispatchEvent(new KeyboardEvent('keydown', {key:' ',bubbles:true})); }
+  function release(button) { button.dispatchEvent(new KeyboardEvent('keyup', {key:' ',bubbles:true})); }
+  const find = (selector) => document.querySelector(selector);
+  const state = {
+    user:{id:'fixture-voice', kind:'staff', permissions:['assistants','voice']},
+    uiSettings:{institutionName:'测试机构',hiddenRoutes:[]},
+    agentCapabilities:{voiceInput:{path:'/test/asr',state:'available'}},
+  };
+  const goTo = [];
+  const ctx = {state, available:() => true, go: (...args) => goTo.push(args), async refreshWorkspace(){return true;}};
+  let messages = [], submitted = [], audioUploads = 0, fail = false, generation = 'test', releaseReply;
+  const snapshot = () => ({ messages:[...messages], scopeKey:'fixture', generation, contextLimit:100000 });
+  window.fetch = async (url, options) => {
+    if (url === '/test/asr') {
+      check(options.body instanceof Blob && options.headers['X-DeepSeek-Consent'] === 'yes', '录音请求');
+      audioUploads++;
+      return Response.json({text:'护理用具还有多少？'});
+    }
+    if (url.endsWith('/reset')) {
+      if (JSON.parse(options.body).generation !== generation) return Response.json({error:'其他页面已开始新对话'},{status:409});
+      messages=[]; generation+='-new'; return Response.json(snapshot());
+    }
+    if (options.method !== 'POST') return Response.json(snapshot());
+    const data = JSON.parse(options.body);
+    submitted.push(data);
+    if (fail) throw new TypeError('网络暂不可用，请重试。');
+    if (data.text === '等待页面手动翻阅') await new Promise(resolve => {releaseReply=resolve;});
+    const answer = data.text === '生成详细汇报' ? Array.from({length:60},(_,i)=>(i+1)+' 具体事项需要跟进。').join('\n') : '这是测试回复。';
+    const action = data.text === '创建老人入住' ? {kind:'navigate',route:'intake',title:'办理入住'} : null;
+    messages.push({role:'user',content:data.text},{role:'assistant',content:answer,action});
+    return Response.json(snapshot());
+  };
+  async function run() {
+    let uploadCount = 0, lastText = '', pendingPermission;
+    const held = holdToSpeak({
+      available: () => '', onState:() => {},
+      record: async (ready) => { await new Promise(resolve => pendingPermission = resolve); return (deliver) => { if (deliver !== false) ready(new Blob(['test'])); }; },
+      upload: async () => { uploadCount++; return {text:'转写成功'}; }, onText: data => { lastText=data.text; },
+    });
+    document.body.append(held.control);
+    press(held.control); release(held.control); pendingPermission();
+    await new Promise(resolve=>setTimeout(resolve,20));
+    check(uploadCount === 0, '授权期间松手不应上传');
+    press(held.control); pendingPermission();
+    await until(() => held.control.dataset.phase === 'recording','等待正常录音');
+    release(held.control); release(held.control);
+    await until(() => uploadCount === 1 && lastText === '转写成功','松手后只转写一次');
+    held.control.remove();
+
+    // Use a synthetic audio stream through the actual AudioWorklet and pointer/keyboard bar.
+    const audio = new AudioContext();
+    const oscillator = audio.createOscillator();
+    const dest = audio.createMediaStreamDestination();
+    oscillator.connect(dest); oscillator.start();
+    let streams=[];
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable:true, value: async () => {
+      const stream=dest.stream.clone(); streams.push(stream); return stream;
+    }});
+    const launcher=chatLauncher(()=>toggleChat(()=>ctx));
+    document.body.append(launcher);
+    localStorage.removeItem('assistant:auto-send:fixture-voice');
+    launcher.click();
+    await until(()=>!find('.assistant-input').disabled,'打开对话');
+    const input=find('.assistant-input'), mic=find('.assistant-hold');
+    const enter=(extra={})=>input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true,...extra}));
+    function type(text){ input.value=text; input.dispatchEvent(new Event('input')); }
+    type('今');
+    input.dispatchEvent(new CompositionEvent('compositionstart'));
+    enter();input.dispatchEvent(new CompositionEvent('compositionend'));
+    enter({shiftKey:true});
+    check(!submitted.length,'中文选词和换行均不发送');
+    type('今天养老院怎么样？');enter();
+    await until(()=>find('.from-assistant'),'等待回答');
+    check(submitted.length===1 && goTo.length===0 && !find('dialog[open]'),'普通聊天只回复');
+    const pointer = (kind) => mic.dispatchEvent(new PointerEvent(kind,{bubbles:true,button:0,isPrimary:true,pointerId:4}));
+    pointer('pointerdown');
+    await until(()=>mic.dataset.phase==='recording', '麦克风启动');
+    await new Promise(resolve=>setTimeout(resolve,250)); pointer('pointerup');
+    await until(()=>input.value.includes('护理用具'), '松开自动转写并回填');
+    check(submitted.length===1 && audioUploads===1,'不开自动发送时可以修改');
+    find('.assistant-auto input').click();
+    type(''); press(mic);
+    await until(()=>mic.dataset.phase==='recording','再次录音');
+    await new Promise(resolve=>setTimeout(resolve,250)); release(mic);
+    await until(()=>submitted.length===2,'开启自动发送后松开即发');
+    check(audioUploads===2 && streams.every(s=>s.getAudioTracks().every(t=>t.readyState==='ended')),'麦克风已释放');
+    fail=true;type('追问'); enter();
+    await until(()=>find('.assistant-error').innerText.includes('网络暂不可用'),'云端错误直接可见');
+    check(input.value==='追问' && !goTo.length,'出错保留草稿');
+    const previous=submitted.at(-1).requestId;
+    fail=false;enter();
+    await until(()=>!find('.assistant-error').innerText && find('.assistant-log').querySelectorAll('.from-assistant').length===3 && submitted.length===4,'重试');
+    check(submitted.at(-1).requestId===previous,'重试使用同一发送编号');
+    type('生成详细汇报');enter();
+    const log = find('.assistant-log');
+    await until(()=>log.querySelector('.from-assistant:last-child')?.innerText.includes('60 具体事项'),'长回复完成');
+    const top = () => log.querySelector('.from-assistant:last-child').getBoundingClientRect().top - log.getBoundingClientRect().top;
+    check(top()>-2 && top()<125 && log.scrollTop+log.clientHeight<log.scrollHeight-100,'长回复从开头阅读');
+    log.scrollTop=log.scrollHeight;type('等待页面手动翻阅');enter();
+    await until(()=>log.querySelector('.assistant-waiting') && releaseReply,'等待下一条消息');
+    log.scrollTop=35;
+    releaseReply();
+    await until(()=>!log.querySelector('.assistant-waiting'),'请求已返回');
+    check(Math.abs(log.scrollTop-35)<5, '手动向上翻阅原位置保持');
+    log.scrollTop=log.scrollHeight;type('短回复');enter();
+    await until(()=>log.querySelectorAll('.from-assistant').length===6,'短回答完成');
+    check(log.scrollHeight-log.clientHeight-log.scrollTop<4, '短回复跟随底部');
+    type('创建老人入住');enter();
+    await until(()=>goTo[0]?.[0]==='residents','明确指令快速定位');
+    launcher.click();await until(()=>!find('.assistant-input').disabled,'继续对话');
+    generation = 'other-window';
+    messages=[{role:'user',content:'另一窗口的问题'},{role:'assistant',content:'另一窗口的回复'}];
+    find('.assistant-new').click();
+    await until(()=>find('.assistant-log').innerText.includes('另一窗口的回复') && !find('.assistant-input').disabled,'旧窗口自动载入新会话');
+    check(messages.length===2,'旧窗口没有重置新一代对话');
+    find('.assistant-new').click();
+    await until(()=>!document.querySelector('.from-user') && !find('.assistant-input').disabled,'开始新对话');
+    state.user={...state.user,id:'fixture-other'};
+    checkChatUser(ctx);
+    check(!find('#assistant-chat'),'切换账号清除对话和录音');
+    launcher.click();
+    await until(()=>!find('.assistant-input').disabled,'新账号对话');
+    check(!find('.assistant-auto input').checked,'自动发送偏好按账号隔离');
+    clearChat(); oscillator.stop(); audio.close();
+    document.documentElement.dataset.result = 'pass';
+    find('output').textContent = 'PASS';
+  }
+  run().catch(error => {
+    document.documentElement.dataset.result = 'fail';
+    find('output').textContent = error.stack || error.message;
+  });
+</script>
+</body></html>

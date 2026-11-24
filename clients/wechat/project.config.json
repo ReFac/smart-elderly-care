@@ -1,0 +1,8 @@
+{
+  "description": "安康医养平台微信小程序",
+  "projectname": "yihe-care",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "./",
+  "appid": "touristappid",
+  "setting": { "es6": true, "minified": true, "urlCheck": true }
+}
