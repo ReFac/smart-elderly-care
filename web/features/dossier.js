@@ -299,7 +299,13 @@ function newDocument(ctx, resident) {
   const source = node('input');
   source.maxLength = 200;
   source.placeholder = '例如医院名称、科室或既往病历来源';
-  const method = options(['手工描述', '院内 OCR', '人工核对的 OCR 转录']);
+  const method = options(['手工描述', 'DeepSeek OCR', '人工核对的 OCR 转录']);
+  const consent = node('input');
+  consent.type = 'checkbox';
+  const consentField = node('label', 'access-check', [
+    consent,
+    '同意将本次原件发送至 DeepSeek 识别，使用机构 OCR 页数额度。'
+  ]);
   const description = node('textarea');
   description.rows = 4;
   description.maxLength = 8000;
@@ -349,6 +355,7 @@ function newDocument(ctx, resident) {
     group(
       '存档概括',
       label('文字来源', method, true),
+      consentField,
       label('原文事实与描述', description, true),
       label('待核实事项', pending)
     ),
@@ -357,16 +364,19 @@ function newDocument(ctx, resident) {
     submit
   );
   const updateMethod = () => {
-    const local = method.value === '院内 OCR';
+    const local = method.value === 'DeepSeek OCR';
     for (const field of [description, pending]) {
       field.disabled = local;
       field.closest('label').hidden = local;
     }
-    submit.textContent = local ? '留存原件并在院内识别' : '确认原文并存档';
+    consentField.hidden = !local;
+    consent.required = local;
+    submit.textContent = local ? '留存原件并提交 DeepSeek OCR' : '确认原文并存档';
   };
+  updateMethod();
   method.addEventListener('change', updateMethod);
   kind.addEventListener('change', () => {
-    if (kind.value === '出院小结') method.value = '院内 OCR';
+    if (kind.value === '出院小结') method.value = 'DeepSeek OCR';
     if (kind.value === '病史补录') method.value = '手工描述';
     updateMethod();
   });
@@ -396,7 +406,7 @@ function newDocument(ctx, resident) {
         payload.imageBase64 = await asBase64(file);
       }
       const imageHash =
-        file && method.value === '院内 OCR'
+        file && method.value === 'DeepSeek OCR'
           ? Array.from(
               new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())),
               (x) => x.toString(16).padStart(2, '0')

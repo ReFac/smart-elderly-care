@@ -1,12 +1,42 @@
 import { node, field, select, runForm } from './shared.js';
 import { button, statusText, pathName } from './room-elements.js';
 
-function addBuilding(ctx) {
+function editCampus(ctx, campus) {
+  runForm(ctx, {
+    title: campus ? '编辑分院资料' : '新增分院',
+    action: campus ? 'facility.updateCampus' : 'facility.addCampus',
+    fields: [
+      field('name', '分院名称', { value: campus?.name || '', maxLength: 60 }),
+      field('address', '分院地址（选填）', {
+        value: campus?.address || '',
+        required: false,
+        maxLength: 150
+      })
+    ],
+    map: (values) => (campus ? { ...values, campusId: campus.id } : values),
+    submitLabel: '保存分院'
+  });
+}
+
+function renameBuilding(ctx, building) {
+  runForm(ctx, {
+    title: '修改楼栋名称',
+    action: 'facility.renameBuilding',
+    description: building.campusName,
+    fields: [field('name', '楼栋名称', { value: building.name, maxLength: 60 })],
+    map: (values) => ({ ...values, buildingId: building.id }),
+    submitLabel: '保存楼栋名称'
+  });
+}
+
+function addBuilding(ctx, campus) {
   runForm(ctx, {
     title: '新增楼栋',
     action: 'facility.addBuilding',
+    description: campus.name,
+    map: (values) => ({ ...values, campusId: campus.id }),
     fields: [field('name', '楼栋名称', { placeholder: '例如：二期护理楼', maxLength: 60 })],
-    submitLabel: '保存楼栋',
+    submitLabel: '保存楼栋'
   });
 }
 
@@ -17,7 +47,7 @@ function addFloor(ctx, building) {
     description: building.name,
     fields: [field('number', '楼层号', { type: 'number', min: 1, max: 199, step: 1 })],
     map: (values) => ({ buildingId: building.id, number: Number(values.number) }),
-    submitLabel: '保存楼层',
+    submitLabel: '保存楼层'
   });
 }
 
@@ -38,20 +68,20 @@ function addRoom(ctx, building, floor) {
         min: 0,
         max: 99999,
         step: '0.01',
-        value: 60,
+        value: 60
       }),
       ...coords.map(([key, label]) =>
         field(key, label + '（%）', { type: 'number', min: 0, max: 100, step: 'any' })
-      ),
+      )
     ],
     map: (values) => ({
       ...values,
       ...Object.fromEntries(coords.map(([key]) => [key, Number(values[key])])),
       floorId: floor.id,
       bedCount: Number(values.bedCount),
-      dailyRate: Number(values.dailyRate),
+      dailyRate: Number(values.dailyRate)
     }),
-    submitLabel: '保存房间与床位',
+    submitLabel: '保存房间与床位'
   });
 }
 
@@ -70,22 +100,22 @@ function addBeds(ctx, room) {
         min: 1,
         max: 12 - room.bedCount,
         step: 1,
-        value: 1,
+        value: 1
       }),
       field('dailyRate', '新增床位日价（元）', {
         type: 'number',
         min: 0,
         max: 99999,
         step: '0.01',
-        value: 60,
-      }),
+        value: 60
+      })
     ],
     map: (values) => ({
       roomId: room.id,
       count: Number(values.count),
-      dailyRate: Number(values.dailyRate),
+      dailyRate: Number(values.dailyRate)
     }),
-    submitLabel: '保存新增床位',
+    submitLabel: '保存新增床位'
   });
 }
 
@@ -148,7 +178,7 @@ function editLayout(ctx, floor) {
       roomId,
       ...Object.fromEntries(
         Object.entries(controls).map(([key, input]) => [key, Number(input.value)])
-      ),
+      )
     }));
     save.disabled = true;
     try {
@@ -156,7 +186,7 @@ function editLayout(ctx, floor) {
         !(await ctx.command('facility.setLayout', {
           floorId: floor.id,
           rooms,
-          planMediaUrl: image.value.trim(),
+          planMediaUrl: image.value.trim()
         }))
       ) {
         err.textContent = document.getElementById('announcer').textContent || '布局未保存';
@@ -178,17 +208,17 @@ function addScene(ctx, scope) {
       field('title', '视点名称', { placeholder: '例如：公共活动区' }),
       select('kind', '素材类型', [
         { value: 'photo', label: '环境照片' },
-        { value: 'panorama', label: '全景照片' },
+        { value: 'panorama', label: '全景照片' }
       ]),
       field('mediaUrl', '机构环境图片地址', { placeholder: '/tour-media/activity-room.jpg' }),
-      field('sortOrder', '导览顺序', { type: 'number', min: 0, max: 9999, step: 1, value: 0 }),
+      field('sortOrder', '导览顺序', { type: 'number', min: 0, max: 9999, step: 1, value: 0 })
     ],
     map: (values) => ({ ...values, [scope.key]: scope.id, sortOrder: Number(values.sortOrder) }),
-    submitLabel: '保存导览视点',
+    submitLabel: '保存导览视点'
   });
 }
 
-export function chooseAdmin(ctx, building, floor, room) {
+export function chooseAdmin(ctx, building, floor, room, campus) {
   const group = (label, actions) =>
     node('section', 'room-admin-group', [node('h3', '', label), ...actions]);
   let dialog;
@@ -202,33 +232,38 @@ export function chooseAdmin(ctx, building, floor, room) {
       'room-admin-link',
       [ctx.ui.icon(icon, 16), node('span', '', title), ctx.ui.icon('chevron', 14)]
     );
-  const places = [{ key: 'buildingId', id: building.id, label: building.name }];
+  const places = building ? [{ key: 'buildingId', id: building.id, label: building.name }] : [];
   if (floor)
     places.push({ key: 'floorId', id: floor.id, label: pathName(building.name, floor.label) });
   if (room)
     places.push({
       key: 'roomId',
       id: room.id,
-      label: pathName(building.name, floor?.label, room.number + ' 房'),
+      label: pathName(building.name, floor?.label, room.number + ' 房')
     });
   dialog = ctx.detail(
     '空间管理',
     node('div', 'room-admin', [
-      group('院区扩建', [
-        item('新增楼栋', 'building', () => addBuilding(ctx)),
-        item('在' + building.name + '新增楼层', 'layers', () => addFloor(ctx, building)),
+      group(campus.name + ' · 空间管理', [
+        item('新增分院', 'location', () => editCampus(ctx)),
+        item('编辑分院资料', 'location', () => editCampus(ctx, campus)),
+        item('新增楼栋', 'building', () => addBuilding(ctx, campus)),
+        building && item('修改楼栋名称', 'building', () => renameBuilding(ctx, building)),
+        building &&
+          item('在' + building.name + '新增楼层', 'layers', () => addFloor(ctx, building)),
         floor &&
           item('在' + floor.label + '新增房间与床位', 'bed', () => addRoom(ctx, building, floor)),
         room &&
           room.bedCount < 12 &&
           item('为' + room.number + '房扩充床位', 'bed', () => addBeds(ctx, room)),
         floor?.rooms?.length > 0 &&
-          item('登记' + floor.label + '实际房间位置', 'layers', () => editLayout(ctx, floor)),
+          item('登记' + floor.label + '实际房间位置', 'layers', () => editLayout(ctx, floor))
       ]),
-      group(
-        '登记环境导览视点',
-        places.map((place) => item(place.label, 'location', () => addScene(ctx, place)))
-      ),
+      places.length > 0 &&
+        group(
+          '登记环境导览视点',
+          places.map((place) => item(place.label, 'location', () => addScene(ctx, place)))
+        )
     ])
   );
 }

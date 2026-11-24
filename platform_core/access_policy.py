@@ -153,6 +153,9 @@ COLLECTION_GRANTS = {
     "reports": "reports",
 }
 FACILITY_COMMANDS = (
+    "facility.addCampus",
+    "facility.updateCampus",
+    "facility.renameBuilding",
     "facility.addBuilding",
     "facility.addFloor",
     "facility.addRoom",
@@ -171,6 +174,14 @@ DEFAULT_UI = {
 
 
 def has(user, permission):
+    from . import campus_access
+
+    if (
+        user
+        and campus_access.bound(user)
+        and permission in campus_access.INSTITUTION_GRANTS
+    ):
+        return False
     return bool(user) and (
         user["kind"] == "owner" or permission in user.get("permissions", ())
     )
@@ -319,7 +330,12 @@ def allowed_actions(user):
         actions += [
             *FACILITY_COMMANDS,
             "access.settings",
+            "access.mediaSettings",
         ]
+    from . import campus_access
+
+    if campus_access.bound(user):
+        actions = [a for a in actions if a not in ("ops.expense", "ops.suggest")]
     return sorted(actions)
 
 

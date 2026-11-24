@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from platform_core import access, care, operations
+from platform_core.store import Store
 
 DAY = "2026-11-24"
 PASSWORD = "internal-test-only-417"
@@ -34,20 +35,20 @@ class AccountPermissions(unittest.TestCase):
         access.apply(self.db, self.state, "access.create", values, self.owner)
         return access.login(self.db, name, PASSWORD)
 
-    def test_password_file_random_private_and_restart_does_not_reset(self):
+    def test_bootstrap_secret_encrypted_and_password_change_removes_it(self):
         with (
             tempfile.TemporaryDirectory() as d,
             patch.dict(os.environ, {"NH_OWNER_PASSWORD": ""}),
         ):
-            db = sqlite3.connect(Path(d) / "workspace.sqlite3")
+            store = Store(Path(d) / "workspace.sqlite3")
+            db = store.connect()
             self.addCleanup(db.close)
-            db.row_factory = sqlite3.Row
-            with db:
-                access.init(db)
-            secret = Path(d) / ".owner-password"
+            self.assertFalse((Path(d) / ".owner-password").exists())
             if os.name == "posix":
-                self.assertEqual(stat.S_IMODE(secret.stat().st_mode), 0o600)
-            first = secret.read_text().strip()
+                self.assertEqual(
+                    stat.S_IMODE(store.storage_key_file.stat().st_mode), 0o600
+                )
+            first = db.execute("SELECT password FROM storage_bootstrap").fetchone()[0]
             token, user = access.login(db, "owner", first)
             access.apply(
                 db,
@@ -57,6 +58,7 @@ class AccountPermissions(unittest.TestCase):
                 user,
             )
             access.init(db)
+            self.assertIsNone(db.execute("SELECT * FROM storage_bootstrap").fetchone())
             self.assertIsNone(access.authenticate(db, token))
             with self.assertRaises(PermissionError):
                 access.login(db, "owner", first)

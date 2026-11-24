@@ -286,6 +286,9 @@ export function inquiryForm(ctx) {
     title: '登记入住意向',
     action: 'care.inquire',
     fields: [
+      ...(ctx.state.campusOptions?.length
+        ? [select('campusId', '接待分院', ctx.state.campusOptions.map((c) => ({ value: c.id, label: c.name })))]
+        : []),
       field('name', '长者姓名'),
       field('contact', '联系人或电话', {
         required: false

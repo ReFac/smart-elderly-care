@@ -4,24 +4,25 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import copy
+import json
+from datetime import datetime
 from pathlib import Path
-import shutil
-import sqlite3
-import subprocess
+from platform_core.secure_storage import cipherdb
 import tempfile
 import threading
 import unittest
 from unittest.mock import patch
 
-from platform_core import document_ocr
+from provider_fixture import isolate_credentials
+from platform_core import document_ocr, provider
+from platform_core.provider import media
 from platform_core.store import Store
 
 FIXTURE = Path(__file__).parent / "fixtures" / "discharge-training.png"
-LOCAL = Path(__file__).resolve().parents[1] / ".local/ocr/usr/bin/tesseract"
 PASSWORD = "local-ocr-test-account"
 RESULT = {
     "state": "recognized",
-    "engine": "test fixture",
+    "engine": document_ocr.METHOD,
     "lines": [
         {
             "page": 1,
@@ -39,9 +40,13 @@ class DocumentOcrTests(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
+        isolate_credentials(self, folder.name)
         self.path = Path(folder.name) / "test.db"
         with patch.dict("os.environ", {"NH_OWNER_PASSWORD": PASSWORD}):
-            self.store = Store(self.path)
+            self.store = Store(
+                self.path,
+                now=lambda: datetime.fromisoformat("2026-11-24T12:00:00+08:00"),
+            )
         self.owner, self.actor = self.store.login("owner", PASSWORD)
         self.rid = "r001"
         self.payload = {
@@ -69,7 +74,10 @@ class DocumentOcrTests(unittest.TestCase):
     def command(self, action, payload, actor=None):
         token = actor or self.owner
         return self.store.execute(
-            action, payload, self.store.version(token)["revision"], token
+            action,
+            {**payload, "consent": True} if action == "dossier.ocr" else payload,
+            self.store.version(token)["revision"],
+            token,
         )
 
     def process(self):
@@ -81,7 +89,7 @@ class DocumentOcrTests(unittest.TestCase):
             "verifiedName": self.resident()["name"],
             "sourceFacts": "已核对的原文",
             "pending": "",
-            "method": "院内 OCR 人工核对",
+            "method": "DeepSeek OCR 人工核对",
             "changes": [],
             **extras,
         }
@@ -164,7 +172,7 @@ class DocumentOcrTests(unittest.TestCase):
         )
         with (
             closing(self.store.connect()) as db,
-            self.assertRaises(sqlite3.IntegrityError),
+            self.assertRaises(cipherdb.IntegrityError),
         ):
             db.execute("DELETE FROM dossier_document_reviews")
 
@@ -257,7 +265,7 @@ class DocumentOcrTests(unittest.TestCase):
         entered = threading.Event()
         release = threading.Event()
 
-        def run(_):
+        def run(*args):
             entered.set()
             self.assertTrue(release.wait(5))
             return RESULT
@@ -333,42 +341,93 @@ class DocumentOcrTests(unittest.TestCase):
             )
         )
 
-    def test_real_ocr_reads_synthetic_discharge_photo(self):
-        installed = shutil.which("tesseract")
-        if installed:
-            languages = subprocess.run(
-                [installed, "--list-langs"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=True,
-            ).stdout.splitlines()
-            if not {"eng", "chi_sim"}.issubset(languages):
-                self.skipTest("本地 OCR 的简中、英文模型尚未同时安装")
-        else:
-            models = LOCAL.parents[1] / "share/tesseract-ocr/5/tessdata"
-            if not LOCAL.is_file() or not all(
-                (models / f"{lang}.traineddata").is_file()
-                for lang in ("chi_sim", "eng")
-            ):
-                self.skipTest("本地 OCR 引擎与简中、英文模型尚未安装")
-        self.process()
+    def test_existing_recognition_remains_reviewable_without_cloud_request(self):
+        self.command(
+            "dossier.document",
+            {
+                **self.payload,
+                "residentId": "r002",
+                "requestId": "legacy",
+                "method": "院内 OCR",
+            },
+        )
+        doc = next(
+            item
+            for item in self.data()["medicalDocuments"]
+            if item["residentId"] == "r002"
+        )
+        legacy = {**RESULT, "engine": "Tesseract"}
+        with closing(self.store.connect()) as db, db:
+            db.execute(
+                "INSERT INTO dossier_ocr_jobs VALUES(?,?,?,?,1)",
+                (doc["id"], "legacy", 1, json.dumps(legacy)),
+            )
+        with patch.object(media, "invoke") as send:
+            arg = {"documentId": doc["id"], "residentId": "r002"}
+            self.command("dossier.ocr", arg)
+            name = next(
+                row["name"] for row in self.data()["residents"] if row["id"] == "r002"
+            )
+            self.command(
+                "dossier.reviewDocument",
+                self.review(**arg, verifiedName=name, method="院内 OCR 人工核对"),
+            )
+            send.assert_not_called()
+        archived = next(
+            item
+            for item in self.data()["medicalDocuments"]
+            if item["residentId"] == "r002"
+        )
+        self.assertEqual(archived["summary"]["method"], "院内 OCR 人工核对")
+
+    def test_deepseek_receipt_keeps_literal_text_and_uses_page_quota_once(self):
+        response = {
+            "id": "synthetic-ocr",
+            "object": "ocr.result",
+            "purpose": "text_recognition",
+            "page_count": 1,
+            "pages": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "text": "<｜ref｜>text<｜/ref｜><｜box｜>[[100,100,800,180]]<｜/box｜>姓名："
+                    + self.resident()["name"]
+                    + "\n过敏史：原文乙",
+                }
+            ],
+        }
+        with closing(self.store.connect()) as db, db:
+            provider.grant(db, "模拟", 100, "2029-01-01", self.store.now())
+            plan = provider.latest(db)["id"]
+            media.grant(db, plan, "ocr", 1)
+        with (
+            patch.object(media, "invoke", return_value=response) as send,
+            patch.object(media, "read_key", return_value="fixture"),
+        ):
+            with self.assertRaisesRegex(ValueError, "确认"):
+                self.store.execute(
+                    "dossier.ocr",
+                    self.arg,
+                    self.store.version(self.owner)["revision"],
+                    self.owner,
+                )
+            send.assert_not_called()
+            self.process()
+            self.process()
+            send.assert_called_once()
+            self.assertEqual(
+                send.call_args.args[:4],
+                ("ocr", FIXTURE.read_bytes(), "document.png", "image/png"),
+            )
         with closing(self.store.connect()) as db:
             result = document_ocr.detail(db, self.actor, self.doc["id"])
+            self.assertEqual(media.amounts(db, plan, "ocr")["used"], 1)
         self.assertEqual(result["state"], "recognized", result.get("error"))
-        self.assertGreaterEqual(len(result["lines"]), 4)
-        self.assertTrue(
-            any(
-                c["field"] == "name" and c["value"] == self.resident()["name"]
-                for c in result["candidates"]
-            )
+        self.assertEqual(
+            [c["field"] for c in result["candidates"]], ["name", "allergies"]
         )
-        self.assertTrue(
-            all(
-                len(line["box"]) == 4 and 0 <= line["confidence"] <= 100
-                for line in result["lines"]
-            )
-        )
+        self.assertTrue(result["lines"][0]["box"])
+        self.assertNotIn("confidence", result["lines"][0])
         self.assertIsNone(self.view()["summary"])
 
 

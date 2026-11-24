@@ -1,4 +1,6 @@
+import { downloadDocument, openDocumentButton } from './secure-documents.js';
 import {
+  choose,
   badge,
   btn,
   byRecent,
@@ -186,29 +188,7 @@ function exportDialog(ctx, r) {
         hex.slice(20),
       ].join('-');
       if (!(await ctx.command('care.exportReferral', { referralId: r.id, exportId }))) return false;
-      const { data } = await ctx.get('/api/state');
-      const current = data.referrals?.find((item) => item.id === r.id);
-      const receipt = current?.exports?.find((e) => e.id === exportId);
-      if (
-        data.user.id !== ctx.state.user.id ||
-        !receipt ||
-        current.consents.at(-1).decision !== '同意' ||
-        receipt.consentNumber !== current.consents.length
-      ) {
-        ctx.toast('授权或会话已更新，请重新核实。');
-        return true;
-      }
-      const url = URL.createObjectURL(
-        new Blob([JSON.stringify(receipt.content, null, 2)], {
-          type: 'application/json;charset=utf-8',
-        })
-      );
-      const a = node('a');
-      a.href = url;
-      a.download = '院外衔接-' + exportId + '.json';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      return true;
+      return downloadDocument(ctx, { kind: 'referral', id: r.id, exportId });
     },
   });
 }
@@ -257,7 +237,15 @@ function showReferral(ctx, r) {
       '本地导出凭证',
       records(
         r.exports || [],
-        (e) => named(e.date + ' · ' + e.operator, e.id + ' · 授权记录 ' + e.consentNumber),
+        (e) =>
+          node('div', 'fx-profile', [
+            named(e.date + ' · ' + e.operator, e.id + ' · 授权记录 ' + e.consentNumber),
+            granted && e.consentNumber === history.length
+              ? link(ctx, '下载加密包', () =>
+                  downloadDocument(ctx, { kind: 'referral', id: r.id, exportId: e.id })
+                )
+              : null,
+          ]),
         '尚无导出记录'
       )
     )
@@ -298,7 +286,7 @@ export function referrals(ctx) {
   return table(ctx, {
     title: '院外衔接',
     rows: byRecent(ctx.state.referrals || []),
-    action: btn(ctx, '登记院外衔接', () => createReferral(ctx)),
+    action: choose(openDocumentButton(ctx), btn(ctx, '登记院外衔接', () => createReferral(ctx))),
     filter: status,
     search: {
       placeholder: '搜索长者或接收单位',

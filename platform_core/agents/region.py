@@ -2,16 +2,16 @@
 
 import json
 
-from .. import facility
+from .. import campus_access, facility
 
-FIELDS = ("buildingId", "floorId", "roomId")
-POLICY = ("buildingIds", "floorIds", "roomIds")
+FIELDS = ("campusId", "buildingId", "floorId", "roomId")
+POLICY = ("campusIds", "buildingIds", "floorIds", "roomIds")
 EMPTY_STATE = {"beds": [], "residents": []}
 
 
 def selection(value):
     if not isinstance(value, dict) or set(value) - set(FIELDS):
-        raise ValueError("区域只能指定楼栋、楼层或房间")
+        raise ValueError("区域只能指定分院、楼栋、楼层或房间")
     selected = {}
     for key in FIELDS:
         item = value.get(key, "")
@@ -33,19 +33,20 @@ def within(db, user, selected):
         if not site or policy["institutionId"] != site[0]:
             raise PermissionError("机构范围不匹配")
     if any(key in policy for key in POLICY) and not selected:
-        raise PermissionError("当前岗位必须选择获授权的楼栋、楼层或房间")
+        raise PermissionError("当前岗位必须选择获授权的分院、楼栋、楼层或房间")
 
 
 def resolve(db, state, user, selected):
     within(db, user, selected)
     if selected is None:
         return None
-    return facility.scope(db, state, user, **selected)
+    return facility.scope(db, state, user, agent=True, **selected)
 
 
 def save(db, run_id, resolved):
     historical = {
-        k: resolved[k] for k in ("institutionId", *FIELDS, "label", "roomIds")
+        k: resolved[k]
+        for k in ("institutionId", *FIELDS, "label", "roomIds", "residentIds")
     }
     db.execute(
         "INSERT INTO agent_regions VALUES(?,?)",
@@ -53,7 +54,7 @@ def save(db, run_id, resolved):
     )
 
 
-def visible(db, user, saved):
+def visible(db, user, saved, permitted=None):
     """An employee newly limited to a room cannot reopen the old whole-floor report."""
     if not user.get("facilityScope") and isinstance(
         user.get("facilityScope", {}), dict
@@ -63,7 +64,14 @@ def visible(db, user, saved):
         within(db, user, saved)
         if not saved:
             return True
-        current = facility.scope(db, EMPTY_STATE, user, **{k: saved[k] for k in FIELDS})
+        if campus_access.bound(user):
+            if permitted is None:
+                permitted = campus_access.current_residents(db, user)
+            if "residentIds" not in saved or not set(saved["residentIds"]) <= permitted:
+                return False
+        current = facility.scope(
+            db, EMPTY_STATE, user, agent=True, **{k: saved.get(k, "") for k in FIELDS}
+        )
         return saved["institutionId"] == current["institutionId"] and set(
             saved["roomIds"]
         ) <= set(current["roomIds"])

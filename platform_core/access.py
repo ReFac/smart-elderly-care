@@ -4,15 +4,13 @@ import hashlib
 import hmac
 import json
 import os
-from pathlib import Path
 import re
 import secrets
-import sqlite3
-import stat
 import time
 from uuid import uuid4
 
-from . import portal, staff_scope
+from . import campus_access, portal, staff_scope
+from .secure_storage import INTEGRITY_ERRORS
 
 from .access_policy import (
     DEFAULT_UI,
@@ -75,40 +73,19 @@ def _owner_password(db):
     if configured:
         return _password(configured)
     filename = db.execute("PRAGMA database_list").fetchone()[2]
-    if not filename:
-        return secrets.token_urlsafe(24)
-    path = Path(filename).parent / ".owner-password"
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        # Reuse an interrupted, local bootstrap safely. Never follow symlinks.
-        fd = os.open(
-            path,
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
-        )
-        with os.fdopen(fd, "r", encoding="utf-8") as source:
-            info = os.fstat(source.fileno())
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or not stat.S_ISREG(path.lstat().st_mode)
-                or not os.path.samestat(info, path.lstat())
-                or (
-                    os.name == "posix"
-                    and (info.st_uid != os.getuid() or info.st_mode & 0o077)
-                )
-            ):
-                raise RuntimeError("首次登录密码文件须归当前用户所有且权限为 0600")
-            return _password(source.read(132).strip())
-    value = secrets.token_urlsafe(24)
-    with os.fdopen(fd, "w", encoding="utf-8") as output:
-        output.write(value + "\n")
-        output.flush()
-        os.fsync(output.fileno())
-    return value
+    secret = secrets.token_urlsafe(24)
+    if filename:
+        if not db.execute("PRAGMA cipher_version").fetchone():
+            raise ValueError("首次凭据须保存在加密的机构数据库")
+        db.execute("INSERT INTO storage_bootstrap VALUES(1,?)", (secret,))
+    return secret
 
 
 def init(db):
     """Initialize inside the caller's write transaction. No default shared password."""
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS storage_bootstrap(id INTEGER PRIMARY KEY CHECK(id=1), password TEXT NOT NULL)"
+    )
     db.execute("""CREATE TABLE IF NOT EXISTS accounts (
       id TEXT PRIMARY KEY, username TEXT UNIQUE COLLATE NOCASE NOT NULL,
       display_name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('owner','staff','family')),
@@ -121,6 +98,8 @@ def init(db):
         db.execute(
             "ALTER TABLE accounts ADD COLUMN family_services INTEGER NOT NULL DEFAULT 0 CHECK(family_services IN (0,1))"
         )
+    if "campus_id" not in {r[1] for r in db.execute("PRAGMA table_info(accounts)")}:
+        db.execute("ALTER TABLE accounts ADD COLUMN campus_id TEXT")
     if "portal_scopes" not in {r[1] for r in db.execute("PRAGMA table_info(accounts)")}:
         db.execute(
             "ALTER TABLE accounts ADD COLUMN portal_scopes TEXT NOT NULL DEFAULT '[]'"
@@ -184,6 +163,8 @@ def _public(row):
         if row["kind"] == "owner"
         else json.loads(row["permissions"]),
     }
+    if row["kind"] == "staff" and row["campus_id"]:
+        user["facilityScope"] = {"campusIds": [row["campus_id"]]}
     user["routes"] = resolve_routes(user)
     if user["kind"] == "family":
         user["familyServices"] = bool(row["family_services"])
@@ -345,6 +326,27 @@ def _family_services(p, kind, current=False):
     return p["familyServices"]
 
 
+def _campus(db, user, p, kind, target=None):
+    local = (target or {}).get("facilityScope", {}).get("campusIds", [])
+    granted = user.get("facilityScope", {}).get("campusIds")
+    default = local[0] if local else ""
+    if target is None and granted:
+        default = granted[0]
+    key = p.get("campusId", default)
+    if not isinstance(key, str) or (key and kind != "staff"):
+        raise ValueError("分院授权仅适用于员工账号")
+    if granted is not None and key not in granted:
+        raise PermissionError("只能为员工分配获授权的分院")
+    if (
+        key
+        and not db.execute(
+            "SELECT 1 FROM facility_campuses WHERE id=?", (key,)
+        ).fetchone()
+    ):
+        raise ValueError("请选择已登记的分院")
+    return key
+
+
 def preview(db, user, payload, facility_policy=None):
     if not manages_accounts(user):
         raise PermissionError("此账号没有对应的管理权限")
@@ -353,6 +355,7 @@ def preview(db, user, payload, facility_policy=None):
         "kind",
         "role",
         "permissions",
+        "campusId",
     }:
         raise ValueError("权限预览字段无效")
     area_check = staff_scope.boundary(db, user, facility_policy)
@@ -367,6 +370,9 @@ def preview(db, user, payload, facility_policy=None):
         raise ValueError("亲属账号不能授予员工权限")
     kind, role, grants = _account_definition(user, payload, target)
     draft = {"kind": kind, "role": role, "permissions": grants}
+    campus = _campus(db, user, payload, kind, target)
+    if campus:
+        draft["facilityScope"] = {"campusIds": [campus]}
     if (
         target
         and area_check
@@ -375,6 +381,7 @@ def preview(db, user, payload, facility_policy=None):
         raise PermissionError("拟分配岗位的区域超出本人可管理的范围")
     return {
         **draft,
+        "permissions": [g for g in grants if has(draft, g)],
         "routes": resolve_routes(draft),
         "allowedActions": allowed_actions(draft),
     }
@@ -382,6 +389,7 @@ def preview(db, user, payload, facility_policy=None):
 
 def _create(db, state, p, user, area_check):
     kind, role, grants = _account_definition(user, p)
+    campus = _campus(db, user, p, kind)
     family_services = _family_services(p, kind)
     scopes = portal.scopes(p, kind)
     username = _required(p.get("username"), "登录名", 40).lower()
@@ -401,8 +409,8 @@ def _create(db, state, p, user, area_check):
     try:
         with staff_scope.verify_change(db, area_check, lambda: account(db, account_id)):
             db.execute(
-                """INSERT INTO accounts(id,username,display_name,kind,role,permissions,resident_id,salt,password_hash,family_services,portal_scopes)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                """INSERT INTO accounts(id,username,display_name,kind,role,permissions,resident_id,salt,password_hash,family_services,portal_scopes,campus_id)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     account_id,
                     username,
@@ -415,9 +423,10 @@ def _create(db, state, p, user, area_check):
                     _digest(password, salt),
                     int(family_services),
                     json.dumps(scopes),
+                    campus or None,
                 ),
             )
-    except sqlite3.IntegrityError as error:
+    except INTEGRITY_ERRORS as error:
         raise ValueError("此登录名已被使用") from error
     return (
         f"创建{role}账号 {username}"
@@ -435,6 +444,7 @@ def _update(db, p, target, user):
         "enabled",
         "familyServices",
         "portalScopes",
+        "campusId",
     }:
         raise ValueError("只可修改员工或亲属的姓名、启用状态及员工岗位权限")
     enabled = p.get("enabled", target["enabled"])
@@ -447,10 +457,11 @@ def _update(db, p, target, user):
     family_services = _family_services(
         p, target["kind"], target.get("familyServices", False)
     )
+    campus = _campus(db, user, p, target["kind"], target)
     previous_scopes = target.get("portalScopes", [])
     scopes = portal.scopes(p, target["kind"], previous_scopes)
     db.execute(
-        "UPDATE accounts SET display_name=?,role=?,permissions=?,enabled=?,family_services=?,portal_scopes=? WHERE id=?",
+        "UPDATE accounts SET display_name=?,role=?,permissions=?,enabled=?,family_services=?,portal_scopes=?,campus_id=? WHERE id=?",
         (
             display,
             role,
@@ -458,12 +469,24 @@ def _update(db, p, target, user):
             int(enabled),
             int(family_services),
             json.dumps(scopes),
+            campus or None,
             target["id"],
         ),
     )
     if not enabled:
         db.execute("DELETE FROM sessions WHERE account_id=?", (target["id"],))
     changes = []
+    if (target.get("facilityScope", {}).get("campusIds") or [""])[0] != campus:
+        changes.append(
+            "分院授权调整为"
+            + (
+                db.execute(
+                    "SELECT name FROM facility_campuses WHERE id=?", (campus,)
+                ).fetchone()[0]
+                if campus
+                else "全机构"
+            )
+        )
     for key, label in portal.SCOPES.items():
         if (key in scopes) != (key in previous_scopes):
             changes.append(("授予" if key in scopes else "收回") + label)
@@ -551,7 +574,19 @@ def apply(db, state, action, payload, user, facility_policy=None):
 
 
 def project(db, state, user, facility_policy=None):
-    filtered = visible_data(state, user)
+    filtered = visible_data(campus_access.projection(db, state, user), user)
+    if filtered.get("referrals"):
+        # Receipts stay visible. Their historical payload is served only after a current consent check.
+        filtered["referrals"] = [
+            {
+                **ref,
+                "exports": [
+                    {k: v for k, v in entry.items() if k != "content"}
+                    for entry in ref.get("exports", [])
+                ],
+            }
+            for ref in filtered["referrals"]
+        ]
     row = db.execute("SELECT * FROM institution_settings WHERE id=1").fetchone()
     filtered.update(
         user=user,
@@ -579,6 +614,20 @@ def project(db, state, user, facility_policy=None):
         filtered["familyServiceHistory"] = [
             {k: r[k] for k in ("date", "time", "title", "completedAt") if k in r}
             for r in latest[:30]
+        ]
+    if (
+        manages_accounts(user)
+        or has(user, "intake")
+        or has(user, "shifts")
+        or campus_access.bound(user)
+    ) and db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='facility_campuses'"
+    ).fetchone():
+        filtered["campusOptions"] = [
+            dict(r)
+            for r in db.execute("SELECT id,name FROM facility_campuses ORDER BY rowid")
+            if not campus_access.bound(user)
+            or r["id"] in user["facilityScope"]["campusIds"]
         ]
     if manages_accounts(user):
         area_check = staff_scope.boundary(db, user, facility_policy)
@@ -630,6 +679,8 @@ def change_own_password(db, user, payload):
 
 
 def _replace_password(db, target, new_password):
+    if target["kind"] == "owner":
+        db.execute("DELETE FROM storage_bootstrap")
     salt = secrets.token_bytes(16)
     db.execute(
         "UPDATE accounts SET salt=?,password_hash=? WHERE id=?",

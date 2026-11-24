@@ -23,12 +23,14 @@ SERVICE_ITEMS = {
 }
 
 
-def match_staff(state, resident, day):
+def match_staff(state, resident, day, campus_id=None):
     ward = lookup(state, "beds", resident["bedId"])["ward"]
     candidates = {
         s["staff"]
         for s in state.get("shifts", [])
-        if s["date"] == day and s["area"] == ward
+        if s["date"] == day
+        and s["area"] == ward
+        and (campus_id is None or s.get("campusId", "campus-main") == campus_id)
     }
     if not candidates:
         raise ValueError("今天本区尚无排班，请指定负责照护的人员。")
@@ -70,7 +72,11 @@ def assess(state, p, today):
             for a in state["assessments"]
         )
     )
-    assignee = assigned or ("" if historical else match_staff(state, resident, today))
+    assignee = assigned or (
+        ""
+        if historical
+        else match_staff(state, resident, today, p.get("matchCampusId"))
+    )
     if scale:
         for group, subtotal in scale["subtotals"].items():
             if subtotal < sum(GROUPS[group].values()):

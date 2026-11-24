@@ -4,10 +4,11 @@ import argparse
 from contextlib import closing
 import json
 from pathlib import Path
-import sqlite3
+from platform_core import secure_storage
 import sys
 
 from platform_core import activity, provider
+from platform_core.provider import media
 
 
 def main():
@@ -18,6 +19,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     grant = commands.add_parser("grant", help="核实付款后发放或调整本期额度")
     grant.add_argument("--name", required=True)
+    grant.add_argument("--ocr-pages", type=int, help="本期识别照片页数")
+    grant.add_argument("--asr-seconds", type=int, help="本期语音识别秒数")
     grant.add_argument("--tokens", required=True, type=int)
     grant.add_argument(
         "--expires", required=True, help="到期日 YYYY-MM-DD（上海时区，含当日）"
@@ -31,17 +34,23 @@ def main():
     reconcile.add_argument("--actor", required=True)
     reconcile.add_argument("--request", required=True)
     reconcile.add_argument("--tokens", type=int, required=True)
+    commands.add_parser("media-unsettled", help="列出待核对的媒体用量")
+    rec_media = commands.add_parser(
+        "media-reconcile", help="按 DeepSeek 账单核实单笔页数或秒数"
+    )
+    rec_media.add_argument("--call", required=True)
+    rec_media.add_argument("--units", type=int, required=True)
     args = parser.parse_args()
     try:
         with (
             closing(
-                sqlite3.connect(
-                    args.db.resolve().as_uri() + "?mode=rw", uri=True, timeout=8
+                secure_storage.open_database(
+                    args.db,
+                    secure_storage.read_key(secure_storage.key_location(args.db)),
                 )
             ) as db,
             db,
         ):
-            db.row_factory = sqlite3.Row
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("BEGIN IMMEDIATE")
             if not db.execute(
@@ -52,7 +61,17 @@ def main():
             change = None
             if args.command == "grant":
                 provider.grant(db, args.name, args.tokens, args.expires)
+                for kind, limit in (("ocr", args.ocr_pages), ("asr", args.asr_seconds)):
+                    if limit is not None:
+                        media.grant(db, provider.latest(db)["id"], kind, limit)
                 change = f"调整套餐 {args.name}，本期额度 {args.tokens} token，有效至 {args.expires}"
+                if args.ocr_pages is not None:
+                    change += f"，文书识别 {args.ocr_pages} 页"
+                if args.asr_seconds is not None:
+                    change += f"，语音转写 {args.asr_seconds} 秒"
+            elif args.command == "media-reconcile":
+                media.reconcile(db, args.call, args.units, provider.local_time())
+                change = f"媒体识别用量对账 {args.call}，结算 {args.units} 单位"
             elif args.command == "disable":
                 provider.disable(db)
                 change = "停用云端规划套餐"
@@ -80,7 +99,14 @@ def main():
                     {},
                     {},
                 )
-            if args.command == "unsettled":
+            if args.command == "media-unsettled":
+                result = [
+                    dict(r)
+                    for r in db.execute(
+                        "SELECT id,kind,actor,at,reserved,state FROM media_usage WHERE state IN ('pending','uncertain') ORDER BY at"
+                    )
+                ]
+            elif args.command == "unsettled":
                 entries = db.execute("""SELECT planId,actor,request,model,status,allowance,createdAt FROM api_usage
                     WHERE status IN ('pending','uncertain') ORDER BY createdAt""")
                 result = [dict(r) for r in entries]
@@ -91,7 +117,7 @@ def main():
                     provider.local_time(),
                 )
             print(json.dumps(result, ensure_ascii=False, indent=2))
-    except (ValueError, sqlite3.Error, OSError) as err:
+    except (ValueError, secure_storage.cipherdb.Error, OSError) as err:
         print(str(err), file=sys.stderr)
         return 1
     return 0

@@ -1,3 +1,4 @@
+import { voiceProposal } from './speech-input.js';
 import {
   node,
   page,
@@ -62,26 +63,14 @@ function simulate(ctx) {
 
 function newProposal(ctx) {
   const tasks = ctx.state.tasks.filter((t) => t.status === '待执行' && t.date <= today(ctx));
-  const requestId = uniqueId();
-  runForm(ctx, {
-    title: '登记语音变更草稿',
-    action: 'gw.propose',
-    description: '语音识别接口待接入。用文字模拟转写并选择工单，提交后进入人工确认队列。',
-    fields: [
-      select(
-        'taskId',
-        '拟完成的工单',
-        tasks.map((t) => ({
-          value: t.id,
-          label: residentName(ctx, t.residentId) + ' · ' + t.title + ' · ' + t.date + ' ' + t.time,
-        })),
-      ),
-      memo('transcript', '模拟转写文本', true),
-      memo('note', '拟写入的执行记录', true),
-    ],
-    map: (v) => ({ ...v, requestId, targetAction: 'care.completeTask' }),
-    submitLabel: '提交确认申请',
-  });
+  return voiceProposal(
+    ctx,
+    tasks.map((t) => [
+      t.id,
+      residentName(ctx, t.residentId) + ' · ' + t.title + ' · ' + t.date + ' ' + t.time,
+    ]),
+    uniqueId(),
+  );
 }
 
 function review(ctx, row) {
@@ -182,7 +171,15 @@ function changePreview(ctx, task, row) {
   ]);
 }
 
-function confirmProposal(ctx, row) {
+async function confirmProposal(ctx, row, trigger) {
+  try {
+    const changes = await ctx.get('/api/voice-proposals/' + encodeURIComponent(row.id));
+    if (!trigger.isConnected) return;
+    row = { ...row, ...changes };
+  } catch (error) {
+    ctx.toast(error.message);
+    return;
+  }
   const task = ctx.state.tasks.find((t) => t.id === row.taskId);
   const approve = btn(
     ctx,
@@ -247,11 +244,11 @@ function queueRow(ctx, row, alerts) {
   const meta = alerts
     ? row.observations.map((e) => sources[e.source]).join('、')
     : '申请人 ' + row.requester;
-  const note = alerts ? row.observation : row.note;
+  const note = alerts ? row.observation : null;
   const action = btn(
     ctx,
     alerts ? (pending ? '查看并复核' : '查看记录') : '核对改动',
-    () => (alerts ? inspectAlert(ctx, row) : confirmProposal(ctx, row)),
+    (event) => (alerts ? inspectAlert(ctx, row) : confirmProposal(ctx, row, event.currentTarget)),
     'secondary',
   );
   return node('li', 'gw-event', [

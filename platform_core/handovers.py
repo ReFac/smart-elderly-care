@@ -4,29 +4,37 @@ from hashlib import sha256
 import json
 import re
 
-from . import access, facility
+from . import access, campus_access, facility
 from .care.records import append_record, get_resident, lookup, text_field
 
 
-def recipients(db, actor):
+def recipients(db, actor, policy=None):
     access.require(actor, "care")
-    rows = db.execute(
-        """SELECT id, username, display_name, kind, permissions FROM accounts
-        WHERE enabled=1 AND kind IN ('staff','owner') AND id<>?
-        ORDER BY display_name, username""",
+    accounts = db.execute(
+        """SELECT * FROM accounts WHERE enabled=1 AND kind IN ('staff','owner')
+        AND id<>? ORDER BY display_name,username""",
         (actor["id"],),
     )
-    return {
-        "recipients": [
-            {
-                "id": row["id"],
-                "username": row["username"],
-                "displayName": row["display_name"],
-            }
-            for row in rows
-            if row["kind"] == "owner" or "care" in json.loads(row["permissions"])
-        ]
-    }
+    result = []
+    for row in accounts:
+        target = access._public(row)
+        if not access.has(target, "care"):
+            continue
+        if policy is not None:
+            target["facilityScope"] = campus_access.effective(
+                target, policy(db, target)
+            )
+        if not _share_campus(actor, target):
+            continue
+        result.append({k: target[k] for k in ("id", "username", "displayName")})
+    return {"recipients": result}
+
+
+def _share_campus(actor, receiver):
+    return not (campus_access.bound(actor) and campus_access.bound(receiver)) or bool(
+        set(actor["facilityScope"]["campusIds"])
+        & set(receiver["facilityScope"]["campusIds"])
+    )
 
 
 def workload(state, resident_id, today, include_vitals):
@@ -60,7 +68,12 @@ def recipient(db, actor, account_id, policy):
     ):
         raise ValueError("请选择另一位在岗且具有照护权限的接班账号")
     if policy is not None:
-        receiver = {**receiver, "facilityScope": policy(db, receiver)}
+        receiver = {
+            **receiver,
+            "facilityScope": campus_access.effective(receiver, policy(db, receiver)),
+        }
+    if not _share_campus(actor, receiver):
+        raise PermissionError("接班账号不在双方共有分院")
     return receiver
 
 
@@ -170,7 +183,12 @@ def draft(db, state, actor, receiver, resident_id, today):
             + (" · " + "、".join(samples) + tail if samples else "")
         )
     return dict(
-        note="\n".join(lines), stamp=stamp, snapshot=counts, date=today, scope=scope
+        note="\n".join(lines),
+        stamp=stamp,
+        snapshot=counts,
+        date=today,
+        scope=scope,
+        residentIds=sorted({item[3] for items in groups.values() for item in items}),
     )
 
 
@@ -239,6 +257,7 @@ def create(db, state, payload, actor, now, policy=None):
             {
                 "draftScope": "resident" if resident_id else "personal",
                 "draftDate": today,
+                "draftResidentIds": generated["residentIds"],
             }
             if generated
             else {}

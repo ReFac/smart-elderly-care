@@ -15,7 +15,7 @@ function tourViewer(ctx, scope, initialLabel) {
           node('div', 'room-tour-empty', [
             node('span', 'room-tour-empty-icon', ctx.ui.icon('building', 32)),
             node('h2', '', initialLabel || ctx.state.uiSettings.institutionName),
-            node('p', '', '此范围尚未发布环境照片或全景视点。'),
+            node('p', '', '此范围尚未发布环境照片或全景视点。')
           ])
         );
         return;
@@ -38,7 +38,7 @@ function tourViewer(ctx, scope, initialLabel) {
             action: 'facility.withdrawScene',
             description: '确认从环境导览中撤下“' + scene.title + '”。',
             map: () => ({ sceneId: scene.id }),
-            submitLabel: '确认撤下',
+            submitLabel: '确认撤下'
           });
         });
       for (const [index, scene] of data.scenes.entries()) {
@@ -50,8 +50,12 @@ function tourViewer(ctx, scope, initialLabel) {
           ),
           node('span', '', [
             node('strong', '', scene.title),
-            node('small', '', pathName(scene.buildingName, scene.floorLabel, scene.roomNumber)),
-          ]),
+            node(
+              'small',
+              '',
+              pathName(scene.campusName, scene.buildingName, scene.floorLabel, scene.roomNumber)
+            )
+          ])
         ]);
         places.append(entry);
         controls.push(entry);
@@ -97,7 +101,11 @@ function tourViewer(ctx, scope, initialLabel) {
         image.src = scene.mediaUrl;
         text.replaceChildren(
           node('h2', '', scene.title),
-          node('p', '', pathName(scene.buildingName, scene.floorLabel, scene.roomNumber))
+          node(
+            'p',
+            '',
+            pathName(scene.campusName, scene.buildingName, scene.floorLabel, scene.roomNumber)
+          )
         );
         count.textContent =
           active + 1 + ' / ' + data.scenes.length + (panoramic ? ' · 可左右浏览全景' : '');
@@ -110,7 +118,7 @@ function tourViewer(ctx, scope, initialLabel) {
           node('section', 'room-tour-view', [
             text,
             photo,
-            node('div', 'room-tour-move', [count, withdraw, prev, next]),
+            node('div', 'room-tour-move', [count, withdraw, prev, next])
           ]),
           node('aside', 'room-tour-index', [
             heading(
@@ -119,8 +127,8 @@ function tourViewer(ctx, scope, initialLabel) {
               '导览视点',
               node('span', 'room-context', data.scenes.length + ' 站')
             ),
-            places,
-          ]),
+            places
+          ])
         ])
       );
       show(0);

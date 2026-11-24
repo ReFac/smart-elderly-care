@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+from provider_fixture import isolate_credentials
 from platform_core import agents, facility, provider
 from platform_core.store import Store
 from platform_core.agents import runtime
@@ -18,6 +19,7 @@ class RegionRuns(unittest.TestCase):
     def setUp(self):
         workspace = tempfile.TemporaryDirectory()
         self.addCleanup(workspace.cleanup)
+        isolate_credentials(self, workspace.name)
         self.now = datetime(2026, 11, 24, 12, tzinfo=provider.ZONE)
         with patch.dict(os.environ, {"NH_OWNER_PASSWORD": "region-fixture-pass"}):
             self.store = Store(Path(workspace.name) / "site.sqlite", lambda: self.now)

@@ -226,7 +226,7 @@ class GatewayCases(TestCase):
         self.assertEqual(self.view(self.second)["voiceQueue"], [])
         self.assertEqual(
             (self.task["status"], self.task["note"], self.task["operatorId"]),
-            ("已完成", proposal["note"], self.first["id"]),
+            ("已完成", self.proposal["note"], self.first["id"]),
         )
         with self.assertRaises(ValueError):
             self.call("confirm", {"proposalId": proposal["id"]}, self.second)

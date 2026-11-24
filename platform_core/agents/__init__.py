@@ -63,7 +63,9 @@ def summary(row):
     args = json.loads(row["args"])
     area = json.loads(row["regionSnapshot"]) if row["regionSnapshot"] else None
     return dict(
-        region={k: v for k, v in area.items() if k != "roomIds"} if area else None,
+        region={k: v for k, v in area.items() if k not in ("roomIds", "residentIds")}
+        if area
+        else None,
         id=row["id"],
         actorName=row["actorName"],
         started=row["started"],
@@ -89,10 +91,10 @@ def region_visible(db, user, run_id):
     return region.visible(db, user, json.loads(row[0]) if row else None)
 
 
-def visible(db, row, user):
+def visible(db, row, user, permitted=None):
     area = json.loads(row["regionSnapshot"]) if row["regionSnapshot"] else None
     return (
-        region.visible(db, user, area)
+        region.visible(db, user, area, permitted)
         and (user["kind"] == "owner" or row["actor"] == user["id"])
         and all(
             a["agent"] in {s.key for s in specialists(user)}
@@ -109,9 +111,12 @@ def listing(db, user):
     if user["kind"] != "owner":
         query += " WHERE r.actor=?"
         args = (user["id"],)
+    from ..campus_access import current_residents
+
+    permitted = current_residents(db, user)
     result = []
     for row in db.execute(query + " ORDER BY r.rowid DESC", args):
-        if visible(db, row, user):
+        if visible(db, row, user, permitted):
             result.append(summary(row))
         if len(result) == 80:
             break

@@ -6,6 +6,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from .. import access_policy as access
+from .. import campus_access
 from ..care import apply as care_action
 from ..care.records import append_record, lookup, text_field
 from ..care.residency import active_card
@@ -44,6 +45,12 @@ def init(db):
         resident_id TEXT NOT NULL, bed_id TEXT NOT NULL, allocation TEXT NOT NULL, room TEXT NOT NULL,
         created_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT '待确认', reviewer_id TEXT,
         reviewed_at TEXT, reason TEXT, UNIQUE(requester_id,request_id))""")
+    if "media_call" not in {
+        r[1] for r in db.execute("PRAGMA table_info(gateway_voice)")
+    }:
+        db.execute(
+            "ALTER TABLE gateway_voice ADD COLUMN media_call TEXT NOT NULL DEFAULT ''"
+        )
     db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS gateway_pending_task
                   ON gateway_voice(task_id) WHERE status = '待确认'""")
 
@@ -96,10 +103,25 @@ def ingest(db, state, payload, user, today):
         return f"收到重传事件 {event}，沿用原预警"
     bed = lookup(state, "beds", bed_id)
     room = room_label(bed)
+    mapped = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='facility_beds'"
+    ).fetchone()
+    if mapped:
+        # A room may have the same label in different buildings or branches.
+        room_beds = {
+            r[0]
+            for r in db.execute(
+                "SELECT bedId FROM facility_beds WHERE roomId=(SELECT roomId FROM facility_beds WHERE bedId=?)",
+                (bed_id,),
+            )
+        }
+        room_beds.add(bed_id)
+    else:
+        room_beds = {b["id"] for b in state["beds"] if room_label(b) == room}
     ids = [
         b["residentId"]
         for b in state["beds"]
-        if room_label(b) == room and b["residentId"]
+        if b["id"] in room_beds and b["residentId"]
     ]
     if hint and hint not in ids:
         raise ValueError("提示的长者不在此房间的在住名单中。")
@@ -210,22 +232,43 @@ def propose(db, state, payload, user, today):
     if payload.get("targetAction", "care.completeTask") != "care.completeTask":
         raise ValueError("当前语音确认模板仅支持登记一项工单完成。")
     request_id = required(payload, "requestId", "申请幂等编号", 160)
-    transcript = required(payload, "transcript", "转写内容", 1000)
+    transcript = required(
+        payload,
+        "transcript",
+        "转写内容",
+        16000 if payload.get("transcriptId") else 1000,
+    )
     note = required(payload, "note", "拟写入的执行记录", 1000)
     task_id = required(payload, "taskId", "目标工单")
+    task = lookup(state, "tasks", task_id)
+    campus_access.require_resident(db, user, task["residentId"], state)
+    media_call = text_field(payload.get("transcriptId"), "语音识别凭据", limit=100)
+    if media_call:
+        recognized = db.execute(
+            """SELECT result FROM media_usage WHERE id=? AND actor=? AND reference=?
+                               AND kind='asr' AND state='complete'""",
+            (media_call, user["id"], task_id),
+        ).fetchone()
+        if not recognized or transcript != json.loads(recognized[0])["text"]:
+            raise ValueError("请重新核对当前工单的语音识别凭据")
     previous = db.execute(
         "SELECT * FROM gateway_voice WHERE requester_id=? AND request_id=?",
         (user["id"], request_id),
     ).fetchone()
     if previous:
-        if (previous["task_id"], previous["note"], previous["transcript"]) != (
+        if (
+            previous["task_id"],
+            previous["note"],
+            previous["transcript"],
+            previous["media_call"],
+        ) != (
             task_id,
             note,
             transcript,
+            media_call,
         ):
             raise ValueError("此申请编号已对应不同改动。")
         return "收到重复提交，沿用原语音申请"
-    task = lookup(state, "tasks", task_id)
     resident = lookup(state, "residents", task["residentId"])
     if (
         task["status"] != "待执行"
@@ -244,7 +287,7 @@ def propose(db, state, payload, user, today):
     db.execute(
         """INSERT INTO gateway_voice
         (id,requester_id,request_id,requester_name,task_id,task_title,transcript,note,
-         resident_id,bed_id,allocation,room,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         resident_id,bed_id,allocation,room,created_at,media_call) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             uuid4().hex,
             user["id"],
@@ -259,16 +302,33 @@ def propose(db, state, payload, user, today):
             allocation,
             room_label(bed),
             timestamp(),
+            media_call,
         ),
     )
     return f"已提交「{task['title']}」的完成申请，等待授权人员确认"
 
 
-def resolve_voice(db, state, payload, user, today, confirm):
+def pending_voice(db, user, proposal_id, state=None):
     access.require(user, "care")
-    row = record(db, "gateway_voice", required(payload, "proposalId", "申请编号"))
+    access.require(user, "voice.confirm")
+    row = record(db, "gateway_voice", proposal_id)
+    beds = campus_access.allowed_beds(db, user, include_rooms=True)
+    if beds is not None:
+        if state is None:
+            state = json.loads(
+                db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+            )
+        if row["bed_id"] not in beds or row[
+            "resident_id"
+        ] not in campus_access.resident_ids(state, beds):
+            raise PermissionError("该语音申请不在本人授权范围内")
     if row["status"] != "待确认":
         raise ValueError("该申请已由其他人员处理，请刷新待办。")
+    return row
+
+
+def resolve_voice(db, state, payload, user, today, confirm):
+    row = pending_voice(db, user, required(payload, "proposalId", "申请编号"), state)
     note = "" if confirm else required(payload, "reason", "退回原因", 500)
     if confirm:
         task = lookup(state, "tasks", row["task_id"])
@@ -317,7 +377,7 @@ def apply(db, state, action, payload, user, today):
     raise ValueError("未知接入动作。")
 
 
-def project(db, data, user):
+def project(db, data, user, bed_ids=None, resident_ids=None):
     data["gatewayAlerts"], data["voiceQueue"], data["integrationCatalog"] = [], [], []
     if any(
         access.has(user, grant)
@@ -329,6 +389,13 @@ def project(db, data, user):
     if access.has(user, "alerts"):
         episodes = {}
         for row in db.execute("SELECT * FROM gateway_alert ORDER BY rowid DESC"):
+            if bed_ids is not None and row["bed_id"] not in bed_ids:
+                continue
+            if resident_ids is not None and any(
+                rid and rid not in resident_ids
+                for rid in (row["resident_hint"], row["resident_id"])
+            ):
+                continue
             episodes.setdefault(row["episode"], []).append(
                 {
                     "source": row["source"],
@@ -354,7 +421,11 @@ def project(db, data, user):
                     "signal": row["signal"],
                     "observedAt": row["observed_at"],
                     "residentHint": row["resident_hint"],
-                    "candidates": json.loads(row["candidates"]),
+                    "candidates": [
+                        rid
+                        for rid in json.loads(row["candidates"])
+                        if resident_ids is None or rid in resident_ids
+                    ],
                     "evidenceRef": row["evidence_ref"],
                     "observation": row["observation"],
                     "status": row["status"],
@@ -374,8 +445,13 @@ def project(db, data, user):
         )
     if access.has(user, "voice.confirm") and access.has(user, "care"):
         for row in db.execute(
-            "SELECT * FROM gateway_voice WHERE status='待确认' ORDER BY rowid DESC"
+            """SELECT id,task_id,task_title,resident_id,room,created_at,requester_name,bed_id
+               FROM gateway_voice WHERE status='待确认' ORDER BY rowid DESC"""
         ):
+            if bed_ids is not None and row["bed_id"] not in bed_ids:
+                continue
+            if resident_ids is not None and row["resident_id"] not in resident_ids:
+                continue
             data["voiceQueue"].append(
                 {
                     "id": row["id"],
@@ -385,8 +461,6 @@ def project(db, data, user):
                     "room": row["room"],
                     "createdAt": row["created_at"],
                     "requester": row["requester_name"],
-                    "transcript": row["transcript"],
-                    "note": row["note"],
                 }
             )
     return data

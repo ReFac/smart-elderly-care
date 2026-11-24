@@ -4,16 +4,18 @@ from contextlib import closing
 from datetime import datetime
 import json
 from pathlib import Path
-import sqlite3
 from zoneinfo import ZoneInfo
 
 from .room_context import room_context, validate_proposal
+from . import protected_docs, secure_storage, storage_assets
 from .bootstrap import empty_workspace
+from . import backups
 from .access_policy import can_record_scale
 from . import (
     access,
     activity,
     agents,
+    campus_access,
     care,
     dossier,
     facility,
@@ -24,7 +26,7 @@ from . import (
 )
 
 TIMEZONE = ZoneInfo("Asia/Shanghai")
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class Conflict(Exception):
@@ -55,7 +57,10 @@ class Store:
         if initial_data not in ("demo", "empty"):
             raise ValueError("请选择 demo 或 empty 初始化模式")
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.storage_key_file, self._storage_master = secure_storage.prepare_database(
+            self.path
+        )
         self.now = now
         self.facility_policy = facility_policy
         with closing(self.connect()) as db, db:
@@ -67,6 +72,8 @@ class Store:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, data TEXT NOT NULL)"
             )
+            storage_assets.init(db)
+            protected_docs.init(db)
             activity.init(db)
             if not db.execute("SELECT 1 FROM workspace WHERE id=1").fetchone():
                 day = now().date().isoformat()
@@ -91,19 +98,28 @@ class Store:
                 data.update(missing)
                 db.execute("UPDATE workspace SET data=? WHERE id=1", (encode(data),))
             facility.init(db, data)
+            backups.init(db)
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        self.backups = backups.BackupService(self)
 
     def actor(self, db, token):
         actor = viewer(db, token)
         if self.facility_policy is not None:
-            actor = {**actor, "facilityScope": self.facility_policy(db, actor)}
+            actor = {
+                **actor,
+                "facilityScope": campus_access.effective(
+                    actor, self.facility_policy(db, actor)
+                ),
+            }
+        if campus_access.bound(actor):
+            actor["permissions"] = [
+                g for g in actor["permissions"] if access.has(actor, g)
+            ]
+            actor["routes"] = access.resolve_routes(actor)
         return actor
 
     def connect(self):
-        db = sqlite3.connect(self.path, timeout=8)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys=ON")
-        return db
+        return secure_storage.open_database(self.path, self._storage_master)
 
     def login(self, username, password):
         with closing(self.connect()) as db:
@@ -140,9 +156,8 @@ class Store:
                 "SELECT revision,data FROM workspace WHERE id=1"
             ).fetchone()
             today = self.now().date().isoformat()
-            data = access.project(
-                db, json.loads(row["data"]), user, self.facility_policy
-            )
+            state = json.loads(row["data"])
+            data = access.project(db, state, user, self.facility_policy)
             if can_record_scale(user):
                 from .care.scales import CATALOG
 
@@ -192,7 +207,11 @@ class Store:
                     and agents.region_visible(db, user, item["runId"])
                 ]
             dossier.project(db, data, user, today)
-            gateways.project(db, data, user)
+            beds = campus_access.allowed_beds(db, user, include_rooms=True)
+            people = (
+                campus_access.resident_ids(state, beds) if beds is not None else None
+            )
+            gateways.project(db, data, user, beds, people)
             if access.has(user, "assistants"):
                 data["agentRuns"] = agents.listing(db, user)
                 data["agentCapabilities"] = self.agent_capabilities(db, user)
@@ -252,7 +271,7 @@ class Store:
     def handover_recipients(self, token):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            return handovers.recipients(db, self.actor(db, token))
+            return handovers.recipients(db, self.actor(db, token), self.facility_policy)
 
     def handover_draft(self, token, receiver_id, resident_id=""):
         with closing(self.connect()) as db, db:
@@ -297,7 +316,8 @@ class Store:
                 raise FileNotFoundError("未找到本次简报可核对的交班")
             if run["region"]:
                 region = {
-                    k: run["region"][k] for k in ("buildingId", "floorId", "roomId")
+                    k: run["region"].get(k, "")
+                    for k in ("campusId", "buildingId", "floorId", "roomId")
                 }
                 current = facility.scope(db, state, user, **region)
                 if record["residentId"] not in current["residentIds"]:
@@ -307,14 +327,30 @@ class Store:
     def photo(self, token, doc_id):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            return dossier.photo(db, doc_id, self.actor(db, token))
+            user = self.actor(db, token)
+            campus_access.require_document(db, user, doc_id)
+            return dossier.photo(db, doc_id, user)
+
+    def voice_proposal(self, token, proposal_id):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            actor = self.actor(db, token)
+            row = gateways.pending_voice(db, actor, proposal_id)
+            return {"transcript": row["transcript"], "note": row["note"]}
+
+    def transcribe(self, token, task_id, raw, consent):
+        from .provider import speech
+
+        return speech.recognize(self, token, task_id, raw, consent)
 
     def document_ocr_detail(self, token, doc_id):
         from . import document_ocr
 
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            return document_ocr.detail(db, self.actor(db, token), doc_id)
+            user = self.actor(db, token)
+            campus_access.require_document(db, user, doc_id)
+            return document_ocr.detail(db, user, doc_id)
 
     def dossier_summary_draft(self, token, resident_id):
         with closing(self.connect()) as db, db:
@@ -325,6 +361,7 @@ class Store:
             state = json.loads(
                 db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
             )
+            campus_access.require_resident(db, user, resident_id, state)
             return dossier.summary_draft(db, state, user, resident_id)
 
     def portal_history(self, token, scope, offset, revision):
@@ -399,7 +436,9 @@ class Store:
     def tour_media(self, token, path):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            return facility.can_read_media(db, {}, self.actor(db, token), path)
+            if not facility.can_read_media(db, {}, self.actor(db, token), path):
+                raise FileNotFoundError("该环境场景尚未发布")
+            return storage_assets.read_tour(db, path)
 
     def agent_capabilities(self, db, user):
         result = agents.capabilities(user)
@@ -410,7 +449,14 @@ class Store:
                     "id": "rooms.search",
                     "method": "GET",
                     "path": "/api/facility/search",
-                    "arguments": ["q", "buildingId", "floorId", "roomId", "limit"],
+                    "arguments": [
+                        "q",
+                        "campusId",
+                        "buildingId",
+                        "floorId",
+                        "roomId",
+                        "limit",
+                    ],
                     "cloudTokens": 0,
                 },
                 {
@@ -424,7 +470,7 @@ class Store:
                     "id": "rooms.tour",
                     "method": "GET",
                     "path": "/api/facility/tour",
-                    "arguments": ["buildingId", "floorId", "roomId"],
+                    "arguments": ["campusId", "buildingId", "floorId", "roomId"],
                     "cloudTokens": 0,
                 },
             ]
@@ -560,6 +606,7 @@ class Store:
                 if action != "gw.propose":
                     raise ValueError("未登记的区域工具")
                 payload = validate_proposal(db, data, user, payload, today)
+            campus_access.authorize_command(db, user, action, payload, data)
             previous = activity.locate(db, data, action, payload, user)
             domain = action.partition(".")[0]
             try:
@@ -573,6 +620,12 @@ class Store:
                     summary = handovers.withdraw(data, payload, user, now)
                 elif domain in ("ops", "care"):
                     fields = dict(payload)
+                    if action in ("care.inquire", "ops.shift"):
+                        fields["campusId"] = facility.selected_campus(db, user, fields)
+                    if action == "care.assess":
+                        fields["matchCampusId"] = facility.resident_campus(
+                            db, data, fields.get("residentId")
+                        )
                     actor_fields = {
                         "care.assess": "operator",
                         "care.addMedication": "operator",
@@ -608,6 +661,10 @@ class Store:
                     )
                 elif domain == "facility":
                     summary = facility.apply(db, data, action, payload, user, today)
+                elif action == "access.mediaSettings":
+                    from .provider import media
+
+                    summary = media.configure(db, user, payload)
                 elif domain == "access":
                     summary = access.apply(
                         db, data, action, payload, user, self.facility_policy

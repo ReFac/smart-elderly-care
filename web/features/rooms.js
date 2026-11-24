@@ -10,7 +10,7 @@ const memory = new Map();
 function scopedAgent(ctx, place, label) {
   return ctx.available('assistants') && ctx.startScopedAgent
     ? ctx.ui.button(
-        '在此范围发起协作',
+        place.roomId ? '房间协作' : place.floorId ? '楼层协作' : '分院协作',
         () => ctx.startScopedAgent({ ...place, label }),
         'secondary',
         'spark'
@@ -18,7 +18,7 @@ function scopedAgent(ctx, place, label) {
     : null;
 }
 
-function searchBox(ctx, openRoom) {
+function searchBox(ctx, openRoom, campusId) {
   const search = node('input', '');
   search.type = 'search';
   search.placeholder = '搜索长者姓名或房号';
@@ -28,7 +28,7 @@ function searchBox(ctx, openRoom) {
   matches.hidden = true;
   const form = node('form', 'room-search', [
     node('label', 'room-search-box', [ctx.ui.icon('search', 17), search]),
-    matches,
+    matches
   ]);
   let generation = 0,
     timer;
@@ -49,14 +49,14 @@ function searchBox(ctx, openRoom) {
     matches.hidden = false;
     matches.replaceChildren(statusText('正在搜索…'));
     try {
-      const result = await lookup(ctx, '/search', { q: term, limit: 12 });
+      const result = await lookup(ctx, '/search', { q: term, limit: 12, campusId });
       if (ticket !== generation || !form.isConnected) return;
       const list = node('div', 'room-matches-list');
       if (!result.results.length) list.append(statusText('没有匹配的长者或房间'));
       for (const room of result.results) {
         const text = room.matchedNames.length ? room.matchedNames.join('、') : '房间';
         const entry = button(
-          pathName(room.buildingName, room.floorLabel, room.number, text),
+          pathName(room.campusName, room.buildingName, room.floorLabel, room.number, text),
           async () => {
             hide();
             await openRoom(room.buildingId, room.floorId, room.roomId, room.matchedNames);
@@ -66,9 +66,9 @@ function searchBox(ctx, openRoom) {
             ctx.ui.icon(room.matchedNames.length ? 'people' : 'bed', 18),
             node('span', '', [
               node('strong', '', room.number + ' 房 · ' + text),
-              node('small', '', pathName(room.buildingName, room.floorLabel)),
+              node('small', '', pathName(room.campusName, room.buildingName, room.floorLabel))
             ]),
-            ctx.ui.icon('chevron', 14),
+            ctx.ui.icon('chevron', 14)
           ]
         );
         const direct =
@@ -190,7 +190,7 @@ function floorPlan(ctx, data, chooseRoom) {
     ),
     board,
     mapStatus,
-    node('div', 'room-number-picker', [node('h3', '', '按房号选择'), numbers]),
+    node('div', 'room-number-picker', [node('h3', '', '按房号选择'), numbers])
   ]);
   if (!data.rooms.length) {
     board.append(
@@ -202,10 +202,7 @@ function floorPlan(ctx, data, chooseRoom) {
     const roomLabel = room.number + ' 房';
     const tile = button(roomLabel, () => chooseRoom(room.id), 'room-plan-tile', [
       node('strong', '', room.number),
-      node('span', '', [
-        ctx.ui.icon('bed', 14),
-        room.occupiedCount + ' / ' + room.bedCount + ' 床',
-      ]),
+      node('span', '', [ctx.ui.icon('bed', 14), room.occupiedCount + ' / ' + room.bedCount + ' 床'])
     ]);
     tile.title = roomLabel + ' · ' + room.occupiedCount + ' 张床已入住';
     tile.setAttribute('aria-label', tile.title);
@@ -213,7 +210,7 @@ function floorPlan(ctx, data, chooseRoom) {
       ['left', 'x'],
       ['top', 'y'],
       ['width', 'w'],
-      ['height', 'h'],
+      ['height', 'h']
     ])
       tile.style[name] = room[key] + '%';
     tile.dataset.occupied = String(room.occupiedCount > 0);
@@ -231,7 +228,7 @@ function floorPlan(ctx, data, chooseRoom) {
           'span',
           'room-context',
           data.layoutSource === 'schematic' ? '位置为示意排列' : '房间位置以登记数据为准'
-        ),
+        )
       ]),
       collection.lastChild
     );
@@ -241,14 +238,14 @@ function floorPlan(ctx, data, chooseRoom) {
     select(id) {
       for (const [key, ...controls] of switches)
         for (const item of controls) item.setAttribute('aria-pressed', String(key === id));
-    },
+    }
   };
 }
 
 function placeInBed(ctx, room, bed) {
   const actions = choose();
   const dialog = ctx.detail(
-    pathName(room.buildingName, room.floorLabel, bed.label + ' 床'),
+    pathName(room.campusName, room.buildingName, room.floorLabel, bed.label + ' 床'),
     actions
   );
   if (canAct(ctx, 'care.admit'))
@@ -287,7 +284,7 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
     const body = [
       ctx.ui.icon('bed', 18),
       node('span', '', [node('small', '', bed.label + ' 床'), node('strong', '', name)]),
-      resident || allocatable ? ctx.ui.icon('chevron', 14) : null,
+      resident || allocatable ? ctx.ui.icon('chevron', 14) : null
     ];
     const row = resident
       ? button('查看' + name + '的档案', () => profile(ctx, resident), 'room-bed-row', body)
@@ -301,18 +298,18 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
     node('header', 'room-detail-head', [
       node('span', 'room-pin', ctx.ui.icon('location', 22)),
       node('div', '', [
-        node('small', '', pathName(room.buildingName, room.floorLabel)),
-        node('h2', '', room.number + ' 房'),
-      ]),
+        node('small', '', pathName(room.campusName, room.buildingName, room.floorLabel)),
+        node('h2', '', room.number + ' 房')
+      ])
     ]),
     node('div', 'room-detail-meta', [node('span', '', '照护区'), node('strong', '', room.ward)]),
     node('div', 'room-detail-meta', [
       node('span', '', '入住床位'),
-      node('strong', '', room.occupiedCount + ' / ' + room.bedCount + ' 床'),
+      node('strong', '', room.occupiedCount + ' / ' + room.bedCount + ' 床')
     ]),
     node('section', 'room-bed-list', [
       node('h3', '', '床位明细'),
-      room.beds.length ? people : statusText('尚未设置床位'),
+      room.beds.length ? people : statusText('尚未设置床位')
     ]),
     node('div', 'room-room-actions', [
       ctx.available('tour')
@@ -321,9 +318,9 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
       scopedAgent(
         ctx,
         { buildingId: room.buildingId, floorId: room.floorId, roomId: room.id },
-        pathName(room.buildingName, room.floorLabel, room.number + ' 房')
-      ),
-    ]),
+        pathName(room.campusName, room.buildingName, room.floorLabel, room.number + ' 房')
+      )
+    ])
   ]);
 }
 
@@ -334,17 +331,22 @@ export function roomsPage(ctx) {
   const root = page(
     ctx,
     '房间工作台',
-    '选择楼层后，可在平面图或房号列表中定位房间。',
+    '选择分院、楼栋和楼层，可通过平面图、房号或长者姓名定位房间。',
     controls,
     stage
   );
   const actor = ctx.state.user.id;
   const saved = memory.get(actor) || {};
-  let directory, building, floor, room, floorMap, detailPanel;
+  let directory, campus, building, floor, room, floorMap, detailPanel;
   let floorRequest = 0,
     detailRequest = 0;
   function remember() {
-    memory.set(actor, { buildingId: building?.id, floorId: floor?.id, roomId: room?.id });
+    memory.set(actor, {
+      campusId: campus?.id,
+      buildingId: building?.id,
+      floorId: floor?.id,
+      roomId: room?.id
+    });
   }
   async function chooseRoom(id, names = []) {
     const ticket = ++detailRequest;
@@ -361,7 +363,7 @@ export function roomsPage(ctx) {
           openFacilityTour(
             ctx,
             { roomId: data.id },
-            pathName(data.buildingName, data.floorLabel, data.number + ' 房')
+            pathName(data.campusName, data.buildingName, data.floorLabel, data.number + ' 房')
           );
         })
       );
@@ -371,21 +373,29 @@ export function roomsPage(ctx) {
     }
   }
   function nav() {
+    const branch = node('select', 'room-building-select');
+    branch.setAttribute('aria-label', '选择分院');
+    if (campus.address) branch.title = campus.address;
+    for (const item of directory.campuses)
+      branch.add(new Option(item.name, item.id, false, campus.id === item.id));
+    branch.addEventListener('change', () => switchCampus(branch.value));
     const pick = node('select', 'room-building-select');
     pick.setAttribute('aria-label', '选择楼栋');
-    for (const item of directory.buildings)
-      pick.add(new Option(item.name, item.id, false, building.id === item.id));
+    for (const item of directory.buildings.filter((b) => b.campusId === campus.id))
+      pick.add(new Option(item.name, item.id, false, building?.id === item.id));
     pick.addEventListener('change', () => switchLevel(pick.value));
     const chips = node('div', 'room-floors');
     chips.setAttribute('aria-label', '选择楼层');
-    for (const lv of building.floors) {
+    for (const lv of building?.floors || []) {
       const chip = button(lv.label, () => switchLevel(building.id, lv.id), 'room-floor-btn');
       chip.setAttribute('aria-pressed', String(lv.id === floor?.id));
       chips.append(chip);
     }
     return node('div', 'room-locator', [
-      node('label', 'room-building', [ctx.ui.icon('building', 18), pick]),
+      node('label', 'room-building', [node('span', '', '分院'), branch]),
+      building ? node('label', 'room-building', [node('span', '', '楼栋'), pick]) : null,
       chips,
+      scopedAgent(ctx, { campusId: campus.id }, campus.name)
     ]);
   }
   async function switchLevel(buildingId, floorId, roomId, names = []) {
@@ -432,29 +442,41 @@ export function roomsPage(ctx) {
         failure(ctx, main, error, () => switchLevel(buildingId, floorId, roomId, names));
     }
   }
+  async function switchCampus(id, initial = {}) {
+    ++floorRequest;
+    ++detailRequest;
+    campus = directory.campuses.find((item) => item.id === id) || directory.campuses[0];
+    const buildings = directory.buildings.filter((b) => b.campusId === campus.id);
+    building = floor = room = floorMap = detailPanel = null;
+    controls.replaceChildren(searchBox(ctx, switchLevel, campus.id));
+    if (directory.canManage)
+      controls.append(
+        ctx.ui.button(
+          '空间管理',
+          () => chooseAdmin(ctx, building, floor, room, campus),
+          'secondary',
+          'building'
+        )
+      );
+    if (!buildings.length) {
+      remember();
+      area.replaceChildren(nav(), statusText('此分院尚未登记楼栋'));
+      return;
+    }
+    const first = buildings.find((b) => b.id === initial.buildingId) || buildings[0];
+    await switchLevel(first.id, initial.floorId, initial.roomId);
+  }
   async function load() {
-    stage.replaceChildren(statusText('正在读取楼栋…'));
+    stage.replaceChildren(statusText('正在读取分院…'));
     try {
       directory = await lookup(ctx, '');
       if (!root.isConnected) return;
-      controls.replaceChildren(searchBox(ctx, switchLevel));
-      if (!directory.buildings.length) {
-        stage.replaceChildren(statusText('当前授权范围内没有楼栋'));
+      if (!directory.campuses.length) {
+        stage.replaceChildren(statusText('当前账号没有获授权的分院'));
         return;
       }
-      if (directory.canManage)
-        controls.append(
-          ctx.ui.button(
-            '空间管理',
-            () => chooseAdmin(ctx, building, floor, room),
-            'secondary',
-            'building'
-          )
-        );
       stage.replaceChildren(area);
-      const initial =
-        directory.buildings.find((b) => b.id === saved.buildingId) || directory.buildings[0];
-      await switchLevel(initial.id, saved.floorId, saved.roomId);
+      await switchCampus(saved.campusId, saved);
     } catch (error) {
       failure(ctx, stage, error, load);
     }

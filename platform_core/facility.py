@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 from math import ceil, isfinite, sqrt
 import os
 import re
-import sqlite3
+from .secure_storage import INTEGRITY_ERRORS
 import unicodedata
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
@@ -14,13 +14,23 @@ from .access_policy import has
 from .care.records import text_field
 
 MAIN = "building-main"
+HOME_CAMPUS = "campus-main"
 INITIAL_FLOORS = (1, 2, 3, 5, 6, 7)
 READ_GRANTS = ("intake", "care", "clinical", "residents")
-ROOM_FIELDS = "r.id,r.number,r.ward,r.floorId,r.x,r.y,r.w,r.h,f.buildingId,f.label AS floorLabel,b.name AS buildingName"
-ROOM_TABLE = "facility_rooms r JOIN facility_floors f ON f.id=r.floorId JOIN facility_buildings b ON b.id=f.buildingId"
+ROOM_FIELDS = "r.id,r.number,r.ward,r.floorId,r.x,r.y,r.w,r.h,f.buildingId,f.label AS floorLabel,b.name AS buildingName,b.campusId,b.campusName"
+ROOM_TABLE = "facility_rooms r JOIN facility_floors f ON f.id=r.floorId JOIN facility_building_directory b ON b.id=f.buildingId"
 SCHEMA = (
     "CREATE TABLE IF NOT EXISTS facility_site (singleton INTEGER PRIMARY KEY CHECK(singleton=1), id TEXT NOT NULL UNIQUE)",
     "CREATE TABLE IF NOT EXISTS facility_buildings (id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE)",
+    "CREATE TABLE IF NOT EXISTS facility_campuses (id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,address TEXT NOT NULL DEFAULT '')",
+    """CREATE TABLE IF NOT EXISTS facility_building_campus (
+        buildingId TEXT PRIMARY KEY REFERENCES facility_buildings(id),
+        campusId TEXT NOT NULL REFERENCES facility_campuses(id),localName TEXT NOT NULL,
+        UNIQUE(campusId,localName))""",
+    """CREATE VIEW IF NOT EXISTS facility_building_directory AS
+        SELECT m.buildingId AS id,m.localName AS name,c.id AS campusId,c.name AS campusName,b.rowid AS ordinal
+        FROM facility_buildings b JOIN facility_building_campus m ON m.buildingId=b.id
+        JOIN facility_campuses c ON c.id=m.campusId""",
     """CREATE TABLE IF NOT EXISTS facility_floors (
         id TEXT PRIMARY KEY,buildingId TEXT NOT NULL REFERENCES facility_buildings(id),
         number INTEGER NOT NULL,label TEXT NOT NULL,layoutSource TEXT NOT NULL DEFAULT 'schematic',
@@ -55,10 +65,24 @@ def init(db, state):
         ):
             for key, url in db.execute(query):
                 _index_media(db, kind, key, url)
+    db.execute(
+        "INSERT OR IGNORE INTO facility_campuses(id,name) VALUES (?,?)",
+        (HOME_CAMPUS, "本部"),
+    )
+    db.execute(
+        """INSERT INTO facility_building_campus(buildingId,campusId,localName)
+        SELECT b.id,?,b.name FROM facility_buildings b
+        WHERE NOT EXISTS(SELECT 1 FROM facility_building_campus m WHERE m.buildingId=b.id)""",
+        (HOME_CAMPUS,),
+    )
     if db.execute("SELECT id FROM facility_site").fetchone():
         return
     db.execute("INSERT INTO facility_site VALUES (1,?)", ("site-" + uuid4().hex,))
     db.execute("INSERT INTO facility_buildings VALUES (?,?)", (MAIN, "主楼"))
+    db.execute(
+        "INSERT INTO facility_building_campus VALUES(?,?,?)",
+        (MAIN, HOME_CAMPUS, "主楼"),
+    )
     for number in INITIAL_FLOORS:
         db.execute(
             "INSERT INTO facility_floors(id,buildingId,number,label) VALUES (?,?,?,?)",
@@ -85,6 +109,29 @@ def init(db, state):
                 (room_id, floor_id, number, bed["ward"]),
             )
         db.execute("INSERT INTO facility_beds VALUES (?,?)", (bed["id"], room_id))
+
+
+def selected_campus(db, user, payload):
+    grants = user.get("facilityScope", {}).get("campusIds")
+    key = payload.get("campusId") or ((grants or [HOME_CAMPUS])[0])
+    if not isinstance(key, str) or (grants is not None and key not in grants):
+        raise PermissionError("所选分院未获授权")
+    if not db.execute("SELECT 1 FROM facility_campuses WHERE id=?", (key,)).fetchone():
+        raise ValueError("所选分院不存在")
+    return key
+
+
+def resident_campus(db, state, resident_id):
+    bed = next(
+        (p.get("bedId") for p in state["residents"] if p["id"] == resident_id), None
+    )
+    row = db.execute(
+        "SELECT b.campusId FROM "
+        + ROOM_TABLE
+        + " JOIN facility_beds beds ON beds.roomId=r.id WHERE beds.bedId=?",
+        (bed,),
+    ).fetchone()
+    return row[0] if row else HOME_CAMPUS
 
 
 def _id(prefix):
@@ -127,6 +174,7 @@ class _Access:
     buildings: frozenset | None
     floors: frozenset | None
     rooms: frozenset | None
+    campuses: frozenset | None
 
     def allows(self, b="", f="", r=""):
         return all(
@@ -147,7 +195,7 @@ def _access(db, user, *, environment=False):
     if not isinstance(policy, dict) or policy.get("institutionId", site) != site:
         raise PermissionError("机构范围不匹配")
     limits = []
-    for key in ("buildingIds", "floorIds", "roomIds"):
+    for key in ("buildingIds", "floorIds", "roomIds", "campusIds"):
         if key not in policy:
             limits.append(None)
         else:
@@ -157,13 +205,21 @@ def _access(db, user, *, environment=False):
             ):
                 raise PermissionError("区域授权格式无效")
             limits.append(frozenset(items))
+    if limits[3] is not None:
+        buildings = {
+            row[0]
+            for row in db.execute("SELECT id,campusId FROM facility_building_directory")
+            if row[1] in limits[3]
+        }
+        limits[0] = frozenset(buildings) if limits[0] is None else limits[0] & buildings
     return _Access(site, *limits)
 
 
-def _restrictions(acl, buildingId="", floorId="", roomId=""):
+def _restrictions(acl, buildingId="", floorId="", roomId="", campusId=""):
     tests = []
     values = []
     for column, key, allowed in (
+        ("b.campusId", campusId, acl.campuses),
         ("f.buildingId", buildingId, acl.buildings),
         ("f.id", floorId, acl.floors),
         ("r.id", roomId, acl.rooms),
@@ -180,42 +236,47 @@ def _restrictions(acl, buildingId="", floorId="", roomId=""):
     return (" WHERE " + " AND ".join(tests) if tests else ""), values
 
 
-def _meta(db, acl, buildingId="", floorId="", roomId=""):
-    where, values = _restrictions(acl, buildingId, floorId, roomId)
+def _meta(db, acl, buildingId="", floorId="", roomId="", campusId=""):
+    where, values = _restrictions(acl, buildingId, floorId, roomId, campusId)
     return [
         dict(r)
         for r in db.execute(
             f"SELECT {ROOM_FIELDS} FROM {ROOM_TABLE}"
             + where
-            + " ORDER BY b.rowid,f.number,r.number COLLATE NOCASE,r.id",
+            + " ORDER BY b.ordinal,f.number,r.number COLLATE NOCASE,r.id",
             values,
         )
     ]
 
 
-def _floor_rows(db, acl, buildingId="", floorId=""):
+def _floor_rows(db, acl, buildingId="", floorId="", campusId=""):
     # Only include parents of accessible children when the downstream scope is constrained.
     rooms_needed = acl.rooms is not None
     left = " JOIN" if rooms_needed else " LEFT JOIN"
-    where, values = _restrictions(acl, buildingId, floorId)
+    where, values = _restrictions(acl, buildingId, floorId, campusId=campusId)
     return [
         dict(f)
         for f in db.execute(
-            "SELECT f.*,b.name AS buildingName,COUNT(r.id) AS roomCount FROM facility_floors f JOIN facility_buildings b ON f.buildingId=b.id"
+            "SELECT f.*,b.name AS buildingName,b.campusId,b.campusName,COUNT(r.id) AS roomCount FROM facility_floors f JOIN facility_building_directory b ON f.buildingId=b.id"
             + left
             + " facility_rooms r ON r.floorId=f.id"
             + where
-            + " GROUP BY f.id ORDER BY b.rowid,f.number",
+            + " GROUP BY f.id ORDER BY b.ordinal,f.number",
             values,
         )
     ]
 
 
 def directory(db, state, user):
-    acl = _access(db, user)
+    return _directory(db, state, user, _access(db, user))
+
+
+def _directory(db, state, user, acl):
     floors = _floor_rows(db, acl)
     by_id = {}
-    for b in db.execute("SELECT * FROM facility_buildings ORDER BY rowid"):
+    for b in db.execute(
+        "SELECT id,name,campusId,campusName FROM facility_building_directory ORDER BY ordinal"
+    ):
         if acl.allows(b["id"]) and (
             acl.rooms is None
             and acl.floors is None
@@ -227,8 +288,23 @@ def directory(db, state, user):
     can_manage = user["kind"] == "owner" and all(
         v is None for v in (acl.buildings, acl.floors, acl.rooms)
     )
+    visible_campuses = {b["campusId"] for b in by_id.values()}
+    whole_campus = (
+        acl.floors is None
+        and acl.rooms is None
+        and "buildingIds" not in user.get("facilityScope", {})
+    )
+    campuses = [
+        dict(c)
+        for c in db.execute(
+            "SELECT id,name,address FROM facility_campuses ORDER BY rowid"
+        )
+        if c["id"] in visible_campuses
+        or (whole_campus and (acl.campuses is None or c["id"] in acl.campuses))
+    ]
     result = {
         "institutionId": acl.site,
+        "campuses": campuses,
         "buildings": list(by_id.values()),
         "canManage": can_manage,
         "canReadResidents": True,
@@ -322,44 +398,63 @@ def room(db, state, user, roomId):
     }
 
 
-def scope(db, state, user, buildingId="", floorId="", roomId=""):
-    """Resolve the host's validated hierarchy into IDs before exposing any agent data."""
-    if not any((buildingId, floorId, roomId)):
-        raise ValueError("请先限定楼栋、楼层或房间")
-    acl = _access(db, user)
-    rooms = _meta(db, acl, buildingId, floorId, roomId)
-    if not rooms:
-        floors = _floor_rows(db, acl, buildingId, floorId)
-        if roomId or (floorId and not floors):
-            raise FileNotFoundError("没有可访问的区域")
-        if buildingId and buildingId not in [
-            b["id"] for b in directory(db, state, user)["buildings"]
-        ]:
+def scope(
+    db, state, user, buildingId="", floorId="", roomId="", campusId="", *, agent=False
+):
+    """Resolve the requested hierarchy before exposing any agent input."""
+    if not any((campusId, buildingId, floorId, roomId)):
+        raise ValueError("请先限定分院、楼栋、楼层或房间")
+    # Finance agents can summarize their branch's accounts without room-directory access.
+    finance_branch = (
+        agent
+        and bool(campusId)
+        and not any((buildingId, floorId, roomId))
+        and has(user, "assistants")
+        and has(user, "finance")
+    )
+    acl = _access(db, user, environment=finance_branch)
+    directory_data = _directory(db, state, user, acl)
+    building = floor_row = room_row = None
+    if roomId:
+        matching = _meta(db, acl, buildingId, floorId, roomId, campusId)
+        if not matching:
+            raise FileNotFoundError("没有可访问的房间")
+        room_row = matching[0]
+        floorId = room_row["floorId"]
+    if floorId:
+        matching = _floor_rows(db, acl, buildingId, floorId, campusId)
+        if not matching:
+            raise FileNotFoundError("没有可访问的楼层")
+        floor_row = matching[0]
+        buildingId = floor_row["buildingId"]
+    if buildingId:
+        building = next(
+            (
+                b
+                for b in directory_data["buildings"]
+                if b["id"] == buildingId and (not campusId or b["campusId"] == campusId)
+            ),
+            None,
+        )
+        if not building:
             raise FileNotFoundError("没有可访问的楼栋")
-    if rooms:
-        buildingId = rooms[0]["buildingId"]
-        if roomId:
-            floorId = rooms[0]["floorId"]
-    elif floorId:
-        buildingId = floors[0]["buildingId"]
+        campusId = building["campusId"]
+    campus = next((c for c in directory_data["campuses"] if c["id"] == campusId), None)
+    if not campus:
+        raise FileNotFoundError("没有可访问的分院")
+    rooms = _meta(db, acl, buildingId, floorId, roomId, campusId)
     beds = _used_beds(db, {r["id"] for r in rooms}, state)
     allbeds = [b for entries in beds.values() for b in entries]
-    if rooms:
-        location = [rooms[0]["buildingName"]]
-        if floorId:
-            location.append(rooms[0]["floorLabel"])
-        if roomId:
-            location.append(rooms[0]["number"] + " 房")
-    elif floorId:
-        location = [floors[0]["buildingName"], floors[0]["label"]]
-    else:
-        location = [
-            db.execute(
-                "SELECT name FROM facility_buildings WHERE id=?", (buildingId,)
-            ).fetchone()[0]
-        ]
+    location = [campus["name"]]
+    if building:
+        location.append(building["name"])
+    if floor_row:
+        location.append(floor_row["label"])
+    if room_row:
+        location.append(room_row["number"] + " 房")
     return {
         "institutionId": acl.site,
+        "campusId": campusId,
         "buildingId": buildingId,
         "floorId": floorId,
         "roomId": roomId,
@@ -374,14 +469,16 @@ def _normalized(value):
     return re.sub(r"[\s·\-]+", "", unicodedata.normalize("NFKC", value).casefold())
 
 
-def search(db, state, user, q, buildingId="", floorId="", roomId="", limit=12):
+def search(
+    db, state, user, q, buildingId="", floorId="", roomId="", limit=12, campusId=""
+):
     acl = _access(db, user)
     limit = _integer(limit, "查询条数", 1, 30)
     term = _normalized(_text(q, "搜索词", 80))
     if not term:
         raise ValueError("请填写房号或姓名中的至少一个字")
     number_term = re.sub(r"(?:号房间|号房|房间|房号|号|室|房)$", "", term)
-    rooms = _meta(db, acl, buildingId, floorId, roomId)
+    rooms = _meta(db, acl, buildingId, floorId, roomId, campusId)
     beds = _used_beds(db, {r["id"] for r in rooms}, state)
     hits = []
     for r in rooms:
@@ -402,6 +499,8 @@ def search(db, state, user, q, buildingId="", floorId="", roomId="", limit=12):
                     {
                         "roomId": r["id"],
                         "number": r["number"],
+                        "campusId": r["campusId"],
+                        "campusName": r["campusName"],
                         "buildingId": r["buildingId"],
                         "buildingName": r["buildingName"],
                         "floorId": r["floorId"],
@@ -525,13 +624,13 @@ def can_read_media(db, state, user, path):
     return any(acl.allows(row["buildingId"], row["id"]) for row in rows)
 
 
-def tour(db, state, user, buildingId="", floorId="", roomId=""):
+def tour(db, state, user, buildingId="", floorId="", roomId="", campusId=""):
     acl = _access(db, user, environment=True)
     scenes = []
-    query = """SELECT s.*,b.name AS buildingName,COALESCE(f.label,'') AS floorLabel,
+    query = """SELECT s.*,b.name AS buildingName,b.campusId,b.campusName,COALESCE(f.label,'') AS floorLabel,
         COALESCE(r.number,'') AS roomNumber FROM facility_scenes s
-        JOIN facility_buildings b ON s.buildingId=b.id LEFT JOIN facility_floors f ON s.floorId=f.id
-        LEFT JOIN facility_rooms r ON s.roomId=r.id ORDER BY s.sortOrder,b.rowid,f.number,r.number,s.rowid"""
+        JOIN facility_building_directory b ON s.buildingId=b.id LEFT JOIN facility_floors f ON s.floorId=f.id
+        LEFT JOIN facility_rooms r ON s.roomId=r.id ORDER BY s.sortOrder,b.ordinal,f.number,r.number,s.rowid"""
     for raw in db.execute(query):
         s = dict(raw)
         if not _scene_visible(acl, s):
@@ -539,6 +638,7 @@ def tour(db, state, user, buildingId="", floorId="", roomId=""):
         if any(
             asked and asked != s[key]
             for key, asked in (
+                ("campusId", campusId),
                 ("buildingId", buildingId),
                 ("floorId", floorId),
                 ("roomId", roomId),
@@ -640,7 +740,7 @@ def _add_beds(db, state, room_id, count, rate):
         return
     r = _find(db, "facility_rooms", room_id, "房间")
     f = _find(db, "facility_floors", r["floorId"], "楼层")
-    building = _find(db, "facility_buildings", f["buildingId"], "楼栋")
+    building = _find(db, "facility_building_directory", f["buildingId"], "楼栋")
     previous = db.execute(
         "SELECT COUNT(*) FROM facility_beds WHERE roomId=?", (room_id,)
     ).fetchone()[0]
@@ -658,7 +758,12 @@ def _add_beds(db, state, room_id, count, rate):
     prefix = (
         existing[0]["label"].rsplit("-", 1)[0]
         if existing
-        else f"{building['name']}·{f['label']}·{r['number']}"
+        else (
+            (building["campusName"] + "·")
+            if building["campusId"] != HOME_CAMPUS
+            else ""
+        )
+        + f"{building['name']}·{f['label']}·{r['number']}"
     )
     labels = {b["label"] for b in state["beds"] if b["ward"] == r["ward"]}
     slot = 0
@@ -690,14 +795,50 @@ def apply(db, state, action, payload, user, today):
         raise PermissionError("院区维护需要完整机构管理范围")
     p = payload
     try:
-        if action == "facility.addBuilding":
+        if action == "facility.addCampus":
+            name = _text(p.get("name"), "分院名称", 60)
+            address = text_field(p.get("address"), "分院地址", limit=150)
+            db.execute(
+                "INSERT INTO facility_campuses VALUES(?,?,?)",
+                (_id("campus"), name, address),
+            )
+            return "新增分院 " + name
+        if action == "facility.updateCampus":
+            campus = _find(db, "facility_campuses", p.get("campusId"), "分院")
+            name = _text(p.get("name", campus["name"]), "分院名称", 60)
+            address = text_field(
+                p.get("address", campus["address"]), "分院地址", limit=150
+            )
+            db.execute(
+                "UPDATE facility_campuses SET name=?,address=? WHERE id=?",
+                (name, address, campus["id"]),
+            )
+            return f"更新分院 {campus['name']} 的名称和地址，现名 {name}"
+        if action == "facility.renameBuilding":
+            building = _find(
+                db, "facility_building_directory", p.get("buildingId"), "楼栋"
+            )
             name = _text(p.get("name"), "楼栋名称", 60)
             db.execute(
-                "INSERT INTO facility_buildings VALUES (?,?)", (_id("building"), name)
+                "UPDATE facility_building_campus SET localName=? WHERE buildingId=?",
+                (name, building["id"]),
             )
-            return "新增楼栋 " + name
+            return f"{building['campusName']}的{building['name']}更名为{name}"
+        if action == "facility.addBuilding":
+            campus = _find(
+                db, "facility_campuses", p.get("campusId", HOME_CAMPUS), "分院"
+            )
+            name = _text(p.get("name"), "楼栋名称", 60)
+            bid = _id("building")
+            # Keep the legacy globally unique column for existing foreign keys.
+            db.execute("INSERT INTO facility_buildings VALUES (?,?)", (bid, bid))
+            db.execute(
+                "INSERT INTO facility_building_campus VALUES(?,?,?)",
+                (bid, campus["id"], name),
+            )
+            return f"为{campus['name']}新增楼栋 {name}"
         if action == "facility.addFloor":
-            b = _find(db, "facility_buildings", p.get("buildingId"), "楼栋")
+            b = _find(db, "facility_building_directory", p.get("buildingId"), "楼栋")
             n = _integer(p.get("number"), "楼层", 1, 199)
             if b["id"] == MAIN and n == 4:
                 raise ValueError("主楼不设四楼")
@@ -777,7 +918,7 @@ def apply(db, state, action, payload, user, today):
             fid = r["floorId"] if r else (p.get("floorId") or None)
             f = _find(db, "facility_floors", fid, "楼层") if fid else None
             bid = f["buildingId"] if f else p.get("buildingId")
-            b = _find(db, "facility_buildings", bid, "楼栋")
+            b = _find(db, "facility_building_directory", bid, "楼栋")
             if (
                 p.get("floorId")
                 and p["floorId"] != fid
@@ -809,6 +950,6 @@ def apply(db, state, action, payload, user, today):
             db.execute("DELETE FROM facility_scenes WHERE id=?", (s["id"],))
             _index_media(db, "scene", s["id"], "")
             return "已撤下环境导览场景 " + s["title"]
-    except sqlite3.IntegrityError:
+    except INTEGRITY_ERRORS:
         raise ValueError("同一区域内已存在此编号或名称") from None
     raise ValueError("未登记的院区动作")

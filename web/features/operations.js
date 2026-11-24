@@ -21,6 +21,7 @@ import {
   records,
   today,
 } from './shared.js';
+import { downloadDocument, openDocumentButton } from './secure-documents.js';
 import { monthlyPanel } from './monthly.js';
 
 function addItem(ctx) {
@@ -203,6 +204,11 @@ export function shifts(ctx) {
       title: '安排班次',
       action: 'ops.shift',
       fields: [
+        select(
+          'campusId',
+          '值班分院',
+          (ctx.state.campusOptions || []).map((c) => ({ value: c.id, label: c.name })),
+        ),
         field('staff', '值班人员'),
         field('date', '排班日期', {
           type: 'date',
@@ -245,6 +251,12 @@ export function shifts(ctx) {
           view: (s) => badge(ctx, s.period, 'blue'),
         },
         {
+          label: '值班分院',
+          view: (s) =>
+            (ctx.state.campusOptions || []).find((c) => c.id === (s.campusId || 'campus-main'))
+              ?.name || '本部',
+        },
+        {
           label: '责任区域',
           view: (s) => s.area,
         },
@@ -278,21 +290,6 @@ export function shifts(ctx) {
       ],
     })
   );
-}
-
-function download(ctx, report) {
-  const payload = JSON.stringify(report, null, 2);
-  const url = URL.createObjectURL(
-    new Blob([payload], {
-      type: 'application/json;charset=utf-8',
-    })
-  );
-  const a = node('a');
-  a.href = url;
-  a.download = '民政报送-' + report.month + '-v' + (report.version || 1) + '.json';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  ctx.toast('报送草稿已导出');
 }
 
 function reportDetails(ctx, r) {
@@ -364,20 +361,21 @@ function reportDetails(ctx, r) {
               s.receiptRef
                 ? named(s.outcome + ' · ' + s.receiptRef, s.receiptDate + ' · ' + s.note)
                 : node('p', 'fx-muted', '待接收方回执'),
-              link(ctx, '导出本版快照', () => download(ctx, s.snapshot)),
+              link(ctx, '导出本版加密文件', () =>
+                downloadDocument(ctx, { kind: 'report', id: r.id, version: s.version })
+              ),
             ]),
           '暂无送出凭证'
         )
       ),
       choose(
-        btn(ctx, '导出 JSON 草稿', () =>
-          download(
-            ctx,
-            r.submissions?.find((s) => s.version === r.version)?.snapshot || {
-              ...r,
-              submissions: undefined,
-            }
-          )
+        btn(ctx, '导出加密文件', () =>
+          downloadDocument(ctx, {
+            kind: 'report',
+            id: r.id,
+            version: r.version || 1,
+            revision: ctx.state.revision,
+          })
         ),
         (r.stage || '草稿') === '草稿' && !r.serviceMetrics
           ? btn(ctx, '重新归集本月数据', () => ctx.command('ops.report', { month: r.month }))
@@ -443,6 +441,7 @@ export function reports(ctx) {
   const drafts = () =>
     table(ctx, {
       title: '月度报送草稿',
+      action: openDocumentButton(ctx),
       rows: state.reports,
       search: {
         placeholder: '搜索报送月份',

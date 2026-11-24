@@ -85,7 +85,12 @@ async function signOut() {
   }
 }
 function applySnapshot(snapshot) {
-  state = { ...snapshot.data, today: snapshot.today, audit: snapshot.audit, revision: snapshot.revision };
+  state = {
+    ...snapshot.data,
+    today: snapshot.today,
+    audit: snapshot.audit,
+    revision: snapshot.revision,
+  };
   revision = snapshot.revision;
   branding = state.uiSettings;
   document.documentElement.dataset.theme = state.uiSettings.theme;
@@ -191,6 +196,11 @@ async function command(action, payload, endpoint = '/api/commands') {
 }
 
 function context() {
+  const assignedCampuses = state.user?.facilityScope?.campusIds;
+  const campus =
+    assignedCampuses?.length === 1
+      ? state.campusOptions?.find((item) => item.id === assignedCampuses[0])
+      : null;
   return {
     state,
     get,
@@ -198,11 +208,12 @@ function context() {
       if (await readState()) render();
     },
     available,
-    agentRegion,
+    agentRegion: agentRegion || (campus ? { campusId: campus.id, label: campus.name } : null),
+    hasSelectedRegion: Boolean(agentRegion),
     startScopedAgent(place) {
       if (!available('assistants')) return;
       const region = {};
-      for (const key of ['buildingId', 'floorId', 'roomId'])
+      for (const key of ['campusId', 'buildingId', 'floorId', 'roomId'])
         if (place[key]) region[key] = place[key];
       agentRegion = { ...region, label: place.label };
       go('assistants', 'runs');

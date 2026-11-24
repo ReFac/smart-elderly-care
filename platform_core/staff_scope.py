@@ -2,6 +2,8 @@
 
 from contextlib import contextmanager
 
+from .campus_access import effective
+
 
 def boundary(db, user, resolver):
     if user["kind"] == "owner" or (resolver is None and not user.get("facilityScope")):
@@ -10,17 +12,25 @@ def boundary(db, user, resolver):
     # A floor includes future rooms. Comparing just the currently occupied rooms
     # would let a room-bound manager reset a whole-floor employee's password.
     locations = {
+        "campusIds": {
+            c: (c,) for (c,) in db.execute("SELECT id FROM facility_campuses")
+        },
         "buildingIds": {
-            b: (b,) for (b,) in db.execute("SELECT id FROM facility_buildings")
+            b: (c, b)
+            for b, c in db.execute(
+                "SELECT id,campusId FROM facility_building_directory"
+            )
         },
         "floorIds": {
-            f: (b, f)
-            for f, b in db.execute("SELECT id,buildingId FROM facility_floors")
+            f: (c, b, f)
+            for f, b, c in db.execute(
+                "SELECT f.id,b.id,b.campusId FROM facility_floors f JOIN facility_building_directory b ON b.id=f.buildingId"
+            )
         },
         "roomIds": {
-            r: (b, f, r)
-            for r, f, b in db.execute(
-                "SELECT r.id,f.id,f.buildingId FROM facility_rooms r JOIN facility_floors f ON r.floorId=f.id"
+            r: (c, b, f, r)
+            for r, f, b, c in db.execute(
+                "SELECT r.id,f.id,b.id,b.campusId FROM facility_rooms r JOIN facility_floors f ON r.floorId=f.id JOIN facility_building_directory b ON b.id=f.buildingId"
             )
         },
     }
@@ -52,7 +62,9 @@ def boundary(db, user, resolver):
 
     def contains(account):
         try:
-            candidate = branches(resolver(db, account) if resolver else {})
+            candidate = branches(
+                effective(account, resolver(db, account) if resolver else {})
+            )
         except PermissionError:
             return False
         return all(

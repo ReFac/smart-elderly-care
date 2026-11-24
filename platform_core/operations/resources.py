@@ -66,6 +66,14 @@ def assign_shift(state, payload, today):
     ):
         raise ValueError("该员工在此班次已有排班")
     state["shifts"].insert(
-        0, dict(id=new_id("shift"), staff=staff, date=when, period=period, area=area)
+        0,
+        dict(
+            id=new_id("shift"),
+            staff=staff,
+            date=when,
+            period=period,
+            area=area,
+            **({"campusId": payload["campusId"]} if "campusId" in payload else {}),
+        ),
     )
     return f"为{staff}安排 {when} {period} · {area}"

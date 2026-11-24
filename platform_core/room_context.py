@@ -98,7 +98,14 @@ def room_context(db, state, user, query, today):
     return {
         "region": {
             k: region[k]
-            for k in ("institutionId", "buildingId", "floorId", "roomId", "label")
+            for k in (
+                "institutionId",
+                "campusId",
+                "buildingId",
+                "floorId",
+                "roomId",
+                "label",
+            )
         },
         "readTools": ["rooms.search", "rooms.context", "rooms.tour"],
         "targets": targets,

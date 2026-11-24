@@ -12,7 +12,7 @@ import re
 from secrets import token_hex
 from urllib.parse import urlencode, urlsplit
 
-from .. import access, activity
+from .. import access, activity, campus_access
 from .channels import material, setting, verify_signature, verify_wechat_message
 from .records import lookup
 
@@ -269,6 +269,7 @@ def authorized_order(store, db, token, oid):
     access.require(actor, "finance")
     data = json.loads(db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0])
     order = lookup(data, "paymentOrders", oid, "商户订单")
+    campus_access.require_resident(db, actor, order["residentId"], data)
     return actor, data, order
 
 

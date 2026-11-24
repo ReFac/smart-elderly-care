@@ -1,5 +1,6 @@
 """Verify onboarding through the real store for a site without demo residents."""
 
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -16,9 +17,9 @@ class PilotOnboardingTests(unittest.TestCase):
         self.path = Path(directory.name) / "pilot.sqlite3"
         with patch.dict("os.environ", {"NH_OWNER_PASSWORD": ""}):
             self.store = Store(self.path, initial_data="empty")
-        self.token, _ = self.store.login(
-            "owner", (self.path.parent / ".owner-password").read_text().strip()
-        )
+        with closing(self.store.connect()) as db:
+            initial = db.execute("SELECT password FROM storage_bootstrap").fetchone()[0]
+        self.token, _ = self.store.login("owner", initial)
 
     def execute(self, action, **payload):
         self.store.execute(

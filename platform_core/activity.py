@@ -1,6 +1,8 @@
 """Keep the room at the time of the action, including both rooms for transfers."""
 
-from . import access
+import json
+
+from . import access, campus_access
 
 
 def init(db):
@@ -120,6 +122,17 @@ def page(db, user, room="", actor="", before=None, limit=50):
     for value in (room, actor):
         if not isinstance(value, str) or len(value) > 150:
             raise ValueError("筛选值过长")
+    if campus_access.bound(user):
+        state = json.loads(
+            db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+        )
+        permitted = campus_access.resident_ids(
+            state, campus_access.allowed_beds(db, user)
+        )
+        filters.append(
+            "(a.residentId IN (SELECT value FROM json_each(?)) OR a.action LIKE 'agent.%')"
+        )
+        params.append(json.dumps(sorted(permitted)))
     if room:
         filters.append("(instr(a.room,?)>0 OR instr(a.previousRoom,?)>0)")
         params.extend((room, room))

@@ -494,7 +494,7 @@ _CAPABILITIES = [
         MODEL,
         "语音输入与流式转写",
         [],
-        "预留手机录音、音频片段和中间/最终文本。快速回显的转写仍需人工核对。",
+        "流式分片及中间文本接口预留。护理工作台已接入 DeepSeek 整段转写（POST /api/media/asr/{taskId}）。",
         obj(
             {"requestId": ID, "audioRef": ID, "locale": TEXT},
             {"sequence": INT, "isFinal": BOOL},
@@ -520,7 +520,7 @@ _CAPABILITIES = [
         MODEL,
         "医学文档 OCR",
         [],
-        "接收已留档的原件和识别请求号，返回原文片段与来源页，用于首次概括复核。",
+        "工牌外部适配端口预留。长者档案已通过 dossier.ocr 接入 DeepSeek，原件和转录供人工核对。",
         obj({"documentId": ID, "requestId": ID, "imageRef": ID}),
         obj({"text": TEXT, "pages": array(obj({"page": INT, "text": TEXT}))}),
     ),

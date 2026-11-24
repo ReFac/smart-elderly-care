@@ -216,7 +216,7 @@ export function draftPreview(ctx, form, payload) {
     }
   });
   form.addEventListener('change', (event) => {
-    if (!['role', 'permission'].includes(event.target.name)) return;
+    if (!['role', 'permission', 'campusId'].includes(event.target.name)) return;
     version++;
     preview.disabled = false;
     output.replaceChildren();

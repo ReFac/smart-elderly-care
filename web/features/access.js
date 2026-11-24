@@ -1,5 +1,6 @@
+import { backupPanel } from './backups.js';
 import { icon } from '../lib/ui.js';
-import { node, page, table, choose, btn, link, badge, named, section, facts } from './shared.js';
+import { node, page, table, choose, btn, link, badge, named, section, facts, tabs } from './shared.js';
 import { routes } from '../lib/navigation.js';
 import { capabilitySummary, draftPreview, grantPicker } from './access-grants.js';
 
@@ -199,7 +200,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
         node('strong', '', target.username),
       ]),
     );
-  let role, grants;
+  let role, grants, campus;
   if (family) {
     if (!target) {
       const options = state.residents.map((r) => [r.id, r.name + ' · ' + r.id]);
@@ -259,6 +260,15 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       Object.keys(state.rolePresets).map((x) => [x, x]),
       preset,
     );
+    const campusOptions = (state.campusOptions || []).map((item) => [item.id, item.name]);
+    if (!state.user.facilityScope?.campusIds) campusOptions.unshift(['', '全机构']);
+    const [campusRow, campusSelect] = selectField(
+      '工作分院',
+      campusOptions,
+      target?.facilityScope?.campusIds?.[0] || campusOptions[0]?.[0] || '',
+    );
+    campus = campusSelect;
+    campus.name = 'campusId';
     role = roleSelect;
     role.name = 'role';
     grants = grantPicker(
@@ -268,10 +278,12 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
     role.addEventListener('change', () => grants.write(state.rolePresets[role.value] || []));
     form.append(
       roleRow,
+      campusRow,
       section('授权项目', grants.element),
       draftPreview(ctx, form, () => ({
         ...(target ? { id: target.id } : {}),
         kind: 'staff',
+        campusId: campus.value,
         role: role.value,
         permissions: grants.read(),
       })),
@@ -281,7 +293,8 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
     const payload = { displayName: name.value };
     if (target) payload.id = target.id;
     else Object.assign(payload, { kind, username: username.value, password: password.value });
-    if (!family) Object.assign(payload, { role: role.value, permissions: grants.read() });
+    if (!family)
+      Object.assign(payload, { role: role.value, permissions: grants.read(), campusId: campus.value });
     else {
       payload.familyServices = familyServices.checked;
       payload.portalScopes = [...scopeControls]
@@ -463,6 +476,13 @@ function accounts(ctx) {
             ]),
         },
         {
+          label: '工作分院',
+          view: (row) =>
+            row.kind === 'family'
+              ? '随绑定长者'
+              : (state.campusOptions || []).find((c) => c.id === row.facilityScope?.campusIds?.[0])?.name || '全机构',
+        },
+        {
           label: '工作台权限',
           view: (r) =>
             link(
@@ -572,12 +592,34 @@ function settings(ctx) {
     ]),
     node('p', 'fx-muted', '云端规划按机构另购套餐启用。开通、续期与额度调整由平台运营方办理。'),
   ]);
+  if (config.media) {
+    const fields = {};
+    const form = node('form', 'fx-profile');
+    for (const [kind, title] of [['ocr', '医疗文书 OCR'], ['asr', '语音 ASR']]) {
+      const meter = config.media[kind];
+      const check = node('input');
+      check.type = 'checkbox';
+      check.checked = meter.enabled;
+      fields[kind] = check;
+      form.append(
+        node('label', 'access-check', [check, title]),
+        node('small', 'fx-muted', `已用 ${meter.used} / ${meter.limit} ${meter.unit}，在途 ${meter.held} ${meter.unit}`),
+      );
+    }
+    saveForm(form, '保存识别开关', () =>
+      ctx.command('access.mediaSettings', { ocr: fields.ocr.checked, asr: fields.asr.checked }),
+    );
+    deep.append(section('DeepSeek 识别工具', form));
+  }
   const result = page(
     ctx,
     '机构设置',
-    '调整机构工作台外观，查看平台 AI 套餐与用量。',
+    '管理界面、AI 套餐和机构数据备份。',
     null,
-    node('div', 'access-settings-grid', [appearance, deep]),
+    tabs('settings', [
+      ['general', '界面与 AI 套餐', () => node('div', 'access-settings-grid', [appearance, deep])],
+      ['backups', '备份与恢复', () => backupPanel(ctx)],
+    ]),
   );
   result.classList.add('access-management');
   return result;

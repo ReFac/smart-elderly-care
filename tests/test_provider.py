@@ -7,7 +7,6 @@ from io import BytesIO, StringIO
 import json
 import os
 from pathlib import Path
-import sqlite3
 import tempfile
 from threading import Event
 import unittest
@@ -15,7 +14,8 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
 import manage_plan
-from platform_core import provider
+from provider_fixture import isolate_credentials
+from platform_core import provider, secure_storage
 from platform_core.provider import deepseek
 
 
@@ -38,6 +38,7 @@ class ProviderTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
+        isolate_credentials(self, tmp.name)
         self.path = Path(tmp.name) / "instance.sqlite"
         env = patch.dict(
             os.environ,
@@ -49,6 +50,7 @@ class ProviderTests(unittest.TestCase):
         )
         env.start()
         self.addCleanup(env.stop)
+        _, self.storage_key = secure_storage.prepare_database(self.path)
         self.actor = {
             "id": "employee-one",
             "kind": "staff",
@@ -60,9 +62,7 @@ class ProviderTests(unittest.TestCase):
         self.mock = Mock(return_value=reply("inventory"))
 
     def connect(self):
-        db = sqlite3.connect(self.path, timeout=2)
-        db.row_factory = sqlite3.Row
-        return db
+        return secure_storage.open_database(self.path, self.storage_key)
 
     def grant(self, tokens=2000, now=DAY, expires="2026-11-30"):
         with closing(self.connect()) as db, db:

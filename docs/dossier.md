@@ -16,9 +16,9 @@
 ## 归档行为
 
 1. 在长者详细档案内选择「存档医疗文书」。填写文书实际发生日期与来源，可从照片库选图或使用手机相机拍摄。单张原件最大 8 MiB，多页资料可逐页归档。
-2. 核对并填写原文事实。可采用经人工核对的外部 OCR 转录，也可以手工描述。归档账户即为本次核对人。
+2. 核对并填写原文事实。可采用经人工核对的转录，也可以手工描述。归档账户即为本次核对人。
 3. 提交时一次生成结构化概括，包含文书日期、类型、来源、文字来源、原文事实、待核实事项和核对人。系统保存填写内容和登录身份，形成固定版本。之后打开详情直接读取该版本。
-4. 时间线按文书发生日期倒序，同日按入库先后倒序。详情可查存档日和照片原尺寸。数据库保存的原件与上传字节一致。手工录入时，原件、签认概括和审计记录同时归档。院内识别时，先留存原件，再单独核对并签认概括。
+4. 时间线按文书发生日期倒序，同日按入库先后倒序。详情可查存档日和照片原尺寸。数据库保存的原件与上传字节一致。手工录入时，原件、签认概括和审计记录同时归档。选择 DeepSeek OCR 时，先留存原件，再单独核对并签认概括。
 
 护士核实后的跌倒处置进入同一长者的「护理复核与历史摘要」，保留发生时间、房间、复核人和处置说明。
 
@@ -32,48 +32,22 @@
 | `GET /api/documents/{id}/image` | 按服务端会话授权返回原始 JPEG 或 PNG | `medical` |
 | `GET /api/state` | 读取按岗位投影的 `dossierProfiles`、`medicalDocuments`、`relativeProfiles` | 服务端逐集合、字段核对 |
 
-归档命令传入 `requestId`、`residentId`、`eventDate`、`category`、`source`、`description` 和可选 `pending`。有照片时传 `imageBase64`，可附 `mime` 与 `filename`。客户端收到数据版本冲突后，先读取最新快照，再决定是否用原请求编号提交。相同输入复用现有文书，相同原件带不同描述时返回校验错误。同一张图在不同长者名下分别留存证据。同院引擎按原图哈希复用转录，每份档案单独核对身份、签署概括并保留回填凭证。
+归档命令传入 `requestId`、`residentId`、`eventDate`、`category`、`source`、`description` 和可选 `pending`。有照片时传 `imageBase64`，可附 `mime` 与 `filename`。客户端收到数据版本冲突后，先读取最新快照，再决定是否用原请求编号提交。相同输入复用现有文书，相同原件带不同描述时返回校验错误。同一张图在不同长者名下分别留存证据。机构按原图哈希复用转录，每份档案单独核对身份、签署概括并保留回填凭证。
 
 医疗文书表存储 SHA-256、原图和概括版本。读取列表只查询元数据，数据库触发器阻止应用更新或删除已归档行。原件归档的持久性还取决于 SQLite 文件的备份和恢复。
 
-## 出院小结的院内识别与复核
+## 出院小结识别与签认
 
-1. 在长者档案选「存档医疗文书 → 出院小结」，上传单页 PNG 或 JPEG。文字来源自动选为「院内 OCR」。提交后先保存不可覆盖的原件，再调用本机 Tesseract 简中与英文模型。其他类型可手动选择同一模式。图片和转录留在机构服务端，云端额度消耗为零。
-2. 核对每一页的原图、识别行、文字置信度和字段候选。点击原文行可在原图定位。系统只提取明确标记的姓名、出院诊断、过敏史及高危提示；其余文字保留给人工核对。多页文书按页上传，页码对应每张归档照片。
-3. 复核人对照原件输入长者姓名、修订概括。具备临床权限的人员可逐项勾选拟回填的病史摘要、过敏史或高危要点，查看现有值并修正识别错误。候选显示原件行号，也可从原件手工摘录。识别姓名与当前人不符时，只能留存核对概括。提交前服务端复验岗位、原件归属、行号和原值。写入后保存复核者、日期及各字段改动前后值；过敏史更新会触发现有待执行医嘱的风险重核。
-4. 引擎未安装、识别失败或照片过大时，已保存的原件可从时间线打开并手工核对。相同原件的并发请求只运行一次，重看已识别文书直接读取缓存。处理中断后可在 90 秒后重新进入「院内识别原件」。每份原件最后仅保存一份人工确认概括。
+上传原件后选择 DeepSeek OCR，确认发送后等待识别。复核人在原图旁逐行检查姓名、诊断、过敏史和高危提示。有位置框的行可点击定位。复核者可手工纠错、勾选拟回填字段并查看现有值。姓名与当前长者不一致时，仅可保留核对概括。服务端核对归属、权限、行号与原值。核对通过后保存复核者、日期、前后值和唯一概括。
 
-| 接口 | 权限 | 返回或保存 |
+| 接口 | 权限 | 用途 |
 | --- | --- | --- |
-| `dossier.document`，`method=院内 OCR` | `medical.write` | 以原图、来源、发生日期建立待核对文书 |
-| `dossier.ocr` | `medical.write` | 指定 `residentId` 与 `documentId`，或与服务器可核对的 `imageHash`，将院内识别结果登记到该原件 |
-| `GET /api/documents/{id}/ocr` | `medical` | 按需返回识别状态、文字行、原图像素坐标、置信度与候选字段。台账只传状态 |
-| `dossier.reviewDocument` | `medical.write`、`medical` 和 `clinical` | 核对本人身份、文书及拟写值，保存一次性概括与字段回填凭证 |
+| `dossier.document`，`method=DeepSeek OCR` | `medical.write` | 保存原图、来源与日期 |
+| `dossier.ocr` | `medical.write` | 核验分院授权与发送确认，按图像复用转录 |
+| `GET /api/documents/{id}/ocr` | `medical` | 按需读取原文行、可用的位置与候选 |
+| `dossier.reviewDocument` | `medical.write`、`medical`、`clinical` | 签认概括以及选定的档案字段 |
 
-桌面复核显示原件、行号、置信度和签认表单，点选识别行即可定位原图。[查看合成文书复核示例](previews/document-ocr-review.jpg)
-
-### 安装与现场验证
-
-Ubuntu / Debian 的机构服务主机可用系统包安装 Tesseract 与语言包。服务使用标准库调用本地程序。管理员可在服务主机执行以下命令。
-
-```bash
-sudo apt-get install tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng
-tesseract --list-langs
-tesseract tests/fixtures/discharge-training.png stdout -l chi_sim+eng --psm 6 tsv
-python3 -m unittest discover -s tests -p test_document_ocr.py -v
-```
-
-核对语言列表包含 `chi_sim` 和 `eng`。本试点还支持将同平台的 Ubuntu 软件包解压到仓库的本地忽略目录，适用于没有系统安装权限的工作站。以下命令须从仓库根目录执行。包版本和依赖跟随部署主机的 Ubuntu 软件源，示例已在 Ubuntu 26.04 验证。
-
-```bash
-ocr_packages=$(mktemp -d)
-(cd "$ocr_packages" && apt-get download tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng tesseract-ocr-osd libtesseract5 libleptonica6)
-mkdir -p .local/ocr
-for package in "$ocr_packages"/*.deb; do dpkg-deb -x "$package" .local/ocr; done
-python3 -m unittest discover -s tests -p test_document_ocr.py -v
-```
-
-合成测试照片专用于验证文字定位与人工纠错。识别置信度来自 OCR 的文字分值，人员须对照原件核实。扫描图像本身的医学判读由具备相应资质的人员完成。[Tesseract 命令与 TSV 字段](https://tesseract-ocr.github.io/tessdoc/Command-Line-Usage.html)
+开通套餐、停用工具、处理中断和语音确认流程见[识别工具说明](media.md)。
 
 ## 动态档案摘要
 

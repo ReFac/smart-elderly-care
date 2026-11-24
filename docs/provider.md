@@ -1,6 +1,6 @@
 # 平台托管的 AI 套餐
 
-安康医养平台把人工确认、房间搜索、档案与本地协作保留在机构工作区。云端套餐按机构单独开通，为授权员工提供一次短请求的 Agent 分派。现阶段以运营方核验收款后手动发放的 token 额度计量。
+安康医养平台把人工确认、房间搜索、档案与本地协作保留在机构工作区。云端套餐按机构单独开通，为授权员工提供一次短请求的 Agent 分派。运营方核验收款后发放规划 token、OCR 页数及 ASR 秒数。[识别工具](media.md)
 
 ## 谁可以做什么
 
@@ -16,7 +16,7 @@
 ## 开通与对账
 
 1. 启动机构工作台，确定该机构实际使用的 SQLite 文件。
-2. 在平台服务进程的部署环境中配置 `DEEPSEEK_API_KEY`。POSIX 主机也可以用 `NH_DEEPSEEK_KEY_FILE` 指定服务账号所有、权限为 0600 的普通文件。凭据使用服务端私密配置供给。默认模型为 `deepseek-flash`，仅平台部署参数 `NH_DEEPSEEK_MODEL` 可指定其他已验证标识。
+2. 平台运维人员可用 `python3 manage_secrets.py set-deepseek` 将供应商凭据写入独立加密运维库，或在服务环境中注入 `DEEPSEEK_API_KEY`。POSIX 主机也可以用 `NH_DEEPSEEK_KEY_FILE` 指定服务账号所有、权限为 0600 的普通文件。如需在本机持久保存凭据，执行 `python3 manage_secrets.py set-deepseek` 写入独立的 SQLCipher 运维密库。旧版平台凭据迁移与独立恢复材料见[加密存储与恢复](storage.md)。默认模型为 `deepseek-flash`，仅平台部署参数 `NH_DEEPSEEK_MODEL` 可指定其他已验证标识。
 3. 运营方核实付款及约定的服务期后，在该机构数据库上执行开通命令。下例的额度与日期均为示例，以实际订单为准。
 
 ```bash
@@ -36,11 +36,11 @@ python3 manage_plan.py --db .local/workspace.sqlite3 reconcile --actor ACCOUNT_I
 
 ## 会传给模型的内容
 
-服务端从任务文本中匹配受控业务词，例如“工单”“交班”“库存”“欠费”。出站请求只含这些词及当前用户允许调用的业务域编号。姓名、身份证号、床位号、联系人、原始任务文本、业务表和医疗图片留在本地。没有匹配词时直接使用本地规划。
+服务端从任务文本中匹配受控业务词，例如“工单”“交班”“库存”“欠费”。出站请求只含这些词及当前用户允许调用的业务域编号。该规划请求仅发送受控关键词及业务域。文书、录音另走人员确认的识别流程。没有匹配词时直接使用本地规划。
 
 每次云端规划只请求一个 JSON 对象，输出上限 32 token。模型返回的专员编号应属于请求人当时获准的范围。保存费用后再次验证会话和当前岗位。相同账号与请求号的网络重试复用原有结果。错误或不可用状态转为可解释的本地降级，真实业务写入继续经过工作台原有的人工确认。
 
-使用 DeepSeek Chat Completions JSON 输出与非思考模式。官方模型别名的实际版本由供应商维护。[Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) · [JSON 输出](https://api-docs.deepseek.com/guides/json_mode/) · [思考模式开关](https://api-docs.deepseek.com/guides/thinking_mode/)
+使用 DeepSeek Chat Completions JSON 输出与非思考模式。截至 2026-11-24，官方 `deepseek-flash` 对应 DeepSeek-V4.1-Flash-1017。平台在聊天请求中显式传入该别名，后续版本以供应商模型表为准。[官方模型表](https://api-docs.deepseek.com/quick_start/pricing/) · [Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) · [JSON 输出](https://api-docs.deepseek.com/guides/json_mode/) · [思考模式开关](https://api-docs.deepseek.com/guides/thinking_mode/)
 
 ## 验收
 

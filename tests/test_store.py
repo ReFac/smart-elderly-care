@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 from threading import Barrier
 
-from platform_core import care, operations
+from platform_core import care, operations, secure_storage
 from platform_core.store import Conflict, SCHEMA_VERSION, Store, TIMEZONE
 
 
@@ -23,9 +23,11 @@ class WorkspaceTransactions(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
         self.store = Store(self.path, lambda: self.date)
-        self.token, _ = self.store.login(
-            "owner", (self.path.parent / ".owner-password").read_text().strip()
-        )
+        with closing(self.store.connect()) as db:
+            bootstrap = db.execute(
+                "SELECT password FROM storage_bootstrap WHERE id=1"
+            ).fetchone()[0]
+        self.token, _ = self.store.login("owner", bootstrap)
 
     def execute(self, action, payload, revision):
         return self.store.execute(action, payload, revision, self.token)
@@ -137,6 +139,9 @@ class WorkspaceMigration(unittest.TestCase):
                 """)
                 db.execute("INSERT INTO workspace VALUES (1,2,?)", (payload,))
                 db.executemany("INSERT INTO audit VALUES (?,?,?,?)", audit)
+            with self.assertRaisesRegex(ValueError, "migrate"):
+                Store(path, lambda: date)
+            secure_storage.migrate_database(path)
             with patch.dict("os.environ", {"NH_OWNER_PASSWORD": password}):
                 store = Store(path, lambda: date)
             token, _ = store.login("owner", password)

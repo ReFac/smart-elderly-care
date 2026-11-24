@@ -6,10 +6,9 @@ from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
-import os
 from pathlib import Path
 import re
-import sqlite3
+from platform_core.secure_storage import OPERATIONAL_ERRORS
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from platform_core import access, facility
@@ -124,19 +123,24 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(415, {"error": str(e)})
         except (ValueError, TypeError, OverflowError, RecursionError) as e:
             self.send_json(400, {"error": str(e)})
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             self.send_json(503, {"error": "数据库暂时不可用，请稍后重试"})
         except (ConnectionResetError, BrokenPipeError):
             pass
 
     def read_resource(self, path):
         token = self.token()
+        voice = re.fullmatch(r"/api/voice-proposals/([a-f0-9]{32})", path)
+        if voice:
+            return self.send_json(200, self.store.voice_proposal(token, voice[1]))
+        if path == "/api/backups":
+            return self.send_json(200, self.store.backups.status(token))
         if path == "/api/payments/checkout/channels":
             return self.send_json(200, self.store.payment_channels(token))
         match = re.fullmatch(r"/api/payments/checkout/orders/(NH-[a-f0-9]{16})", path)
         if match:
             return self.send_json(200, self.store.payment_order_status(token, match[1]))
-        geo = ("buildingId", "floorId", "roomId")
+        geo = ("campusId", "buildingId", "floorId", "roomId")
         if path == "/api/facility":
             return self.send_json(200, self.store.facility_resource(token, "directory"))
         if path == "/api/care/handover-recipients":
@@ -281,28 +285,65 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def tour_image(self, token, path):
-        if not self.store.tour_media(token, path):
-            raise FileNotFoundError("该环境场景尚未发布")
-        root = Path(
-            os.environ.get("NH_TOUR_MEDIA_DIR") or ROOT / ".local" / "tour-media"
-        ).resolve()
-        target = (root / path.removeprefix("/tour-media/")).resolve()
-        mime = {
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".png": "image/png",
-            ".webp": "image/webp",
-        }.get(target.suffix.lower())
-        if (
-            not mime
-            or not target.is_relative_to(root)
-            or not target.is_file()
-            or target.stat().st_size > 32 * 1024 * 1024
-        ):
-            raise FileNotFoundError("未找到可用的环境照片")
-        self.respond(200, target.read_bytes(), mime)
+        image, mime = self.store.tour_media(token, path)
+        self.respond(200, image, mime)
 
     def write_resource(self, path):
+        if path in ("/api/secure-documents/export", "/api/secure-documents/open"):
+            from platform_core import protected_docs
+
+            token = self.token()
+            if not token:
+                raise SignedOut("请先登录")
+            if path.endswith("/export"):
+                spec = self.read_json(SMALL_BODY)
+                revision = spec.pop("revision", None)
+                packet = protected_docs.export(self.store, token, spec, revision)
+                return self.respond(200, packet, "application/octet-stream")
+            if self.headers.get_content_type() != "application/octet-stream":
+                raise InvalidMedia("请上传 .akdoc 加密文件")
+            packet = self.read_body(protected_docs.MAX_PACKET)
+            return self.send_json(
+                200, protected_docs.open_package(self.store, token, packet)
+            )
+        verify = re.fullmatch(
+            r"/api/backups/points/(ak-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{32})/verify", path
+        )
+        if verify:
+            self.read_json(SMALL_BODY)
+            return self.send_json(
+                200, self.store.backups.verify(self.token(), verify[1])
+            )
+        if path in (
+            "/api/backups/points",
+            "/api/backups/locations",
+            "/api/backups/retry",
+        ):
+            body = self.read_json(SMALL_BODY)
+            if path.endswith("/points"):
+                result = self.store.backups.request(self.token(), body.get("requestId"))
+            elif path.endswith("/locations"):
+                result = self.store.backups.link(self.token(), body.get("provider"))
+            else:
+                result = self.store.backups.retry(self.token())
+            return self.send_json(200, result)
+        asr = re.fullmatch(r"/api/media/asr/([a-zA-Z0-9_-]{1,100})", path)
+        if asr:
+            if not self.token():
+                raise SignedOut("请先登录")
+            if self.headers.get_content_type() not in (
+                "audio/wav",
+                "audio/ogg",
+                "application/octet-stream",
+            ):
+                raise InvalidMedia("请上传 WAV 或 Ogg Opus 录音")
+            result = self.store.transcribe(
+                self.token(),
+                asr[1],
+                self.read_body(8 * 1024 * 1024),
+                self.headers.get("X-DeepSeek-Consent") == "yes",
+            )
+            return self.send_json(200, result)
         if path == "/api/payments/checkout":
             body = self.read_json(512)
             if set(body) != {"orderId"}:
@@ -441,17 +482,17 @@ def main():
             or parsed.fragment
         ):
             parser.error("--public-origin 需要 HTTPS 根域名")
-    os.environ.setdefault(
-        "NH_DEEPSEEK_KEY_FILE", str(ROOT / ".local" / "platform" / "deepseek.key")
-    )
     store = Store(args.db, initial_data=args.initial_data)
     handler = partial(Handler, store=store, public_origin=origin)
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
+        store.backups.start()
         print(f"安康医养平台已启动  http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
+        finally:
+            store.backups.stop()
 
 
 if __name__ == "__main__":

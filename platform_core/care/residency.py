@@ -69,6 +69,7 @@ def inquire(state, p, today):
     append_record(
         state,
         "inquiries",
+        **({"campusId": p["campusId"]} if "campusId" in p else {}),
         name=name,
         contact=text_field(p.get("contact"), "联系方式"),
         note=text_field(p.get("note"), "接待记录"),

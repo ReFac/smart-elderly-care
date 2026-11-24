@@ -20,6 +20,9 @@ PENDING_SECONDS = 90
 
 
 def init(db):
+    from . import media
+
+    media.init(db)
     db.execute("""CREATE TABLE IF NOT EXISTS api_plans (
         id INTEGER PRIMARY KEY, name TEXT NOT NULL, tokenLimit INTEGER NOT NULL,
         startsOn TEXT NOT NULL, expiresOn TEXT NOT NULL, enabled INTEGER NOT NULL)""")
@@ -127,31 +130,68 @@ def private_file(metadata):
     )
 
 
+def backend_vault_enabled():
+    return bool(
+        os.environ.get("NH_PLATFORM_VAULT") or "NH_DEEPSEEK_KEY_FILE" not in os.environ
+    )
+
+
 def configured():
+    from .. import operational_secrets, secure_storage
+
     if os.environ.get("DEEPSEEK_API_KEY", "").strip():
         return True
-    path = key_file()
     try:
-        return path is not None and private_file(path.lstat())
-    except OSError:
-        return False
+        if path := key_file():
+            return private_file(path.lstat())
+        if backend_vault_enabled():
+            with closing(
+                operational_secrets.connect(operational_secrets.vault_path())
+            ) as db:
+                return (
+                    db.execute("SELECT 1 FROM secrets WHERE name='deepseek'").fetchone()
+                    is not None
+                )
+    except (OSError, ValueError, secure_storage.cipherdb.Error):
+        pass
+    return False
 
 
 def read_key():
+    from .. import operational_secrets, secure_storage
+
     value = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-    if not value and os.name == "posix" and (path := key_file()):
-        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as stream:
-            if not private_file(os.fstat(stream.fileno())):
+    if not value and (path := key_file()):
+        if os.name != "posix":
+            raise ValueError("平台凭据文件权限无效")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            if not private_file(os.fstat(fd)):
                 raise ValueError("平台凭据文件权限无效")
-            value = stream.read(513).decode("ascii").strip()
-    if (
-        not value
-        or len(value) > 512
-        or not value.isascii()
-        or any(c.isspace() for c in value)
-    ):
+            raw = stream.read(513)
+    elif not value and backend_vault_enabled():
+        try:
+            raw = operational_secrets.read_value(
+                operational_secrets.vault_path(), "deepseek"
+            )
+        except (OSError, ValueError, secure_storage.cipherdb.Error):
+            raise ValueError("平台运维密库不可用") from None
+    else:
+        raw = b""
+    if not value:
+        try:
+            value = raw.decode("ascii").strip()
+        except UnicodeDecodeError:
+            raise ValueError("平台凭据格式无效") from None
+    if not operational_secrets.valid_key(value):
         raise ValueError("平台凭据不可用")
     return value
+
+
+def media_overview(db):
+    from .media import overview
+
+    return overview(db)
 
 
 def status(db, user, now=None):
@@ -181,6 +221,7 @@ def status(db, user, now=None):
             tokenLimit=plan["tokenLimit"] if plan else 0,
             tokensUsed=used,
             tokensReserved=held,
+            media=media_overview(db),
         )
     return result
 

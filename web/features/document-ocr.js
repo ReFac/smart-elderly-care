@@ -45,7 +45,7 @@ export async function reviewOcr(ctx, doc) {
   layout();
   canvas.append(paper, marker);
   const highlight = (line) => {
-    if (!line) {
+    if (!line?.box) {
       marker.removeAttribute('width');
       return;
     }
@@ -64,10 +64,13 @@ export async function reviewOcr(ctx, doc) {
             line.page +
             ' 页 · 第 ' +
             line.line +
-            ' 行 · 置信度 ' +
-            line.confidence +
-            '%' +
-            (line.confidence < 80 ? ' · 请重点核对' : '')
+            ' 行' +
+            (line.confidence == null
+              ? ''
+              : ' · 置信度 ' +
+                line.confidence +
+                '%' +
+                (line.confidence < 80 ? ' · 请重点核对' : ''))
         )
       ])
     );
@@ -199,7 +202,11 @@ export async function reviewOcr(ctx, doc) {
         verifiedName: identity.value,
         sourceFacts: factsText.value,
         pending: pending.value,
-        method: recognized ? '院内 OCR 人工核对' : '手工描述',
+        method: recognized
+          ? doc.ocr.engine === 'DeepSeek OCR'
+            ? 'DeepSeek OCR 人工核对'
+            : '院内 OCR 人工核对'
+          : '手工描述',
         changes
       });
     } finally {
@@ -210,7 +217,7 @@ export async function reviewOcr(ctx, doc) {
 }
 
 export async function recognizeDocument(ctx, residentId, reference) {
-  if (!(await ctx.command('dossier.ocr', { residentId, ...reference }))) return;
+  if (!(await ctx.command('dossier.ocr', { residentId, ...reference, consent: true }))) return;
   const snapshot = await ctx.get('/api/state');
   if (snapshot.data.user.id !== ctx.state.user.id) return;
   if (!snapshot.data.allowedActions.includes('dossier.reviewDocument')) return;
@@ -240,12 +247,22 @@ export function pendingDocument(ctx, doc) {
   image.alt = '已归档原件';
   body.append(node('figure', 'fx-original', image));
   if (hasGrant(ctx, 'medical.write')) {
-    if (doc.ocr.state === 'queued')
+    if (['queued', 'failed'].includes(doc.ocr.state))
       body.append(
         btn(
           ctx,
-          '院内识别原件',
-          () => recognizeDocument(ctx, doc.residentId, { documentId: doc.id }),
+          '提交 DeepSeek OCR',
+          () =>
+            ctx.dialog({
+              title: '确认发送文书原件',
+              description: '这张照片将提交 DeepSeek OCR，并按成功识别页数使用机构额度。',
+              fields: [],
+              submitLabel: '确认并发送',
+              onSubmit: async () => {
+                await recognizeDocument(ctx, doc.residentId, { documentId: doc.id });
+                return true;
+              }
+            }),
           'primary'
         )
       );

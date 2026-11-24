@@ -140,9 +140,13 @@ function composer(ctx, tools) {
   );
   if (ctx.available('rooms'))
     region.append(
-      ctx.ui.button(ctx.agentRegion ? '更换区域' : '选择楼层或房间', () => ctx.go('rooms'), 'text'),
+      ctx.ui.button(
+        ctx.agentRegion ? '更换区域' : '选择分院、楼层或房间',
+        () => ctx.go('rooms'),
+        'text',
+      ),
     );
-  if (ctx.agentRegion) region.append(ctx.ui.button('清除区域', ctx.clearAgentRegion, 'text'));
+  if (ctx.hasSelectedRegion) region.append(ctx.ui.button('清除区域', ctx.clearAgentRegion, 'text'));
   form.append(title, region, input, examples, controls);
   return form;
 }

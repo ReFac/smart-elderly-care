@@ -53,7 +53,7 @@ CATEGORIES = (
     "病史补录",
     "其他医疗文书",
 )
-METHODS = ("手工描述", "人工核对的 OCR 转录", document_ocr.METHOD)
+METHODS = ("手工描述", "人工核对的 OCR 转录", *document_ocr.STAGED)
 
 
 def init(db):
@@ -319,7 +319,7 @@ def archive_document(db, state, p, user, today):
     if method not in METHODS:
         raise ValueError("请选择有效的描述来源")
     source = text(p, "source", 200, True)
-    staging = method == document_ocr.METHOD
+    staging = method in document_ocr.STAGED
     description = text(p, "description", 8000, not staging)
     if staging and description:
         raise ValueError("请先留存原件，识别后再核对文字")
@@ -420,7 +420,12 @@ def review_document(db, state, p, user, today):
     ).fetchone()
     ocr = json.loads(row[0]) if row else {}
     method = p["method"]
-    if method not in ("院内 OCR 人工核对", "手工描述") or (
+    expected = (
+        "DeepSeek OCR 人工核对"
+        if ocr.get("engine") == document_ocr.METHOD
+        else "院内 OCR 人工核对"
+    )
+    if method not in (expected, "手工描述") or (
         method != "手工描述" and ocr.get("state") != "recognized"
     ):
         raise ValueError("请选择与实际识别结果相符的文字来源")
@@ -570,7 +575,7 @@ def project(db, data, user, today=None):
         ):
             if rid in residents:
                 metadata = json.loads(meta)
-                if metadata.get("method") == document_ocr.METHOD:
+                if metadata.get("method") in document_ocr.STAGED:
                     metadata["imageHash"] = digest
                     metadata["ocr"] = {
                         "state": ocr_status or "queued",

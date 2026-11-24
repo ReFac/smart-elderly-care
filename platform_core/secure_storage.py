@@ -226,9 +226,17 @@ def create_snapshot(store, destination):
             closing(store.connect()) as source,
             closing(open_database(cold, master, new=True)) as target,
         ):
+            # A pinned WAL view prevents active writers from restarting each backup step.
+            source.execute("BEGIN")
+            revision = source.execute(
+                "SELECT revision FROM workspace WHERE id=1"
+            ).fetchone()[0]
             source.backup(target, pages=256, sleep=0.03)
+            source.rollback()  # Release the WAL reader before verifying and sealing the copy.
             target.execute("PRAGMA journal_mode=DELETE")
             info = verify(target)
+            if info["revision"] != revision:
+                raise ValueError("快照与起始读取修订号不匹配")
         nonce, salt = secrets.token_bytes(12), secrets.token_bytes(32)
         header = MAGIC + salt + nonce
         seal = Cipher(
