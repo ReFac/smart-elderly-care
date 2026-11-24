@@ -112,18 +112,35 @@ function myFamily(ctx) {
   if (!resident) return ctx.ui.empty('此账号尚未绑定有效长者，请联系机构。');
   const profile = (ctx.state.relativeProfiles || []).find((r) => r.accountId === me.id) || {};
   const body = node('article', 'fx-panel', [
-    node('header', 'fx-toolbar', node('h2', '', profile.name || me.displayName)),
+    node('header', 'fx-toolbar', node('h2', '', '我的亲属资料')),
     node('div', 'fx-family-details', [
       section('身份与联系', facts(displayed(relativeFields.slice(0, 4), profile))),
       section('其他联系方式', facts(displayed(relativeFields.slice(4), profile)))
     ])
   ]);
+  const services = me.familyServices ? table(ctx, {
+    title: '最近完成的照护服务',
+    rows: ctx.state.familyServiceHistory || [],
+    search: { placeholder: '搜索服务项目', value: (r) => r.title },
+    cols: [
+      { label: '服务项目', view: (r) => r.title },
+      { label: '完成日期', view: (r) => r.completedAt || '未登记' },
+      { label: '计划日期', view: (r) => r.date },
+      { label: '计划时间', view: (r) => r.time || '未登记' },
+    ],
+    empty: '目前没有已完成的照护服务。'
+  }) : null;
+  const identity = node('section', 'family-identity', [
+    node('span', 'family-mark', ctx.ui.icon('people', 25)),
+    node('div', '', [node('small', '', '绑定长者'), node('h2', '', resident.name)]),
+    node('span', 'family-institution', [ctx.ui.icon('building', 15), ctx.state.uiSettings.institutionName])
+  ]);
   return page(
     ctx,
-    '我的亲属档案',
-    '绑定长者 ' + resident.name + ' · ' + resident.id,
+    '家属服务',
+    '',
     btn(ctx, '编辑本人资料', () => relativeForm(ctx, resident, me.id, profile), 'primary'),
-    body
+    identity, services, body
   );
 }
 

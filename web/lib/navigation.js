@@ -41,8 +41,9 @@ export const groups = [
   [
     '院内服务',
     [
-      ['family', '我的亲属资料', 'people'],
+      ['family', '家属服务', 'people'],
       ['tour', '环境导览', 'building'],
+      ['account', '个人中心', 'people'],
     ],
   ],
 ];

@@ -247,6 +247,10 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, target.read_bytes(), mime)
 
     def write_resource(self, path):
+        if path == "/api/access/preview":
+            return self.send_json(
+                200, self.store.access_preview(self.token(), self.read_json(8192))
+            )
         if path == "/api/auth/login":
             body = self.read_json(2048)
             try:
@@ -293,6 +297,8 @@ class Handler(BaseHTTPRequestHandler):
                 body.get("revision"),
                 self.token(),
             )
+            if body.get("action") == "account.changePassword":
+                return self.send_json(200, result, self.session_cookie(None))
             return self.send_json(200, result)
         match = re.fullmatch(r"/api/agent/adapters/([a-z0-9-]+)", path)
         if match:

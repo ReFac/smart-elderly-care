@@ -9,6 +9,7 @@ import { inventory, shifts, reports } from './operations.js';
 import { assistantsPage } from './assistants.js';
 
 import { renderAccess } from './access.js';
+import { accountCenter } from './account.js';
 import { renderDossier } from './dossier.js';
 import { renderGateways } from './gateways.js';
 import { activityPage } from './activity.js';
@@ -16,6 +17,7 @@ import { activityPage } from './activity.js';
 import { roomsPage, tourPage } from './rooms.js';
 
 const features = {
+  account: accountCenter,
   rooms: roomsPage,
   tour: tourPage,
   access: (ctx) => renderAccess('access', ctx),

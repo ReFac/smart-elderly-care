@@ -23,7 +23,7 @@ from . import (
 )
 
 TIMEZONE = ZoneInfo("Asia/Shanghai")
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class Conflict(Exception):
@@ -61,7 +61,7 @@ class Store:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("BEGIN IMMEDIATE")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3, 4, SCHEMA_VERSION):
+            if not 0 <= version <= SCHEMA_VERSION:
                 raise RuntimeError(f"数据库版本 {version} 需要迁移")
             db.execute(
                 "CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, data TEXT NOT NULL)"
@@ -137,7 +137,33 @@ class Store:
                 "SELECT revision,data FROM workspace WHERE id=1"
             ).fetchone()
             today = self.now().date().isoformat()
-            data = access.project(db, json.loads(row["data"]), user)
+            data = access.project(
+                db, json.loads(row["data"]), user, self.facility_policy
+            )
+            data["selfAccess"] = {
+                "permissions": [
+                    {"id": grant, "label": access.PERMISSIONS[grant]}
+                    for grant in user["permissions"]
+                    if grant in access.PERMISSIONS
+                ],
+                "routes": [
+                    route
+                    for route in user["routes"]
+                    if route not in data["uiSettings"]["hiddenRoutes"]
+                ],
+            }
+            if user["kind"] == "family":
+                family_permissions = data["selfAccess"]["permissions"]
+                family_permissions.append(
+                    {"id": "dossier.relative", "label": "维护本人的亲属资料"}
+                )
+                if user.get("familyServices"):
+                    family_permissions.append(
+                        {
+                            "id": "familyServices",
+                            "label": "查看绑定长者已完成的照护服务",
+                        }
+                    )
             data["handovers"] = [
                 handovers.visible(record, access.has(user, "clinical"))
                 for record in data.get("handovers", ())
@@ -174,6 +200,13 @@ class Store:
                 ).fetchone()[0]
             )
             return {key: visual[key] for key in ("brandName", "institutionName")}
+
+    def access_preview(self, token, payload):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            return access.preview(
+                db, self.actor(db, token), payload, self.facility_policy
+            )
 
     def activity(self, token, **filters):
         with closing(self.connect()) as db, db:
@@ -447,7 +480,11 @@ class Store:
                 elif domain == "facility":
                     summary = facility.apply(db, data, action, payload, user, today)
                 elif domain == "access":
-                    summary = access.apply(db, data, action, payload, user)
+                    summary = access.apply(
+                        db, data, action, payload, user, self.facility_policy
+                    )
+                elif action == "account.changePassword":
+                    summary = access.change_own_password(db, user, payload)
                 elif domain in ("gw", "dossier"):
                     module = gateways if domain == "gw" else dossier
                     summary = module.apply(db, data, action, payload, user, today)

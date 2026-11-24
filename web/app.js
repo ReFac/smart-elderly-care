@@ -172,6 +172,10 @@ async function command(action, payload, endpoint = '/api/commands') {
       render();
     }
     if (!response.ok) throw new Error(result.error || '操作未保存');
+    if (action === 'account.changePassword') {
+      signedOut();
+      return true;
+    }
     if (!(await readState())) return true;
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
     render();
@@ -329,7 +333,6 @@ function myPendingHandovers(data = state) {
 function notices() {
   const list = el('div', 'notice-list');
   const items = [
-    ['待复核体征', state.vitals.filter((v) => v.status === '待复核').length, 'care', 'vitals'],
     ['待复核计划', state.plans.filter((p) => p.status === '待复核').length, 'assessments', 'plans'],
     ['待复核用药', state.medications.filter((p) => p.status === '待复核').length, 'medications'],
     [
@@ -339,6 +342,8 @@ function notices() {
       'stock',
     ],
   ];
+  if (permitted('clinical'))
+    items.unshift(['待复核体征', state.vitals.filter((v) => v.status === '待复核').length, 'care', 'vitals']);
   if (permitted('care'))
     items.unshift(['待我签收的交班', myPendingHandovers().length, 'care', 'handover']);
   if (available('inbox')) {
@@ -349,7 +354,7 @@ function notices() {
         'inbox',
         'alerts',
       ]);
-    if (permitted('voice.confirm'))
+    if (state.allowedActions.includes('gw.confirm'))
       items.unshift(['待确认变更', state.voiceQueue.length, 'inbox', 'voice']);
   }
   const d = detail('待处理事项', list);
@@ -368,6 +373,7 @@ function notices() {
     });
     list.append(b);
   }
+  if (!list.childElementCount) list.append(ui.empty('当前账号没有需要处理的事项'));
 }
 
 function accountMenu() {
@@ -386,8 +392,14 @@ function accountMenu() {
     row.append(el('span', '', key), el('strong', '', value));
     info.append(row);
   }
-  info.append(button('退出登录', signOut));
-  detail('当前账号', info);
+  const dialog = detail('当前账号', info);
+  info.append(
+    button('个人中心', () => {
+      dialog.close();
+      go('account');
+    }, 'primary'),
+    button('退出登录', signOut)
+  );
 }
 
 function masthead() {
@@ -585,9 +597,8 @@ async function refresh() {
       return;
     const snapshot = await get('/api/state');
     if (current !== epoch || saving || version !== revision) return;
-    const changedUser =
-      state.user.id !== snapshot.data.user.id ||
-      JSON.stringify(state.user.permissions) !== JSON.stringify(snapshot.data.user.permissions);
+    const changedUser = JSON.stringify(state.user) !== JSON.stringify(snapshot.data.user) ||
+      JSON.stringify(state.uiSettings.hiddenRoutes) !== JSON.stringify(snapshot.data.uiSettings.hiddenRoutes);
     const dialogs = [...document.querySelectorAll('dialog[open]')];
     if (editing && !changedUser && !dialogs.length) return;
     if (dialogs.length && !changedUser) {
@@ -610,7 +621,11 @@ async function refresh() {
           (d.dataset.pendingHandoverId &&
             !snapshot.data.handovers.some((r) => r.id === d.dataset.pendingHandoverId && r.status === '待签收'))
       );
-      if (!obsolete && !settled && !received) return;
+      const lostTarget = dialogs.some(
+        (d) => d.dataset.managedAccountId &&
+          !snapshot.data.accounts?.some((a) => a.id === d.dataset.managedAccountId)
+      );
+      if (!obsolete && !settled && !received && !lostTarget) return;
     }
     dialogs.forEach((d) => d.close());
     applySnapshot(snapshot);

@@ -12,6 +12,8 @@ import stat
 import time
 from uuid import uuid4
 
+from . import staff_scope
+
 from .access_policy import (
     DEFAULT_UI,
     PERMISSIONS,
@@ -21,6 +23,7 @@ from .access_policy import (
     authorize,
     can_view_audit,
     has,
+    manages_accounts,
     require,
     resolve_routes,
     visible_data,
@@ -110,7 +113,14 @@ def init(db):
       id TEXT PRIMARY KEY, username TEXT UNIQUE COLLATE NOCASE NOT NULL,
       display_name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('owner','staff','family')),
       role TEXT NOT NULL, permissions TEXT NOT NULL DEFAULT '[]', resident_id TEXT NOT NULL DEFAULT '',
-      enabled INTEGER NOT NULL DEFAULT 1, salt BLOB NOT NULL, password_hash BLOB NOT NULL)""")
+      enabled INTEGER NOT NULL DEFAULT 1, salt BLOB NOT NULL, password_hash BLOB NOT NULL,
+      family_services INTEGER NOT NULL DEFAULT 0 CHECK(family_services IN (0,1)))""")
+    if "family_services" not in {
+        r[1] for r in db.execute("PRAGMA table_info(accounts)")
+    }:
+        db.execute(
+            "ALTER TABLE accounts ADD COLUMN family_services INTEGER NOT NULL DEFAULT 0 CHECK(family_services IN (0,1))"
+        )
     db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS one_owner ON accounts(kind) WHERE kind='owner'"
     )
@@ -171,6 +181,8 @@ def _public(row):
         else json.loads(row["permissions"]),
     }
     user["routes"] = resolve_routes(user)
+    if user["kind"] == "family":
+        user["familyServices"] = bool(row["family_services"])
     return user
 
 
@@ -261,23 +273,103 @@ def _staff_grants(role, permissions):
     return [p for p in PERMISSIONS if p in result]
 
 
-def _target(db, payload):
+def _assignable(user):
+    return (
+        set(PERMISSIONS)
+        if user["kind"] == "owner"
+        else set(user["permissions"]) - {"staff.manage"}
+    )
+
+
+def _within_account_scope(user, target, assignable, area_check):
+    return user["kind"] == "owner" or (
+        target["kind"] == "staff"
+        and target["id"] != user["id"]
+        and set(target["permissions"]) <= assignable
+        and (area_check is None or area_check(target))
+    )
+
+
+def _target(db, payload, user, area_check):
     target_id = payload.get("id")
-    if not isinstance(target_id, str) or not (target := account(db, target_id)):
+    target = account(db, target_id) if isinstance(target_id, str) else None
+    if user["kind"] != "owner" and (
+        not target
+        or not _within_account_scope(user, target, _assignable(user), area_check)
+    ):
+        raise PermissionError("未找到可管理的员工账号")
+    if not target:
         raise ValueError("未找到该账号")
     return target
 
 
-def _create(db, state, p):
+def _account_definition(user, p, target=None):
+    kind = target["kind"] if target else p.get("kind")
+    if user["kind"] != "owner" and kind != "staff":
+        raise PermissionError("受托管理仅适用于员工账号")
+    if kind == "family":
+        return kind, "亲属", []
+    if kind != "staff":
+        raise ValueError("请选择员工或亲属账号")
+    role = p.get("role", target["role"] if target else "护工")
+    previous = target["permissions"] if target and target["role"] == role else None
+    grants = _staff_grants(role, p.get("permissions", previous))
+    if not set(grants) <= _assignable(user):
+        raise PermissionError("授权项目超出本人可分配的范围")
+    return kind, role, grants
+
+
+def _family_services(p, kind, current=False):
+    if "familyServices" not in p:
+        return current
+    if kind != "family" or type(p["familyServices"]) is not bool:
+        raise ValueError("服务记录授权须为亲属账号的开关选项")
+    return p["familyServices"]
+
+
+def preview(db, user, payload, facility_policy=None):
+    if not manages_accounts(user):
+        raise PermissionError("此账号没有对应的管理权限")
+    if not isinstance(payload, dict) or set(payload) - {
+        "id",
+        "kind",
+        "role",
+        "permissions",
+    }:
+        raise ValueError("权限预览字段无效")
+    area_check = staff_scope.boundary(db, user, facility_policy)
+    target = _target(db, payload, user, area_check) if "id" in payload else None
+    if target and "kind" in payload and payload["kind"] != target["kind"]:
+        raise ValueError("账号身份不可更改")
+    if (
+        target
+        and target["kind"] == "family"
+        and ("role" in payload or "permissions" in payload)
+    ):
+        raise ValueError("亲属账号不能授予员工权限")
+    kind, role, grants = _account_definition(user, payload, target)
+    draft = {"kind": kind, "role": role, "permissions": grants}
+    if (
+        target
+        and area_check
+        and not area_check({**target, **draft, "routes": resolve_routes(draft)})
+    ):
+        raise PermissionError("拟分配岗位的区域超出本人可管理的范围")
+    return {
+        **draft,
+        "routes": resolve_routes(draft),
+        "allowedActions": allowed_actions(draft),
+    }
+
+
+def _create(db, state, p, user, area_check):
+    kind, role, grants = _account_definition(user, p)
+    family_services = _family_services(p, kind)
     username = _required(p.get("username"), "登录名", 40).lower()
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,39}", username):
         raise ValueError("登录名须为 3–40 位字母、数字、点、下划线或短横线")
     display = _required(p.get("displayName"), "姓名")
     password = _password(p.get("password"))
-    kind = p.get("kind")
-    if kind not in ("staff", "family"):
-        raise ValueError("请选择员工或亲属账号")
-    role = p.get("role", "护工") if kind == "staff" else "亲属"
     resident_id = ""
     if kind == "family":
         resident_id = p.get("residentId")
@@ -285,37 +377,41 @@ def _create(db, state, p):
             raise ValueError("请选择亲属已获授权的长者")
     elif p.get("residentId"):
         raise ValueError("员工账号无需绑定亲属关系")
-    grants = _staff_grants(role, p.get("permissions")) if kind == "staff" else []
     salt = secrets.token_bytes(16)
+    account_id = uuid4().hex
     try:
-        db.execute(
-            """INSERT INTO accounts(id,username,display_name,kind,role,permissions,resident_id,salt,password_hash)
-                 VALUES(?,?,?,?,?,?,?,?,?)""",
-            (
-                uuid4().hex,
-                username,
-                display,
-                kind,
-                role,
-                json.dumps(grants),
-                resident_id,
-                salt,
-                _digest(password, salt),
-            ),
-        )
+        with staff_scope.verify_change(db, area_check, lambda: account(db, account_id)):
+            db.execute(
+                """INSERT INTO accounts(id,username,display_name,kind,role,permissions,resident_id,salt,password_hash,family_services)
+                 VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    account_id,
+                    username,
+                    display,
+                    kind,
+                    role,
+                    json.dumps(grants),
+                    resident_id,
+                    salt,
+                    _digest(password, salt),
+                    int(family_services),
+                ),
+            )
     except sqlite3.IntegrityError as error:
         raise ValueError("此登录名已被使用") from error
-    return f"创建{role}账号 {username}"
+    return f"创建{role}账号 {username}" + (
+        "，授予已完成服务记录查阅权限" if family_services else ""
+    )
 
 
-def _update(db, p):
-    target = _target(db, p)
+def _update(db, p, target, user):
     if target["kind"] == "owner" or set(p) - {
         "id",
         "displayName",
         "role",
         "permissions",
         "enabled",
+        "familyServices",
     }:
         raise ValueError("只可修改员工或亲属的姓名、启用状态及员工岗位权限")
     enabled = p.get("enabled", target["enabled"])
@@ -324,26 +420,45 @@ def _update(db, p):
     display = _required(p.get("displayName", target["displayName"]), "姓名")
     if target["kind"] == "family" and ("role" in p or "permissions" in p):
         raise ValueError("亲属账号不能授予员工权限")
-    role = p.get("role", target["role"])
-    previous_grants = target["permissions"] if role == target["role"] else None
-    grants = (
-        _staff_grants(role, p.get("permissions", previous_grants))
-        if target["kind"] == "staff"
-        else []
+    _, role, grants = _account_definition(user, p, target)
+    family_services = _family_services(
+        p, target["kind"], target.get("familyServices", False)
     )
     db.execute(
-        "UPDATE accounts SET display_name=?,role=?,permissions=?,enabled=? WHERE id=?",
-        (display, role, json.dumps(grants), int(enabled), target["id"]),
+        "UPDATE accounts SET display_name=?,role=?,permissions=?,enabled=?,family_services=? WHERE id=?",
+        (
+            display,
+            role,
+            json.dumps(grants),
+            int(enabled),
+            int(family_services),
+            target["id"],
+        ),
     )
     if not enabled:
         db.execute("DELETE FROM sessions WHERE account_id=?", (target["id"],))
-    return f"更新账号 {target['username']} 的姓名、岗位、权限或状态（{'启用' if enabled else '停用'}）"
+    changes = []
+    if display != target["displayName"]:
+        changes.append(f"姓名改为{display}")
+    if role != target["role"]:
+        changes.append(f"岗位改为{role}")
+    for sign, keys in (
+        ("授予", set(grants) - set(target["permissions"])),
+        ("收回", set(target["permissions"]) - set(grants)),
+    ):
+        if keys:
+            changes.append(sign + "、".join(PERMISSIONS[k] for k in sorted(keys)))
+    if enabled != target["enabled"]:
+        changes.append("启用" if enabled else "停用")
+    if family_services != target.get("familyServices", False):
+        changes.append(
+            ("授予" if family_services else "收回") + "已完成服务记录查阅权限"
+        )
+    return f"更新账号 {target['username']}：" + "，".join(changes or ["保存当前配置"])
 
 
-def _change_password(db, p):
-    target = _target(db, p)
-    salt = secrets.token_bytes(16)
-    hashed = _digest(_password(p.get("password")), salt)
+def _change_password(db, p, target):
+    new_password = _password(p.get("password"))
     if target["kind"] == "owner":
         current = p.get("currentPassword")
         row = db.execute(
@@ -357,12 +472,7 @@ def _change_password(db, p):
             )
         ):
             raise ValueError("当前总管理员密码不正确")
-    db.execute(
-        "UPDATE accounts SET salt=?,password_hash=? WHERE id=?",
-        (salt, hashed, target["id"]),
-    )
-    db.execute("DELETE FROM sessions WHERE account_id=?", (target["id"],))
-    db.execute("DELETE FROM login_failures WHERE subject=?", (target["id"],))
+    _replace_password(db, target, new_password)
     return f"重设 {target['username']} 的密码并结束旧会话"
 
 
@@ -393,20 +503,25 @@ def _settings(db, p):
     return "更新机构界面设置"
 
 
-def apply(db, state, action, payload, user):
+def apply(db, state, action, payload, user, facility_policy=None):
     authorize(user, action, payload, state)
+    area_check = staff_scope.boundary(db, user, facility_policy)
     if action == "access.create":
-        return _create(db, state, payload)
+        return _create(db, state, payload, user, area_check)
     if action == "access.update":
-        return _update(db, payload)
+        target = _target(db, payload, user, area_check)
+        with staff_scope.verify_change(
+            db, area_check, lambda: account(db, target["id"])
+        ):
+            return _update(db, payload, target, user)
     if action == "access.password":
-        return _change_password(db, payload)
+        return _change_password(db, payload, _target(db, payload, user, area_check))
     if action == "access.settings":
         return _settings(db, payload)
     raise ValueError("未登记的账号管理操作")
 
 
-def project(db, state, user):
+def project(db, state, user, facility_policy=None):
     filtered = visible_data(state, user)
     row = db.execute("SELECT * FROM institution_settings WHERE id=1").fetchone()
     filtered.update(
@@ -414,15 +529,80 @@ def project(db, state, user):
         uiSettings=json.loads(row["visual"]),
         allowedActions=allowed_actions(user),
     )
-    if user["kind"] == "owner":
+    if user["kind"] == "family" and user.get("familyServices"):
+        tasks = (
+            r
+            for r in state.get("tasks", ())
+            if r["residentId"] == user["residentId"] and r["status"] == "已完成"
+        )
+        latest = sorted(
+            tasks,
+            key=lambda r: (
+                r.get("completedAt") or r["date"],
+                r["date"],
+                r.get("time", ""),
+                r["id"],
+            ),
+            reverse=True,
+        )
+        filtered["familyServiceHistory"] = [
+            {k: r[k] for k in ("date", "time", "title", "completedAt") if k in r}
+            for r in latest[:30]
+        ]
+    if manages_accounts(user):
+        area_check = staff_scope.boundary(db, user, facility_policy)
+        assignable = _assignable(user)
+        accounts = (
+            _public(row)
+            for row in db.execute("SELECT * FROM accounts ORDER BY kind DESC,username")
+        )
+        owner = user["kind"] == "owner"
         filtered.update(
             accounts=[
-                _public(a)
-                for a in db.execute(
-                    "SELECT * FROM accounts ORDER BY kind DESC,username"
-                )
+                {**a, "allowedActions": allowed_actions(a)}
+                for a in accounts
+                if _within_account_scope(user, a, assignable, area_check)
             ],
-            permissionOptions=PERMISSIONS,
-            rolePresets=PRESETS,
+            permissionOptions={
+                key: label for key, label in PERMISSIONS.items() if key in assignable
+            },
+            rolePresets={
+                role: [p for p in grants if p in assignable]
+                for role, grants in PRESETS.items()
+            },
+            accessManagement={
+                "scope": "institution" if owner else "staff",
+                "canBindFamily": owner,
+            },
         )
     return filtered
+
+
+def change_own_password(db, user, payload):
+    if set(payload) != {"currentPassword", "newPassword"}:
+        raise ValueError("请提交本人当前密码和新密码")
+    new_password = _password(payload["newPassword"])
+    current = payload["currentPassword"]
+    row = db.execute(
+        "SELECT salt,password_hash FROM accounts WHERE id=?", (user["id"],)
+    ).fetchone()
+    if (
+        not isinstance(current, str)
+        or len(current) > 128
+        or not hmac.compare_digest(_digest(current, row["salt"]), row["password_hash"])
+    ):
+        raise ValueError("当前密码不正确")
+    if new_password == current:
+        raise ValueError("新密码须与当前密码不同")
+    _replace_password(db, user, new_password)
+    return f"{user['username']}修改了本人密码并结束所有登录会话"
+
+
+def _replace_password(db, target, new_password):
+    salt = secrets.token_bytes(16)
+    db.execute(
+        "UPDATE accounts SET salt=?,password_hash=? WHERE id=?",
+        (salt, _digest(new_password, salt), target["id"]),
+    )
+    db.execute("DELETE FROM sessions WHERE account_id=?", (target["id"],))
+    db.execute("DELETE FROM login_failures WHERE subject=?", (target["id"],))

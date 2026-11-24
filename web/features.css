@@ -921,3 +921,35 @@
   background: var(--accent, #254dba);
   border-radius: 3px;
 }
+.family-identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 20px 24px;
+  border-left: 4px solid var(--gold);
+  border-radius: 7px;
+  color: white;
+  background: var(--side);
+}
+.family-identity h2 {
+  margin: 3px 0 0;
+  font-size: 23px;
+}
+.family-identity small, .family-institution {
+  color: #d1def1;
+}
+.family-institution, .family-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.family-institution {
+  margin-inline-start: auto;
+  font-size: 14px;
+}
+.family-mark {
+  padding: 12px;
+  border-radius: 9px;
+  background: #ffffff14;
+}

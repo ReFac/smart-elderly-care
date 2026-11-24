@@ -1,6 +1,7 @@
 import { icon } from '../lib/ui.js';
 import { node, page, table, choose, btn, link, badge, named, section, facts } from './shared.js';
 import { routes } from '../lib/navigation.js';
+import { capabilitySummary, draftPreview, grantPicker } from './access-grants.js';
 
 function inputField(label, name, value = '', options = {}) {
   const control = node('input');
@@ -157,7 +158,7 @@ export function loginScreen(onLogin, branding = {}) {
   });
   const help = node('p', 'access-login-help', [
     icon('info', 16),
-    node('span', '', '账号尚未开通或需要重设密码，请联系机构管理员。'),
+    node('span', '', '使用机构分配的账号。忘记密码可联系账号管理员重设。'),
   ]);
   panel.append(form, help);
   entry.append(panel);
@@ -170,8 +171,9 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
   const family = kind === 'family';
   const form = node('form', 'access-form');
   const [nameRow, name] = inputField('姓名', 'displayName', target?.displayName || '', { max: 60 });
-  form.append(nameRow);
-  let username, password, resident;
+  const identity = node('div', 'access-field-pair', nameRow);
+  form.append(identity);
+  let username, password, resident, familyServices;
   if (!target) {
     let row;
     [row, username] = inputField('登录名', 'username', '', {
@@ -181,7 +183,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       placeholder: '3–40 位字母、数字、点、下划线或短横线',
     });
     username.pattern = '[A-Za-z0-9][A-Za-z0-9_.\\-]{2,39}';
-    form.append(row);
+    identity.append(row);
     [row, password] = inputField('初始密码', 'password', '', {
       type: 'password',
       min: 10,
@@ -189,18 +191,22 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       placeholder: '至少 10 个字符',
     });
     form.append(row);
-  }
+  } else
+    identity.append(
+      node('div', 'access-fixed-login', [
+        node('span', '', '登录名'),
+        node('strong', '', target.username),
+      ])
+    );
   let role, grants;
   if (family) {
     if (!target) {
       const options = state.residents.map((r) => [r.id, r.name + ' · ' + r.id]);
+      options.unshift(['', '请选择已核验授权的长者']);
       const [residentRow, select] = selectField('已获授权的长者', options);
       resident = select;
       resident.required = true;
-      form.append(
-        residentRow,
-        node('p', 'fx-muted', '请先核验亲属身份和长者授权。绑定后，该账号只能完善自己的亲属资料。')
-      );
+      form.append(residentRow, node('p', 'fx-muted', '请先核验亲属身份和长者授权。'));
     } else {
       form.append(
         facts([
@@ -211,6 +217,23 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
         ])
       );
     }
+    familyServices = node('input');
+    familyServices.type = 'checkbox';
+    familyServices.name = 'familyServices';
+    familyServices.checked = target?.familyServices === true;
+    form.append(
+      section(
+        '家属查阅授权',
+        node('div', 'access-family-grant', [
+          node('label', 'access-check', [familyServices, node('span', '', '查看已完成的照护服务')]),
+          node(
+            'p',
+            'fx-muted',
+            '开通后可查看绑定长者近期已完成的服务日期和项目。亲属可自行维护本人的资料。'
+          ),
+        ])
+      )
+    );
   } else {
     const preset = target?.role || defaultRole;
     const [roleRow, roleSelect] = selectField(
@@ -219,28 +242,36 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       preset
     );
     role = roleSelect;
-    grants = checkboxes(
-      Object.entries(state.permissionOptions),
-      target?.permissions || state.rolePresets[preset]
+    role.name = 'role';
+    grants = grantPicker(
+      state.permissionOptions,
+      target?.permissions || state.rolePresets[preset] || []
     );
     role.addEventListener('change', () => grants.write(state.rolePresets[role.value] || []));
-    grants.choices.get('medical.write')?.addEventListener('change', (e) => {
-      if (e.target.checked) grants.choices.get('medical').checked = true;
-    });
-    grants.choices.get('medical')?.addEventListener('change', (e) => {
-      if (!e.target.checked) grants.choices.get('medical.write').checked = false;
-    });
-    form.append(roleRow, section('授权项目', grants.element));
+    form.append(
+      roleRow,
+      section('授权项目', grants.element),
+      draftPreview(ctx, form, () => ({
+        ...(target ? { id: target.id } : {}),
+        kind: 'staff',
+        role: role.value,
+        permissions: grants.read(),
+      }))
+    );
   }
   saveForm(form, target ? '保存变更' : '创建账号', () => {
     const payload = { displayName: name.value };
     if (target) payload.id = target.id;
     else Object.assign(payload, { kind, username: username.value, password: password.value });
     if (!family) Object.assign(payload, { role: role.value, permissions: grants.read() });
-    else if (!target) payload.residentId = resident.value;
+    else {
+      payload.familyServices = familyServices.checked;
+      if (!target) payload.residentId = resident.value;
+    }
     return ctx.command(target ? 'access.update' : 'access.create', payload);
   });
-  ctx.detail(target ? '编辑账号' : family ? '绑定亲属账号' : '新增员工账号', form);
+  const dialog = ctx.detail(target ? '编辑账号' : family ? '绑定亲属账号' : '新增员工账号', form);
+  if (target) dialog.dataset.managedAccountId = target.id;
 }
 
 function resetPassword(ctx, row) {
@@ -254,17 +285,18 @@ function resetPassword(ctx, row) {
     required: true,
     maxLength: 128,
   });
-  ctx.dialog({
+  const dialog = ctx.dialog({
     title: '重设 ' + row.username + ' 的密码',
     description: '保存后该账号在各端的旧会话会立即结束。',
     fields,
     submitLabel: '重设密码',
     onSubmit: (values) => ctx.command('access.password', { id: row.id, ...values }),
   });
+  dialog.dataset.managedAccountId = row.id;
 }
 
 function status(ctx, row) {
-  ctx.dialog({
+  const dialog = ctx.dialog({
     title: row.enabled ? '停用账号' : '恢复账号',
     description: row.enabled
       ? '停用 ' + row.username + ' 后，其所有已登录设备将失去访问权限。'
@@ -273,6 +305,7 @@ function status(ctx, row) {
     submitLabel: row.enabled ? '确认停用' : '确认恢复',
     onSubmit: () => ctx.command('access.update', { id: row.id, enabled: !row.enabled }),
   });
+  dialog.dataset.managedAccountId = row.id;
 }
 
 function roleTemplates(ctx) {
@@ -299,10 +332,18 @@ function roleTemplates(ctx) {
           )
         );
       else content.append(node('p', 'access-login-intro', '从空权限开始勾选。'));
+      const detail = ctx.detail(role + ' · 岗位模板', content);
       content.append(
-        btn(ctx, '按此模板新增员工', () => editAccount(ctx, 'staff', null, role), 'primary')
+        btn(
+          ctx,
+          '按此模板新增员工',
+          () => {
+            detail.close();
+            editAccount(ctx, 'staff', null, role);
+          },
+          'primary'
+        )
       );
-      ctx.detail(role + ' · 岗位模板', content);
     });
     cards.append(card);
   }
@@ -312,51 +353,100 @@ function roleTemplates(ctx) {
 
 function accounts(ctx) {
   const state = ctx.state;
+  const isOwner = state.accessManagement.scope === 'institution';
+  const kinds = { owner: '总管理员', staff: '员工', family: '亲属' };
+  function showPermissions(account) {
+    const grants =
+      account.kind === 'staff'
+        ? node('details', 'access-capability-section', [
+            node('summary', '', '岗位授权 · ' + account.permissions.length),
+            account.permissions.length
+              ? node(
+                  'ul',
+                  'access-grant-list',
+                  account.permissions.map((key) =>
+                    node('li', '', state.permissionOptions[key] || key)
+                  )
+                )
+              : node('p', 'fx-muted', '当前账号未分配业务权限。'),
+          ])
+        : null;
+    const body = node('div', 'access-permission-detail', [
+      node('div', 'access-account-identity', [
+        node(
+          'span',
+          'access-person-icon',
+          icon(account.kind === 'owner' ? 'shield' : 'people', 22)
+        ),
+        named(account.displayName, account.username + ' · ' + account.role),
+        badge(ctx, account.enabled ? '已启用' : '已停用', account.enabled ? 'green' : 'neutral'),
+      ]),
+      account.enabled ? null : node('p', 'fx-muted', '以下为账号恢复启用后的权限。'),
+      account.kind === 'family'
+        ? facts([
+            [
+              '绑定长者',
+              state.residents.find((r) => r.id === account.residentId)?.name || account.residentId,
+            ],
+            ['已完成照护服务', account.familyServices ? '可查阅近期服务日期和项目' : '未开通查阅'],
+          ])
+        : null,
+      capabilitySummary(ctx, account),
+      grants,
+    ]);
+    const dialog = ctx.detail('权限详情', body);
+    dialog.dataset.managedAccountId = account.id;
+  }
   const management = page(
     ctx,
     '账号与权限',
-    '按岗位分配员工权限，核验后绑定亲属账号。',
+    isOwner
+      ? '管理机构账号、岗位授权及亲属绑定。'
+      : '可管理员工的现有权限和新分配的权限均限于你的业务授权。',
     choose(
-      btn(ctx, '绑定亲属', () => editAccount(ctx, 'family')),
+      state.accessManagement.canBindFamily
+        ? btn(ctx, '绑定亲属', () => editAccount(ctx, 'family'))
+        : null,
       btn(ctx, '新增员工', () => editAccount(ctx, 'staff'), 'primary')
     ),
-    roleTemplates(ctx),
     table(ctx, {
-      title: '机构账号',
+      title: isOwner ? '机构账号' : '可管理员工',
       rows: state.accounts,
+      empty: '没有符合条件的账号',
       search: {
         placeholder: '搜索姓名、岗位或账号',
         value: (r) => [r.displayName, r.username, r.role].join(' '),
       },
       filter: {
-        label: '账号类别',
-        all: '全部类别',
-        value: (r) => ({ owner: '总管理员', staff: '员工', family: '亲属' })[r.kind],
+        label: '账号筛选',
+        all: '全部账号',
+        options: [...(isOwner ? Object.values(kinds) : []), '已启用', '已停用'],
+        matches: (r, key) => kinds[r.kind] === key || (r.enabled ? '已启用' : '已停用') === key,
       },
       cols: [
         { label: '姓名 / 登录名', view: (r) => named(r.displayName, r.username) },
         {
           label: '岗位',
           view: (r) =>
-            node('span', r.kind === 'owner' ? 'access-role owner' : 'access-role', r.role),
+            node('div', 'access-account-roles', [
+              node('span', r.kind === 'owner' ? 'access-role owner' : 'access-role', r.role),
+              r.kind === 'staff' && r.permissions.includes('staff.manage')
+                ? node('span', 'access-staff-manager', '受托管理')
+                : null,
+            ]),
         },
         {
-          label: '权限',
+          label: '工作台权限',
           view: (r) =>
-            r.kind === 'owner'
-              ? '全部权限'
-              : r.kind === 'family'
-                ? '本人资料'
-                : link(ctx, r.permissions.length + ' 项', () =>
-                    ctx.detail(
-                      r.displayName + ' 的权限',
-                      node(
-                        'ul',
-                        'access-grant-list',
-                        r.permissions.map((p) => node('li', '', state.permissionOptions[p]))
-                      )
-                    )
-                  ),
+            link(
+              ctx,
+              r.kind === 'owner'
+                ? '全部权限'
+                : r.kind === 'family'
+                  ? '亲属权限'
+                  : r.permissions.length + ' 项授权',
+              () => showPermissions(r)
+            ),
         },
         {
           label: '状态',
@@ -375,7 +465,8 @@ function accounts(ctx) {
             ),
         },
       ],
-    })
+    }),
+    roleTemplates(ctx)
   );
   management.classList.add('access-management');
   return management;
@@ -466,6 +557,9 @@ function settings(ctx) {
 }
 
 export function renderAccess(route, ctx) {
-  if (ctx.state.user?.kind !== 'owner') return ctx.ui.empty('此页面仅供总管理员使用');
-  return route === 'settings' ? settings(ctx) : accounts(ctx);
+  if (route === 'settings')
+    return ctx.state.user?.kind === 'owner'
+      ? settings(ctx)
+      : ctx.ui.empty('机构设置需要总管理员权限');
+  return ctx.state.accessManagement ? accounts(ctx) : ctx.ui.empty('当前账号未获人员管理权限');
 }

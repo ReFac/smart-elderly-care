@@ -18,6 +18,7 @@ PERMISSIONS = {
     "voice": "发起语音变更申请",
     "voice.confirm": "确认或退回语音变更",
     "audit": "查阅已授权业务的操作日志",
+    "staff.manage": "在本人业务权限内管理员工账号",
 }
 PRESETS = {
     "院长": [
@@ -155,17 +156,38 @@ def require(user, permission):
         raise PermissionError("此账号没有当前操作权限")
 
 
+STAFF_ACCOUNT_ACTIONS = ("access.create", "access.update", "access.password")
+
+
+def manages_accounts(user):
+    return user["kind"] in ("staff", "owner") and has(user, "staff.manage")
+
+
+def has_agent_domain(user):
+    return has(user, "assistants") and any(
+        has(user, grant) for grant in SUGGESTION_GRANTS.values()
+    )
+
+
 def resolve_routes(user):
     if user["kind"] == "family":
-        return ["family", "tour"]
+        return ["family", "tour", "account"]
     routes = [
         route
         for route, grants in ROUTE_GRANTS.items()
         if not grants or any(has(user, g) for g in grants)
     ]
+    if "assistants" in routes and not has_agent_domain(user):
+        routes.remove("assistants")
+    if "inbox" in routes and not (
+        has(user, "care") or has(user, "alerts") or has(user, "gateway.simulate")
+    ):
+        routes.remove("inbox")
+    if manages_accounts(user):
+        routes.append("access")
     if user["kind"] == "owner":
-        routes.extend(["access", "settings"])
-    return routes
+        routes.append("settings")
+    return [*routes, "account"]
 
 
 def authorize(user, action, payload, state):
@@ -174,13 +196,17 @@ def authorize(user, action, payload, state):
         raise PermissionError("请先登录")
     if not isinstance(action, str) or not isinstance(payload, dict):
         raise ValueError("业务操作格式无效")
+    if action == "account.changePassword":
+        return
     if action in FACILITY_COMMANDS:
         if user["kind"] != "owner":
             raise PermissionError("仅机构总管理员可以维护院区")
         return
     if action.startswith("access."):
+        if action in STAFF_ACCOUNT_ACTIONS and manages_accounts(user):
+            return
         if user["kind"] != "owner":
-            raise PermissionError("仅总管理员可管理账号与系统设置")
+            raise PermissionError("此账号没有对应的管理权限")
         return
     if action == "dossier.relative":
         if user["kind"] not in ("owner", "family"):
@@ -208,6 +234,12 @@ def authorize(user, action, payload, state):
     if not permission:
         raise ValueError("未登记的业务操作")
     require(user, permission)
+    if action in (
+        "agent.start",
+        "agent.publish",
+        "agent.cancel",
+    ) and not has_agent_domain(user):
+        raise PermissionError("智能协作需要另行授予照护、物资或财务权限")
     if action in ("gw.propose", "gw.confirm", "gw.dismiss"):
         require(user, "care")
 
@@ -216,22 +248,22 @@ def allowed_actions(user):
     actions = [
         action for action, permission in ACTION_GRANTS.items() if has(user, permission)
     ]
+    actions.append("account.changePassword")
     if not has(user, "care"):
         actions = [
             a for a in actions if a not in ("gw.propose", "gw.confirm", "gw.dismiss")
         ]
-    if has(user, "assistants") and any(
-        has(user, g) for g in SUGGESTION_GRANTS.values()
-    ):
+    if has_agent_domain(user):
         actions += ["ops.suggest", "ops.review"]
+    else:
+        actions = [action for action in actions if not action.startswith("agent.")]
     if user["kind"] in ("owner", "family"):
         actions.append("dossier.relative")
+    if manages_accounts(user):
+        actions.extend(STAFF_ACCOUNT_ACTIONS)
     if user["kind"] == "owner":
         actions += [
             *FACILITY_COMMANDS,
-            "access.create",
-            "access.update",
-            "access.password",
             "access.settings",
         ]
     return sorted(actions)
@@ -303,8 +335,6 @@ def visible_data(state, user):
         "finance",
         "gateway.simulate",
         "alerts",
-        "voice",
-        "voice.confirm",
         "shifts",
     ):
         basic = ["id", "name", "status", "bedId"]
