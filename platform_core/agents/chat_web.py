@@ -121,6 +121,7 @@ def choose_topic(store, actor, receipt, scope, text):
         TOPIC_INSTRUCTION,
         {"本轮问题": text},
         valid,
+        feature="assistant.webTopic",
         output_tokens=128,
     )["query"]
 

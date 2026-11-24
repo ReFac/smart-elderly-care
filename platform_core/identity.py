@@ -225,7 +225,7 @@ def _binding_target(db, store, token, payload, channel, purpose, now, host_owner
     else:
         dst = destination(channel, payload.get("destination"))
         if host_owner and registered:
-            raise PermissionError("本机首次绑定仅适用于没有恢复渠道的总管理员")
+            raise PermissionError("本机首次绑定仅适用于没有恢复渠道的 Owner")
         if not host_owner:
             current = payload.get("currentPassword")
             row = db.execute(

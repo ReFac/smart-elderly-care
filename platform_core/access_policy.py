@@ -309,7 +309,7 @@ def authorize(user, action, payload, state):
         return
     if action == "ops.paymentFees":
         if user["kind"] != "owner":
-            raise PermissionError("仅总管理员可以设置支付手续费")
+            raise PermissionError("仅 Owner 可以设置支付手续费")
         return
     if action == "portal.reportMedication":
         if not (user["kind"] == "family" and user.get("portalSelf") and "medicationReport" in user.get("portalScopes", ())):
@@ -323,7 +323,7 @@ def authorize(user, action, payload, state):
         return
     if action in FACILITY_COMMANDS:
         if user["kind"] != "owner":
-            raise PermissionError("仅机构总管理员可以维护院区")
+            raise PermissionError("仅机构 Owner 可以维护院区")
         return
     if action == "access.password":
         raise PermissionError("密码须由账号本人通过验证码设置")
@@ -335,7 +335,7 @@ def authorize(user, action, payload, state):
         return
     if action == "dossier.relative":
         if user["kind"] not in ("owner", "family") or user.get("portalSelf"):
-            raise PermissionError("本人或总管理员可维护亲属资料")
+            raise PermissionError("本人或 Owner 可维护亲属资料")
         return
     if action in ("ops.suggest", "ops.review"):
         require(user, "assistants")

@@ -93,6 +93,7 @@ def prepare(store, token, payload, revision, *, suggestion=False):
             ["specialist", req, artifact["agent"]],
             artifact["category"],
             facts,
+            feature="agent.specialist." + artifact["agent"],
         )
         # Evidence calculations and referenced field-level facts stay reproducible on the host.
         artifact["detail"] = explanation + "\n\n核对依据\n" + artifact["detail"]

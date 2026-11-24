@@ -46,6 +46,7 @@ WINDOW = 15 * 60
 MAX_FAILURES = 8
 DUMMY_SALT = b"nh-account-dummy"
 DEFAULT_MODEL = "deepseek-flash"
+OWNER_LABEL = "Owner"
 
 
 class LoginThrottled(PermissionError):
@@ -151,9 +152,9 @@ def init(db, initial_owner_password=None):
             (
                 uuid4().hex,
                 "owner",
-                "总管理员",
+                OWNER_LABEL,
                 "owner",
-                "总管理员",
+                OWNER_LABEL,
                 salt,
                 _digest(
                     _password(
@@ -165,6 +166,14 @@ def init(db, initial_owner_password=None):
                 ),
             ),
         )
+    db.execute(
+        "UPDATE accounts SET role=? WHERE kind='owner' AND role<>?",
+        (OWNER_LABEL, OWNER_LABEL),
+    )
+    db.execute(
+        "UPDATE accounts SET display_name=? WHERE kind='owner' AND display_name='总管理员'",
+        (OWNER_LABEL,),
+    )
 
 
 def migrate_branding(db):

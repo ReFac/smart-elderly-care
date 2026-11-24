@@ -43,6 +43,7 @@ export function staffLabel(ctx, value, id) {
   const role = account?.role === '自定义' ? account.staffDuties?.join('、') : account?.role;
   const roles = ctx.state.staffPositions;
   const position = role || roles?.ids?.[accountId] || roles?.names?.[name];
+  if (name === 'Owner' && position === name) return name;
   if (!position && /^(?:—|未登记|待登记|系统|机构系统|宣传页|宣传页访客|DeepSeek|平台运营方|自动巡查|AI 助理定时巡查|健康助理定时巡查|试住到期服务|档案保管服务|历史记录)$/.test(name)) return name;
   return name + '（' + (position || '岗位未登记') + '）';
 }

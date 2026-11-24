@@ -6,7 +6,7 @@ from http.client import HTTPException
 import json
 from urllib.error import HTTPError, URLError
 
-from . import deepseek
+from . import deepseek, token_receipt
 
 
 def init(db):
@@ -29,6 +29,8 @@ def generate(
     facts,
     validate,
     *,
+    feature=None,
+    attributed_actor=None,
     output_tokens=640,
     shared_once=False,
 ):
@@ -107,17 +109,28 @@ def generate(
             raise ValueError("机构的 DeepSeek 套餐额度不足")
         key = read_key()
         db.execute(
-            """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance)
-                    VALUES(?,?,?,?,?,?,'pending',?)""",
-            (actor, request, plan["id"], digest, model, int(now.timestamp()), size),
+            """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance,feature,attributedActor)
+                    VALUES(?,?,?,?,?,?,'pending',?,?,?)""",
+            (
+                actor,
+                request,
+                plan["id"],
+                digest,
+                model,
+                int(now.timestamp()),
+                size,
+                feature,
+                attributed_actor,
+            ),
         )
     status, reason, tokens, result = "uncertain", "provider_unavailable", 0, None
+    remote_receipt = None
     try:
         raw = deepseek.send(key, body, timeout=40)
-        used = raw["usage"]["total_tokens"]
-        if type(used) is not int or not 0 < used <= size:
+        remote_receipt = token_receipt.read(raw, size)
+        if remote_receipt is None:
             raise ValueError("缺少有效用量")
-        tokens, status, reason = used, "closed", "invalid_output"
+        tokens, status, reason = remote_receipt.total, "closed", "invalid_output"
         choice = raw["choices"][0]
         if choice.get("finish_reason") != "stop":
             raise ValueError("回复未完成")
@@ -144,6 +157,7 @@ def generate(
             "UPDATE api_usage SET status=?,reason=?,charged=? WHERE actor=? AND request=? AND status='pending'",
             (status, reason, tokens, actor, request),
         )
+        token_receipt.keep(db, actor, request, remote_receipt)
         if not receipt.rowcount:
             late_usage(
                 db,
@@ -180,7 +194,7 @@ def narrative(value):
     return {"text": text}
 
 
-def summarize(store, actor, request, topic, facts):
+def summarize(store, actor, request, topic, facts, *, feature=None, attributed_actor=None):
     return generate(
         store,
         actor,
@@ -190,4 +204,6 @@ def summarize(store, actor, request, topic, facts):
         '仅返回 JSON 对象 {"text":"简短的业务说明"}。',
         {"topic": topic, "facts": facts},
         narrative,
+        feature=feature,
+        attributed_actor=attributed_actor,
     )["text"]

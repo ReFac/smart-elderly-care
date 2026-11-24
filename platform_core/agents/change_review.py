@@ -206,8 +206,8 @@ def inspect(db, revision, action, actor, rid):
             "SELECT count(*) FROM accounts WHERE kind='owner' AND enabled=1"
         ).fetchone()[0]
         if owners != 1:
-            raise ValueError("机构须保留一个可用的总管理员账号")
-        checks.append("已核对账号操作后的总管理员可用性")
+            raise ValueError("机构须保留一个可用的 Owner 账号")
+        checks.append("已核对账号操作后的 Owner 可用性")
     elif domain == "物资管理":
         invalid = db.execute("""SELECT count(*) FROM workspace,json_each(data,'$.inventory')
             WHERE json_extract(value,'$.quantity')<0 OR json_extract(value,'$.minimum')<0""").fetchone()[
@@ -251,8 +251,9 @@ def process_pending(store, halt, *, limit=8):
         with closing(store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             job = db.execute(
-                """SELECT q.revision,q.action,c.domain,c.result,q.attempts FROM history_cloud_reviews q
+                """SELECT q.revision,q.action,c.domain,c.result,q.attempts,a.actorId FROM history_cloud_reviews q
                 JOIN history_agent_checks c ON c.revision=q.revision
+                JOIN audit a ON a.revision=q.revision
                 WHERE q.next_at<=? AND q.completed_at='' ORDER BY q.revision LIMIT 1""",
                 (now.isoformat(),),
             ).fetchone()
@@ -272,6 +273,8 @@ def process_pending(store, halt, *, limit=8):
                 ["review", job[0], job[1], job[3]],
                 "解释已完成的业务校验，并提示经办人仍需人工确认的事项",
                 {"domain": job[2], "action": job[1], "checks": json.loads(job[3])},
+                feature="workflow.changeReview",
+                attributed_actor=job[5] or None,
             )
         except (OSError, ValueError):
             delay = timedelta(minutes=min(120, 2 ** min(7, job[4])))

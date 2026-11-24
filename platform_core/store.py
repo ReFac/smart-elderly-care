@@ -542,9 +542,9 @@ class Store:
                     db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
                 )
                 campus_access.require_resident(db, user, resident_id, state)
-                return dossier.summary_draft(db, state, user, resident_id)
+                return dossier.summary_draft(db, state, user, resident_id), user["id"]
 
-        draft = current()
+        draft, actor_id = current()
         if not generate or draft["summary"]:
             return draft
         # A single verified evidence set shares one metered response across reviewers.
@@ -555,8 +555,10 @@ class Store:
             "根据护理等级、已复核的文书类型和照护记录数量，撰写简短的档案核对提示。"
             "具体病情只在院内原文中，由签认人核对补写。",
             review_facts(draft),
+            feature="dossier.summary",
+            attributed_actor=actor_id,
         )
-        after = current()
+        after, _ = current()
         if after["fingerprint"] != draft["fingerprint"]:
             raise ValueError("摘要依据已经变化，请重新生成并核对")
         if not after["summary"]:

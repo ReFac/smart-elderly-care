@@ -250,6 +250,7 @@ def preview(store, token, payload):
             PARSE,
             {"口述": text},
             lambda obj: valid_parse(obj, text),
+            feature="medication.voiceParse",
             output_tokens=1500,
         )
     with closing(store.connect()) as db, db:

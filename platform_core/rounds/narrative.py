@@ -229,7 +229,7 @@ def clinical_facts(db, state, person, now, cough):
     return facts, suggestions
 
 
-def arrange(store, rid, scope, rows):
+def arrange(store, rid, scope, rows, *, attributed_actor=None):
     # The model can edit paragraph structure, but cannot insert unrecorded food,
     # diagnoses or reassuring statements. Neither identifiers nor staff names
     # from the surrounding application are needed to arrange these sentences.
@@ -264,19 +264,23 @@ def arrange(store, rid, scope, rows):
         GUIDE,
         {"事实": facts},
         validate,
+        feature="care.roundNarrative",
+        attributed_actor=attributed_actor,
         output_tokens=400,
     )
     return result["paragraphs"]
 
 
-def paragraphs(store, rid, scope, facts):
+def paragraphs(store, rid, scope, facts, *, attributed_actor=None):
     # Small independent chunks bound provider input even on busy days and keep
     # the same reference ordering on a retry. Free-text notes stay intact.
     result = []
     facts = sorted(facts, key=lambda item: (item["day"], item["time"]))
     for offset in range(0, len(facts), 12):
         rows = facts[offset : offset + 12]
-        for indexes in arrange(store, rid, scope, rows):
+        for indexes in arrange(
+            store, rid, scope, rows, attributed_actor=attributed_actor
+        ):
             selected = [rows[i - 1] for i in indexes]
             result.append(
                 {

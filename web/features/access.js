@@ -9,6 +9,7 @@ import { node, page, table, choose, btn, link, badge, named, section, facts, tab
 import { routes } from '../lib/navigation.js';
 import { capabilitySummary, draftPreview, grantPicker } from './access-grants.js';
 import { trialSettings } from './trial-stays.js';
+import { providerUsage } from './provider-usage.js';
 
 function inputField(label, name, value = '', options = {}) {
   const control = node('input');
@@ -130,7 +131,7 @@ export function loginScreen(onLogin, branding = {}) {
   panel.append(
     node('span', 'access-login-icon', icon('shield', 25)),
     node('h2', '', '登录工作台'),
-    node('p', 'access-login-intro', '使用机构分配的员工、亲属或总管理员账号。'),
+    node('p', 'access-login-intro', '使用机构分配的员工、亲属或Owner 账号。'),
   );
   const form = node('form', 'access-form access-login-form');
   const [nameRow, name] = inputField('登录账号', 'username', '', {
@@ -403,7 +404,7 @@ function roleTemplates(ctx) {
 function accounts(ctx) {
   const state = ctx.state;
   const isOwner = state.accessManagement.scope === 'institution';
-  const identityLabel = r => r.kind==='family' ? (r.portalSelf?'入住长者':'亲属') : (r.kind==='owner'?'总管理员':'员工');
+  const identityLabel = r => r.kind==='family' ? (r.portalSelf?'入住长者':'亲属') : (r.kind==='owner'?'Owner':'员工');
   const boundPerson = r => state.residents.find(p=>p.id===r.residentId);
   function showPermissions(account) {
     const grants =
@@ -476,7 +477,7 @@ function accounts(ctx) {
       filter: {
         label: '账号筛选',
         all: '全部账号',
-        options: [...(isOwner ? ['总管理员','员工','入住长者','亲属'] : []), '已启用', '已停用', '待激活'],
+        options: [...(isOwner ? ['Owner','员工','入住长者','亲属'] : []), '已启用', '已停用', '待激活'],
         matches: (r, key) => identityLabel(r) === key || (key==='待激活' && r.activationPending && r.enabled) || (r.enabled ? '已启用' : '已停用') === key,
       },
       cols: [
@@ -505,7 +506,7 @@ function accounts(ctx) {
             link(
               ctx,
               r.kind === 'owner'
-                ? '全部权限'
+                ? 'Owner'
                 : r.kind === 'family'
                   ? '门户权限'
                   : r.permissions.length + ' 项授权',
@@ -610,6 +611,7 @@ function settings(ctx) {
       ['公开搜索', `已计费 ${config.webSearch?.calls || 0} 次，待核对 ${config.webSearch?.pending || 0} 次`],
       ['有效期至', config.expiresOn || '—'],
     ]),
+    btn(ctx, '查看 DeepSeek 用量', () => ctx.go('settings', 'deepseekUsage'), 'primary'),
     node('p', 'fx-muted', '云端规划按机构另购套餐启用。开通、续期与额度调整由平台运营方办理。'),
   ]);
   if (config.media) {
@@ -638,6 +640,7 @@ function settings(ctx) {
     null,
     tabs('settings', [
       ['general', '界面与 AI 套餐', () => node('div', 'access-settings-grid', [appearance, deep])],
+      ['deepseekUsage', 'DeepSeek 用量', () => providerUsage(ctx)],
       ['trials', '试住约定', () => trialSettings(ctx)],
       ['rounds', '定时巡查', () => roundsSettings(ctx)],
       ['backups', '备份与恢复', () => backupPanel(ctx)],
@@ -651,6 +654,6 @@ export function renderAccess(route, ctx) {
   if (route === 'settings')
     return ctx.state.user?.kind === 'owner'
       ? settings(ctx)
-      : ctx.ui.empty('机构设置需要总管理员权限');
+      : ctx.ui.empty('机构设置需要 Owner 权限');
   return ctx.state.accessManagement ? accounts(ctx) : ctx.ui.empty('当前账号未获人员管理权限');
 }

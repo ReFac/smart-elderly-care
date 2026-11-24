@@ -369,7 +369,7 @@ class Reader:
         elif row["action"] not in SUPPORTED:
             undo_reason = "已留存业务凭证，可在对应模块办理更正"
         elif self.user["kind"] != "owner" and row["actorId"] != self.user["id"]:
-            undo_reason = "仅经办人或总管理员可撤销"
+            undo_reason = "仅经办人或 Owner 可撤销"
         rooms = json.loads(row["rooms"] or "[]")
         people = json.loads(row["people"] or "[]")
         return {

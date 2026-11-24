@@ -80,7 +80,7 @@ def _recognized(store, token, files, manifest, authorize, name):
     warnings, evidence, dates = [], [], set()
     mismatch = False
     for (raw, _, _), item in zip(files, manifest):
-        result = document_ocr.recognize(store, token, raw, authorize)
+        result = document_ocr.recognize(store, token, raw, authorize, feature="dossier.visitOcr")
         pages = {p["page"]: p["state"] for p in result.get("pages", [])}
         label = item["filename"]
         if (
@@ -164,6 +164,7 @@ def organize(store, token, actor, rid, name, files, manifest, initial, authorize
                 "原文": [[n, r["text"]] for n, r in enumerate(evidence, 1)],
             },
             lambda obj: _selection(obj, len(evidence)),
+            feature="dossier.visitExtraction",
             output_tokens=1400,
             shared_once=True,
         )

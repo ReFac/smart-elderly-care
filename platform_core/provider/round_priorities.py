@@ -5,7 +5,7 @@ import json
 from uuid import uuid4
 
 from .. import access, history, provider, rounds
-from . import deepseek
+from . import deepseek, token_receipt
 
 CHECKS = {
     "past_due": "先核对已过计划时刻的工单，确认有无漏记或仍需跟进。",
@@ -126,8 +126,8 @@ def generate(store, token, rid, data, *, transport=None):
         key = provider.read_key()
         request = "rounds/" + uuid4().hex
         db.execute(
-            """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance)
-            VALUES(?,?,?,?,?,?,'pending',?)""",
+            """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance,feature)
+            VALUES(?,?,?,?,?,?,'pending',?,'care.roundPriorities')""",
             (
                 actor["id"],
                 request,
@@ -153,7 +153,9 @@ def generate(store, token, rid, data, *, transport=None):
             rid,
             comment,
         )
-    result = deepseek.complete(transport or deepseek.send, key, body, codes)
+    result = deepseek.complete(
+        transport or deepseek.send, key, body, codes, allowance=hold
+    )
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
         history.watch(db, "rounds.priorityResult")
@@ -169,6 +171,7 @@ def generate(store, token, rid, data, *, transport=None):
                 request,
             ),
         )
+        token_receipt.keep(db, actor["id"], request, result.receipt)
         if not receipt.rowcount:
             provider.late_usage(
                 db,

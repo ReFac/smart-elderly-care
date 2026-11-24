@@ -69,3 +69,9 @@ python3 -W error::ResourceWarning -m unittest discover -s tests -p test_provider
 ```
 
 模拟供应商响应可重复检验云端开通、请求最小化、并发限额、幂等、撤权、供应商异常、续期和对账。真实凭据联调应使用虚构任务与平台批准的预算。供应商密钥、原始请求、数据库及本地环境文件由部署端保管。
+
+## 按功能与人员查看用量
+
+Owner 在「机构设置 → DeepSeek 用量」可按北京时间、功能和经办账号查看汇总与调用明细。自动巡查单列为机构自动任务。涉及员工操作的识别、生成与复核归到发起人。每个云端请求只登记一次，待核对和已确认的用量分别展示。
+
+输入 Token 按 DeepSeek 回执拆分为缓存命中和未命中，输出 Token 单列。历史回执缺少拆分时仍保留总量并注明缺失。OCR 按页、ASR 按秒、朗读按计费字符、独立搜索按计费次数查看。[DeepSeek 回执字段](https://api-docs.deepseek.com/api/create-chat-completion/)

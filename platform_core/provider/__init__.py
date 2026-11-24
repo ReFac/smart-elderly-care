@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .. import access_policy
 from ..agents import specialists
-from . import deepseek, late_receipts, search_usage
+from . import deepseek, late_receipts, search_usage, token_receipt
 from .late_receipts import late_usage as late_usage, unsettled as unsettled
 
 DEFAULT_MODEL = "deepseek-flash"
@@ -34,6 +34,7 @@ def init(db):
         specialistIds TEXT NOT NULL DEFAULT '[]', reason TEXT NOT NULL DEFAULT '',
         PRIMARY KEY(actor,request))""")
     db.execute("CREATE INDEX IF NOT EXISTS api_usage_plan ON api_usage(planId)")
+    token_receipt.init(db)
     search_usage.init(db)
     late_receipts.init(db)
     generation.init(db)
@@ -234,9 +235,14 @@ def status(db, user, now=None):
             tokensUsed=used,
             tokensReserved=held,
             media=media_overview(db),
-            readAloud=dict(db.execute("""SELECT COALESCE(sum(charged),0) AS characters,
+            readAloud=dict(
+                db.execute(
+                    """SELECT COALESCE(sum(charged),0) AS characters,
                 COALESCE(sum(CASE WHEN state IN ('pending','uncertain') THEN reserved ELSE 0 END),0) AS held
-                FROM media_usage WHERE plan=? AND kind='tts'""", (plan["id"] if plan else 0,)).fetchone()),
+                FROM media_usage WHERE plan=? AND kind='tts'""",
+                    (plan["id"] if plan else 0,),
+                ).fetchone()
+            ),
             webSearch=search_usage.overview(db, plan["id"] if plan else None),
         )
     return result
@@ -320,8 +326,8 @@ def plan(
             return decision("unavailable", "exhausted", model)
         db.execute(
             """INSERT INTO api_usage
-            (actor,request,planId,fingerprint,model,createdAt,status,allowance)
-            VALUES(?,?,?,?,?,?,'pending',?)""",
+            (actor,request,planId,fingerprint,model,createdAt,status,allowance,feature)
+            VALUES(?,?,?,?,?,?,'pending',?,'agent.routing')""",
             (
                 uid,
                 request_id,
@@ -333,7 +339,9 @@ def plan(
             ),
         )
     # The network call never holds a workspace transaction. Unknown billing keeps its reservation.
-    outcome = deepseek.complete(transport or deepseek.send, key, body, allowed)
+    outcome = deepseek.complete(
+        transport or deepseek.send, key, body, allowed, allowance=allowance
+    )
     with closing(connect()) as db, db:
         receipt = db.execute(
             """UPDATE api_usage SET status=?,charged=?,specialistIds=?,reason=?
@@ -347,6 +355,7 @@ def plan(
                 request_id,
             ),
         )
+        token_receipt.keep(db, uid, request_id, outcome.receipt)
         if not receipt.rowcount:
             late_usage(
                 db,

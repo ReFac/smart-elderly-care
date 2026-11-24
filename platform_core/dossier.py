@@ -213,7 +213,7 @@ def edit_relative(db, state, p, user, today):
         if p.get("residentId", subject["residentId"]) != subject["residentId"]:
             raise ValueError("亲属绑定与长者档案不一致")
     else:
-        raise PermissionError("亲属资料由本人或总管理员维护")
+        raise PermissionError("亲属资料由本人或 Owner 维护")
     resident = lookup(state, "residents", subject["residentId"])
     saved = db.execute(
         "SELECT details FROM dossier_relatives WHERE account_id=? AND resident_id=?",

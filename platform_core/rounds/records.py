@@ -161,12 +161,22 @@ def report_source(db, state, person, now, *, clinical):
     )
 
 
-def interpret(store, data, *, clinical):
-    rows = narrative.paragraphs(store, data["residentId"], "care", data["dailyFacts"])
+def interpret(store, data, *, clinical, attributed_actor=None):
+    rows = narrative.paragraphs(
+        store,
+        data["residentId"],
+        "care",
+        data["dailyFacts"],
+        attributed_actor=attributed_actor,
+    )
     if clinical:
         rows.extend(
             narrative.paragraphs(
-                store, data["residentId"], "clinical", data["clinicalFacts"]
+                store,
+                data["residentId"],
+                "clinical",
+                data["clinicalFacts"],
+                attributed_actor=attributed_actor,
             )
         )
     return {"changes": rows, "clinical": clinical}

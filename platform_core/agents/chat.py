@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 from uuid import uuid4
 
 from .. import access_policy as policy, provider
-from ..provider import deepseek
+from ..provider import deepseek, token_receipt
 from ..store import Conflict, SignedOut
 from . import chat_context as ctx
 from . import chat_navigation, chat_web, ward_brief
@@ -427,6 +427,9 @@ def reply(store, token, data, *, transport=None):
         )
 
         brief = ward_brief.topic(text) if not actions and user["kind"] in ("owner", "staff") else ""
+        feature = "assistant." + (brief or "chat")
+        if actions.get("care") == "medicationRound":
+            feature = "assistant.medication"
         lines = []
 
         def private_body(db, state):
@@ -473,8 +476,8 @@ def reply(store, token, data, *, transport=None):
         if sum(provider.usage(db, plan["id"])) + allowance > plan["tokenLimit"]:
             raise Unavailable("机构的云端 AI 套餐可用额度不足，请联系管理员")
         db.execute(
-            """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance)
-            VALUES(?,?,?,?,?,?,'pending',?)""",
+            """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance,feature)
+            VALUES(?,?,?,?,?,?,'pending',?,?)""",
             (
                 uid,
                 receipt,
@@ -483,6 +486,7 @@ def reply(store, token, data, *, transport=None):
                 model,
                 int(now.timestamp()),
                 allowance,
+                feature,
             ),
         )
         db.execute(
@@ -520,6 +524,7 @@ def reply(store, token, data, *, transport=None):
     sources = None
     preparation_error = None
     charged = 0
+    remote_receipt = None
     rejected = False
     result, failure = None, ""
     try:
@@ -544,6 +549,7 @@ def reply(store, token, data, *, transport=None):
                         + allowance
                     )
                     if network is not None:
+                        feature = "assistant.webAnswer"
                         topic, hits = network
                         actions = {}
                         body = chat_web.public_body(
@@ -566,8 +572,8 @@ def reply(store, token, data, *, transport=None):
                             "机构套餐剩余额度不足以整理本轮答复，请联系管理员"
                         )
                     changed = db.execute(
-                        "UPDATE api_usage SET allowance=? WHERE actor=? AND request=? AND status='pending'",
-                        (allowance, uid, receipt),
+                        "UPDATE api_usage SET allowance=?,feature=? WHERE actor=? AND request=? AND status='pending'",
+                        (allowance, feature, uid, receipt),
                     )
                     if not changed.rowcount:
                         raise chat_web.SearchFailure("本轮用量已进入对账，请重新发送")
@@ -585,12 +591,10 @@ def reply(store, token, data, *, transport=None):
         response = (
             transport(key, body) if transport else deepseek.send(key, body, timeout=60)
         )
-        usage = response.get("usage") if isinstance(response, dict) else None
-        metered = usage.get("total_tokens") if isinstance(usage, dict) else None
-        if type(metered) is int and 0 < metered <= allowance:
-            charged = metered
-        else:
+        remote_receipt = token_receipt.read(response, allowance)
+        if remote_receipt is None:
             raise ValueError
+        charged = remote_receipt.total
         _, answer, action = extract(response, actions, request, scope)
         if brief:
             # Only display authenticated ledger readings and observations. A cloud response
@@ -649,6 +653,7 @@ def reply(store, token, data, *, transport=None):
                 receipt,
             ),
         )
+        token_receipt.keep(db, uid, receipt, remote_receipt)
         if settled.rowcount != 1:
             provider.late_usage(
                 db, uid, receipt, charged, store.now(), confirmed_zero=rejected

@@ -82,7 +82,7 @@ def enqueue_deliveries(db):
 def require_owner(store, db, token):
     actor = store.actor(db, token)
     if actor["kind"] != "owner":
-        raise PermissionError("仅总管理员可管理机构快照和异地备份")
+        raise PermissionError("仅 Owner 可管理机构快照和异地备份")
     return actor
 
 

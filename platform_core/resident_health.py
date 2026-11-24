@@ -173,6 +173,7 @@ def draft(store, token, rid, payload):
         evidence.CALLOUT,
         {"摘录": [[i, s["label"], s["value"]] for i, s in enumerate(sources, 1)]},
         lambda obj: evidence.validate(obj, sources),
+        feature="dossier.healthIntroduction",
         output_tokens=850,
         shared_once=True,
     )

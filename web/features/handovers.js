@@ -30,7 +30,7 @@ async function create(ctx, button) {
       const body = node(
         'div',
         'fx-profile',
-        node('p', '', '请由总管理员在「账号与权限」为另一位在岗人员开通照护服务权限。')
+        node('p', '', '请由 Owner 在「账号与权限」为另一位在岗人员开通照护服务权限。')
       );
       const dialog = ctx.detail('暂无可选接班人', body);
       if (ctx.available('access'))

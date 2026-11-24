@@ -36,6 +36,9 @@ def init(db):
         actor TEXT NOT NULL, fingerprint TEXT NOT NULL, at INTEGER NOT NULL,
         state TEXT NOT NULL, reserved INTEGER NOT NULL, charged INTEGER NOT NULL DEFAULT 0,
         result TEXT, vendor_id TEXT, original BLOB, reference TEXT NOT NULL DEFAULT '')""")
+    if "feature" not in {r[1] for r in db.execute("PRAGMA table_info(media_usage)")}:
+        db.execute("ALTER TABLE media_usage ADD COLUMN feature TEXT")
+    db.execute("CREATE INDEX IF NOT EXISTS media_usage_by_time ON media_usage(at)")
     db.execute(
         "CREATE INDEX IF NOT EXISTS media_lookup ON media_usage(kind,fingerprint,state)"
     )
@@ -193,6 +196,7 @@ def execute(
     mime,
     authorize,
     parse,
+    feature,
     reference="",
     upload=None,
     audit_scope=None,
@@ -243,8 +247,8 @@ def execute(
 
             history.watch(db, "media.asr")
         db.execute(
-            """INSERT INTO media_usage (id,plan,kind,actor,fingerprint,at,state,reserved,original,reference)
-          VALUES(?,?,?,?,?,?,'pending',?,?,?)""",
+            """INSERT INTO media_usage (id,plan,kind,actor,fingerprint,at,state,reserved,original,reference,feature)
+          VALUES(?,?,?,?,?,?,'pending',?,?,?,?)""",
             (
                 call,
                 plan["id"],
@@ -255,6 +259,7 @@ def execute(
                 reserve,
                 raw if kind == "asr" else None,
                 reference,
+                feature,
             ),
         )
         if kind == "asr":

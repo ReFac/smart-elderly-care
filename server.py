@@ -147,6 +147,11 @@ class Handler(BaseHTTPRequestHandler):
         return {key: values[0] for key, values in params.items()}
 
     def read_resource(self, path):
+        if path == "/api/provider/usage":
+            from platform_core.provider import usage_report
+
+            query = self.query_fields({"start", "end", "feature", "actorId", "page"})
+            return self.send_json(200, usage_report.read(self.store, self.token(), query))
         reported = re.fullmatch(r"/api/residents/([A-Za-z0-9_-]{1,100})/(reported-medications|drug-names)", path)
         if reported:
             from platform_core import medication_reports
@@ -880,7 +885,7 @@ def main():
     ):
         from getpass import getpass
 
-        initial_password = getpass("为总管理员设置初始密码（10–128 字符）：")
+        initial_password = getpass("为 Owner 设置初始密码（10–128 字符）：")
         if not 10 <= len(initial_password) <= 128 or initial_password != getpass(
             "请再次输入："
         ):

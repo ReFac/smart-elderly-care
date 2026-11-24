@@ -6,6 +6,7 @@ import { routes } from '../lib/navigation.js';
 
 // These destinations are also indexed by the keyboard quick finder.
 export const quickDestinations = [
+  { label: 'DeepSeek 用量', words: '模型用量 API 用量 Token 用量 OCR ASR 缓存命中率 员工用量', route: 'settings', tab: 'deepseekUsage' },
   { label: '登记集体活动', words: '集体用餐 早餐 午餐 晚餐 登记餐单', route: 'care', tab: 'groupLife', grant: 'care.proposeGroupActivity' },
   { label: '核对活动参加名单', words: '集体活动待确认 用餐签认', route: 'care', tab: 'groupLife', grant: 'care.confirmGroupActivity' },
   { label: '意向客户', words: '来电登记 电话回访 客户反馈', route: 'leads' },

@@ -793,7 +793,7 @@ def _add_beds(db, state, room_id, count, rate):
 
 def apply(db, state, action, payload, user, today):
     if not user or user["kind"] != "owner":
-        raise PermissionError("仅机构总管理员可维护院区和导览")
+        raise PermissionError("仅机构 Owner 可维护院区和导览")
     acl = _access(db, user)
     if any(value is not None for value in (acl.buildings, acl.floors, acl.rooms)):
         raise PermissionError("院区维护需要完整机构管理范围")

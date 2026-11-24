@@ -72,7 +72,7 @@ class RoundService:
             revision, state = workspace(db)
             if path == "/api/rounds/settings":
                 if user["kind"] != "owner":
-                    raise PermissionError("仅总管理员可查看机构巡查设置")
+                    raise PermissionError("仅 Owner 可查看机构巡查设置")
                 return {"revision": revision, "settings": policy(db)}
             if path == "/api/rounds/inbox":
                 beds = campus_access.allowed_beds(db, user, include_rooms=True)
@@ -145,7 +145,7 @@ class RoundService:
             if not unchanged:
                 prepared = (
                     digest,
-                    interpret(self.store, data, clinical=clinical),
+                    interpret(self.store, data, clinical=clinical, attributed_actor=user["id"]),
                 )
         with closing(self.store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -158,7 +158,7 @@ class RoundService:
             action = path.rsplit("/", 1)[-1]
             if action == "settings":
                 if user["kind"] != "owner":
-                    raise PermissionError("仅总管理员可修改机构巡查设置")
+                    raise PermissionError("仅 Owner 可修改机构巡查设置")
                 person = None
                 history.watch(db, "rounds.settings")
                 changed = update_settings(db, body, now)

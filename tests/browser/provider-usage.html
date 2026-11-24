@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>DeepSeek 用量界面检查</title>
+  <link rel="stylesheet" href="../../web/style.css">
+  <link rel="stylesheet" href="../../web/features.css">
+  <link rel="stylesheet" href="../../web/access.css">
+</head>
+<body>
+  <main id="workspace"></main>
+  <output>检查中</output>
+  <script type="module">
+    import { renderAccess } from '../../web/features/access.js';
+    import { providerUsage } from '../../web/features/provider-usage.js';
+    import { selectTab } from '../../web/features/shared.js';
+    import * as ui from '../../web/lib/ui.js';
+
+    const workspace = document.querySelector('#workspace');
+    const observed = [];
+    const day = '2026-11-24';
+    const totals = {
+      calls: 73, pendingCalls: 1, tokens: 18430, reservedTokens: 300,
+      inputTokens: 16501, cacheHitTokens: 11800, cacheMissTokens: 4701, outputTokens: 1929,
+      unclassifiedTokenCalls: 1, unclassifiedCacheCalls: 1,
+      ocrPages: 16, asrSeconds: 294, ttsCharacters: 615, searchCalls: 8,
+    };
+    const features = [
+      { id: 'chat', label: '健康助理对话' }, { id: 'asr', label: '语音转写' },
+      { id: 'ocr', label: '文档识别' }, { id: 'system', label: '定时巡查' },
+    ];
+    const actors = [
+      { id: 'owner-1', label: 'Owner', kind: 'owner' },
+      { id: 'nurse-1', label: '周明（护士）', kind: 'staff' },
+    ];
+    const byFeature = [
+      { id: 'chat', label: '健康助理对话', ...totals, ocrPages: 0, asrSeconds: 0 },
+      { id: 'asr', label: '语音转写', ...totals, calls: 10, tokens: 0, inputTokens: null,
+        cacheHitTokens: null, cacheMissTokens: null, outputTokens: null, asrSeconds: 294, ocrPages: 0, ttsCharacters: 0, searchCalls: 0 },
+      { id: 'ocr', label: '文档识别', ...totals, calls: 7, tokens: 0, inputTokens: null,
+        cacheHitTokens: null, cacheMissTokens: null, outputTokens: null, ocrPages: 16, asrSeconds: 0, ttsCharacters: 0, searchCalls: 0 },
+    ];
+    const state = {
+      user: { id: 'owner-1', kind: 'owner', routes: ['overview', 'settings'] },
+      uiSettings: { institutionName: '安康家园', brandName: '安康医养平台', theme: 'forest', hiddenRoutes: [] },
+      today: day,
+    };
+    const context = {
+      ui, state,
+      go(route, tab) {
+        verify(route === 'settings', '用量入口跳转到机构设置');
+        selectTab(route, tab);
+        render();
+      },
+      async get(path) {
+        const url = new URL(path, location.origin);
+        verify(url.pathname === '/api/provider/usage', '用量使用 Owner 查询接口');
+        observed.push(url.searchParams);
+        const page = Number(url.searchParams.get('page'));
+        if (url.searchParams.get('start') === day) {
+          return { summary: {calls: 0}, byActor: [], byFeature: [], byDay: [], features, actors,
+            records: { items: [], page, pageSize: 50, total: 0 },
+            range: {start: day, end: day, timeZone: 'Asia/Shanghai'} };
+        }
+        return {
+          summary: totals, features, actors, byFeature, byDay: [{ id: day, label: day, ...totals }],
+          byActor: [{ id: 'nurse-1', label: '周明（护士）', ...totals }],
+          range: {start:'2026-11-01', end: day, timeZone: 'Asia/Shanghai'},
+          records: {
+            items: [{ at: day + 'T22:08:00+08:00', featureLabel: '健康助理对话', actorLabel: '周明（护士）',
+              status: page === 2 ? 'uncertain' : 'complete', unit: 'tokens', amount: 390,
+              reserved: 0, inputTokens: 300, cacheHitTokens: 280, cacheMissTokens: 20, outputTokens: 90 }],
+            total: 73, page, pageSize: 50,
+          },
+        };
+      },
+    };
+    const render = () => workspace.replaceChildren(renderAccess('settings', context));
+    const text = () => workspace.textContent;
+    function verify(value, message) { if (!value) throw new Error(message); }
+    const click = title => {
+      const button = [...workspace.querySelectorAll('button')].find(item => item.textContent === title);
+      verify(button, '缺少可点击入口 ' + title);
+      button.click();
+    };
+    async function wait(check, message) {
+      for (let i = 0; i < 40; i += 1) {
+        if (check()) return;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      verify(check(), message);
+    }
+
+    try {
+      render();
+      click('查看 DeepSeek 用量');
+      await wait(() => text().includes('18,430'), '套餐入口和已用 Token');
+      verify(text().includes('1 次模型调用缺少缓存细项') && text().includes('11,800'), '已知与缺失回执并存');
+      click('按员工');
+      verify(text().includes('周明（护士）'), '按员工查看');
+      click('周明（护士）');
+      await wait(() => observed.at(-1).get('actorId') === 'nurse-1' && text().includes('18,430'), '过滤到指定员工');
+      click('调用明细');
+      verify(text().includes('22:08:00') && text().includes('第 1 / 2 页'), '北京时间和分页');
+      click('下一页');
+      await wait(() => text().includes('第 2 / 2 页') && text().includes('待对账'), '服务端翻页与状态');
+      verify(!workspace.querySelector('.usage-table .usage-partial'), '完整单笔记录无需部分统计标记');
+      workspace.querySelector('[name=feature]').value = 'chat';
+      workspace.querySelector('[name=start]').value = day;
+      click('查询');
+      await wait(() => text().includes('此筛选范围内没有调用记录'), '空状态');
+      verify(observed.at(-1).get('feature') === 'chat' && observed.at(-1).get('page') === '1', '组合筛选重置分页');
+      const count = observed.length;
+      const staff = providerUsage({ ...context, state: { ...state, user: { id:'nurse-1', kind:'staff' } } });
+      verify(staff.textContent.includes('Owner') && observed.length === count, '普通员工不会请求统计数据');
+      click('本月');
+      await wait(() => text().includes('18,430'), '恢复默认筛选');
+      click('按功能');
+      document.documentElement.dataset.result = 'pass';
+      document.querySelector('output').textContent = 'PASS';
+    } catch (error) {
+      document.documentElement.dataset.result = 'fail';
+      document.querySelector('output').textContent = error.stack;
+    }
+  </script>
+</body>
+</html>

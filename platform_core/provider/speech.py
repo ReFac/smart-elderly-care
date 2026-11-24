@@ -132,7 +132,7 @@ def recognize(store, token, task_id, raw, consent):
 
     with closing(store.connect()) as db:
         authorize(db, token)
-    return transcribe(store, token, task_id, raw, authorize)
+    return transcribe(store, token, task_id, raw, authorize, feature="care.taskAsr")
 
 
 def agent_capability(db, now):
@@ -268,7 +268,15 @@ def recognize_agent(store, token, selected, raw, consent, *, conversation=False)
             raise PermissionError("工作区域或语音权限已变化，请重新核对")
         return user
 
-    return transcribe(store, token, reference, raw, authorize, audit_scope)
+    return transcribe(
+        store,
+        token,
+        reference,
+        raw,
+        authorize,
+        audit_scope,
+        feature="assistant.voiceAsr" if conversation else "agent.voiceAsr",
+    )
 
 
 def require_agent_receipt(db, user, selected, receipt):
@@ -285,7 +293,7 @@ def require_agent_receipt(db, user, selected, receipt):
         raise ValueError("语音回执与经办人或工作区域不匹配")
 
 
-def transcribe(store, token, reference, raw, authorize, audit_scope=None):
+def transcribe(store, token, reference, raw, authorize, audit_scope=None, *, feature):
     filename, mime, seconds, upload = audio_spec(raw)
 
     def parse(obj):
@@ -314,6 +322,7 @@ def transcribe(store, token, reference, raw, authorize, audit_scope=None):
         mime,
         authorize,
         parse,
+        feature=feature,
         reference=reference,
         upload=upload,
         audit_scope=audit_scope,

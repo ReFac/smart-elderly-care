@@ -6,6 +6,8 @@ import json
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from . import token_receipt
+
 ENDPOINT = "https://api.deepseek.com/chat/completions"
 MAX_REPLY_BYTES = 32 * 1024
 REJECTED_HTTP = frozenset((400, 401, 402, 403, 404, 405, 413, 415, 422, 429))
@@ -122,9 +124,10 @@ class Outcome:
     reason: str
     tokens: int = 0
     ids: tuple = ()
+    receipt: token_receipt.TokenReceipt | None = None
 
 
-def complete(transport, key, body, allowed):
+def complete(transport, key, body, allowed, *, allowance=1_000_000):
     try:
         result = transport(key, body)
     except HTTPError as err:
@@ -134,9 +137,8 @@ def complete(transport, key, body, allowed):
         return Outcome("uncertain", "provider_unavailable")
     except (HTTPException, URLError, OSError, ValueError, RecursionError):
         return Outcome("uncertain", "provider_unavailable")
-    raw_usage = result.get("usage") if isinstance(result, dict) else None
-    tokens = raw_usage.get("total_tokens") if isinstance(raw_usage, dict) else None
-    if type(tokens) is not int or not 0 < tokens <= 1_000_000:
+    receipt = token_receipt.read(result, allowance)
+    if receipt is None:
         return Outcome("uncertain", "usage_unknown")
     try:
         choice = result["choices"][0]
@@ -153,5 +155,5 @@ def complete(transport, key, body, allowed):
         ) != len(ids):
             raise ValueError
     except (KeyError, IndexError, TypeError, ValueError, RecursionError):
-        return Outcome("closed", "invalid_output", tokens)
-    return Outcome("ok", "ready", tokens, tuple(ids))
+        return Outcome("closed", "invalid_output", receipt.total, receipt=receipt)
+    return Outcome("ok", "ready", receipt.total, tuple(ids), receipt)

@@ -478,7 +478,7 @@ function inspectContract(ctx, row) {
           row.pages.length ? '工牌产品介绍第 ' + row.pages.join('、') + ' 页' : '机构补充需求',
         ],
         ['当前响应', 'HTTP 501 · 待接入'],
-        ['配置权限', row.ownerOnly ? '仅总管理员' : '按机构授权'],
+        ['配置权限', row.ownerOnly ? '仅 Owner' : '按机构授权'],
       ]),
       section('能力说明', node('p', 'gw-description', row.description)),
       section('接入条件', node('p', 'gw-description', row.policy)),

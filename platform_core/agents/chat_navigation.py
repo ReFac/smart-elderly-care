@@ -89,6 +89,7 @@ PAGES = (
     ),
     Page("settings", "机构设置", ("系统设置",)),
     Page("settings", "界面与 AI 套餐", ("AI 套餐", "界面设置"), "general"),
+    Page("settings", "DeepSeek 用量", ("模型用量", "API 用量", "Token 用量", "缓存命中率"), "deepseekUsage"),
     Page("settings", "定时巡查", ("巡查设置",), "rounds"),
     Page("settings", "试住约定", ("试住设置", "试住默认价", "试住默认天数"), "trials"),
     Page("settings", "备份与恢复", ("备份", "快照", "恢复备份"), "backups"),

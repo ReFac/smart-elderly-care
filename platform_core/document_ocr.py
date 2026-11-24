@@ -177,7 +177,7 @@ def parse_result(obj, width, height, page_count=1):
     return result, page_count, obj["id"]
 
 
-def recognize(store, token, raw, authorize):
+def recognize(store, token, raw, authorize, *, feature="dossier.documentOcr"):
     from .dossier import jpeg_dimensions, png_dimensions
 
     if raw.startswith(b"%PDF-"):
@@ -205,6 +205,7 @@ def recognize(store, token, raw, authorize):
         mime,
         authorize,
         lambda obj: parse_result(obj, width, height, page_count),
+        feature=feature,
     )
 
 

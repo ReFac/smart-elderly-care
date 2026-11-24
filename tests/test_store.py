@@ -29,6 +29,17 @@ class WorkspaceTransactions(unittest.TestCase):
     def execute(self, action, payload, revision):
         return self.store.execute(action, payload, revision, self.token)
 
+    def test_owner_label_migrates_with_the_existing_login_session(self):
+        with closing(self.store.connect()) as db, db:
+            db.execute(
+                "UPDATE accounts SET display_name='总管理员',role='总管理员' WHERE kind='owner'"
+            )
+        reopened = Store(self.path, lambda: self.date)
+        user = reopened.snapshot(self.token)["data"]["user"]
+        self.assertEqual((user["displayName"], user["role"]), ("Owner", "Owner"))
+        self.assertEqual(user["username"], "owner")
+        self.assertIn("settings", user["routes"])
+
     def test_restart_preserves_state_and_audit_and_refreshes_business_day(self):
         before = self.store.snapshot(self.token)
         self.execute("care.inquire", {"name": "走查长者"}, before["revision"])

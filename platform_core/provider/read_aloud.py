@@ -111,8 +111,8 @@ def listen(store, token, payload, *, transport=None):
             for c in piece
         )
         db.execute(
-            """INSERT INTO media_usage(id,plan,kind,actor,fingerprint,at,state,reserved,reference)
-                      VALUES(?,?,'tts',?,?,?,'pending',?,?)""",
+            """INSERT INTO media_usage(id,plan,kind,actor,fingerprint,at,state,reserved,reference,feature)
+                      VALUES(?,?,'tts',?,?,?,'pending',?,?,'assistant.readAloud')""",
             (ref, plan["id"], uid, fingerprint, int(now.timestamp()), units, request),
         )
     try:

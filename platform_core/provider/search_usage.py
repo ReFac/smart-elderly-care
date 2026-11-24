@@ -11,6 +11,9 @@ def init(db):
         verified INTEGER CHECK(verified IN (0,1)), verifiedAt INTEGER,
         needsReview INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(actor,request))""")
     db.execute(
+        "CREATE INDEX IF NOT EXISTS search_usage_by_time ON api_search_usage(createdAt)"
+    )
+    db.execute(
         "CREATE INDEX IF NOT EXISTS search_plan ON api_search_usage(planId,status)"
     )
 
