@@ -1,6 +1,7 @@
 """Dispatch bounded specialist work, then return evidence and a human-review checkpoint."""
 
 from dataclasses import replace
+from . import react
 
 from .contracts import (
     CARE_PLAN_TOOL,
@@ -18,6 +19,7 @@ from ..operations.care_draft import assessment_facts, plan_facts
 from ..operations.assistants import (
     care_suggestion,
     care_review,
+    finance_line_total,
     stock_suggestion,
     finance_suggestion,
     cite_records,
@@ -48,6 +50,8 @@ FIELDS = {
         "month",
         "kind",
         "trialPrice",
+        "depositMonths",
+        "depositUnitPrice",
         "balance",
         "endDate",
         "amount",
@@ -93,13 +97,15 @@ def scoped_records(state, spec, resident_id, member_ids=None, *, actor_id=None):
         if resident_id and spec.key == "care":
             records = (row for row in records if row.get(key) == resident_id)
         fields = (
-            ("id", "date", "amount")
+            ("id", "date", "amount", "kind")
             if spec.tool == REVENUE_TOOL.tool and collection == "bills"
             else FIELDS[collection]
         )
         data[collection] = []
         for row in records:
             item = {k: row[k] for k in fields if k in row}
+            if collection == "bills" and spec.tool != REVENUE_TOOL.tool and row.get("lineItems"):
+                item["lineTotal"] = finance_line_total(row)
             if spec.tool == CARE_PLAN_TOOL.tool:
                 if collection == "assessments":
                     item.update(assessment_facts(row))
@@ -283,8 +289,12 @@ def execute(
             name: {row["id"] for row in rows} for name, rows in inputs.items()
         }
         trace.append(key, "tool.called", spec.tool, "coordinator")
-        output = provider.collect(spec, inputs, target, day)
+        action = react.Action(
+            spec.tool, spec.title, lambda: provider.collect(spec, inputs, target, day)
+        )
+        output = react.observe((action,), [spec.tool])[spec.tool]
         artifact = validate_artifact(output, spec, target, allowed_ids)
+        trace.append(key, "tool.observed", "已核对资料引用范围", "coordinator")
         artifacts.append(artifact)
         trace.append(key, "artifact.created", artifact["title"], "coordinator")
     trace.append("coordinator", "approval.requested", "产出已保存，等待人工核对并发布")

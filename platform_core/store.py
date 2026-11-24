@@ -12,7 +12,8 @@ from .operations import expense_import
 from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, staff_employment, storage_assets
 from . import lead_contacts, lead_intake, medical_visits, people_labels, visit_schedule
-from . import daily_life, med_rounds, medication_reports, resident_health, scheduled_work
+from . import care_areas, daily_life, med_rounds, medication_reports, resident_health, scheduled_work
+from . import visitor_access
 from .bootstrap import empty_workspace
 from .care import trial_expiry, trial_followups
 from . import backups, history, rounds
@@ -105,6 +106,7 @@ class Store:
                 )
                 db.execute("INSERT INTO workspace VALUES (1, 0, ?)", (encode(data),))
             access.init(db, initial_owner_password)
+            visitor_access.init(db)
             if version < 4:
                 access.migrate_branding(db)
             dossier.init(db)
@@ -130,6 +132,7 @@ class Store:
                 data.update(missing)
                 db.execute("UPDATE workspace SET data=? WHERE id=1", (encode(data),))
             facility.init(db, data)
+            care_areas.init(db)
             backups.init(db)
             rounds.init(db, self.now())
             history.prune(db, self.now())
@@ -213,6 +216,16 @@ class Store:
             ]
             lead_contacts.reconcile_callbacks(db, state, self.now())
             data = access.project(db, state, user, self.facility_policy)
+            from .operations import billing_lifecycle
+
+            billing_lifecycle.project(state, data, user, today)
+            if access.has(user, "intake") or access.has(user, "finance"):
+                from .operations.admission_finance import project_status
+
+                project_status(state, data)
+            data["shifts"] = [{k: v for k, v in row.items() if k != "area"} for row in data.get("shifts", ())]
+            if "beds" in user["routes"]:
+                data["bedDirectory"] = care_areas.bed_directory(db, [bed["id"] for bed in data["beds"]])
             from .operations import dispatch
 
             dispatch.project(db, state, user, data)
@@ -745,6 +758,29 @@ class Store:
             campus_access.authorize_command(db, user, "ops.bill", payload, state)
             return quote_bill(state, payload, self.now().date().isoformat())
 
+    def admission_preview(self, token, body):
+        from .care import residency
+        from .operations import admission_finance
+
+        if set(body) != {"action", "payload", "revision"} or not isinstance(body["payload"], dict):
+            raise ValueError("请选择长者档案、床位和入住日期")
+        action, payload = body["action"], body["payload"]
+        entries = {"care.admit": residency.admit, "care.confirmStay": residency.confirm_stay}
+        if not isinstance(action, str) or action not in entries:
+            raise ValueError("请选择入住办理方式")
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            user = self.actor(db, token)
+            current, raw = db.execute("SELECT revision,data FROM workspace WHERE id=1").fetchone()
+            if type(body["revision"]) is not int or current != body["revision"]:
+                raise Conflict("机构记录已更新，请重新核对入住明细")
+            state = json.loads(raw)
+            access.authorize(user, action, payload, state)
+            campus_access.authorize_command(db, user, action, payload, state)
+            admission_finance.authorize(user, payload)
+            quote = entries[action](state, payload, self.now().date().isoformat(), preview=True)
+            return {**quote, "revision": current}
+
     def plan_agent(self, payload, revision, token):
         from .agents import narrative
 
@@ -805,6 +841,10 @@ class Store:
                     raise ValueError("未登记的区域工具")
                 payload = validate_proposal(db, data, user, payload, today)
             campus_access.authorize_command(db, user, action, payload, data)
+            if action in ("care.admit", "care.confirmStay"):
+                from .operations.admission_finance import authorize as authorize_fees
+
+                authorize_fees(user, payload)
             if action in ("ops.publishNotice", "ops.supplyOrder", "care.addTask"):
                 from .operations.dispatch import verify_proposal
 
@@ -855,6 +895,16 @@ class Store:
                     summary = "已更新院区并行接待席位"
                 elif domain == "leads":
                     summary = lead_contacts.command(db, data, user, action, payload, now)
+                elif action in care_areas.ACTIONS:
+                    summary = care_areas.command(db, data, user, action, payload, now)
+                elif action == "ops.mergeStockItem":
+                    from . import inventory_dedupe
+
+                    summary = inventory_dedupe.merge(self, data, user, payload, today)
+                elif action == "ops.residentBillingPolicy":
+                    from .operations.admission_finance import configure
+
+                    summary = configure(data, payload)
                 elif action in scheduled_work.ACTIONS:
                     summary = scheduled_work.command(db, data, user, action, payload, now)
                 elif action == "care.confirmScheduledMeal":
@@ -920,9 +970,10 @@ class Store:
                     if action in ("care.inquire", "care.register", "ops.shift"):
                         fields["campusId"] = facility.selected_campus(db, user, fields)
                     if action == "care.assess":
-                        fields["matchCampusId"] = facility.resident_campus(
-                            db, data, fields.get("residentId")
-                        )
+                        rid = fields.get("residentId")
+                        fields["matchCampusId"] = facility.resident_campus(db, data, rid)
+                        resident = next((p for p in data["residents"] if p["id"] == rid), None)
+                        fields["matchAreaStaff"] = care_areas.responsible_staff(db, resident["bedId"]) if resident and resident.get("bedId") else ()
                     actor_fields = {
                         "care.assess": "operator",
                         "care.addMedication": "operator",

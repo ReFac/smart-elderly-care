@@ -87,7 +87,7 @@ def receipts(records, goal, day):
     )
     if "bills" in records:
         issued = sorted(
-            (r for r in records["bills"] if begin <= r.get("date", "") <= end),
+            (r for r in records["bills"] if begin <= r.get("date", "") <= end and r.get("kind") != "security"),
             key=lambda r: r["date"],
             reverse=True,
         )

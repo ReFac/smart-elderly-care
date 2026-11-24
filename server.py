@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from platform_core.agents import chat
 from platform_core.operations import expense_import
 from platform_core.backups import exchange
-from platform_core import access, facility
+from platform_core import access, facility, visitor_access
 from platform_core import daily_life, lead_intake, medical_visits, resident_health, scheduled_work
 from platform_core.provider import round_priorities
 from platform_core.store import Conflict, SignedOut, Store, encode
@@ -31,9 +31,10 @@ VISIT_GROUP_BODY = 34 * 1024 * 1024  # 24 MiB of originals, base64-encoded, plus
 
 
 class Handler(BaseHTTPRequestHandler):
-    def __init__(self, *args, store, public_origin=None, **kwargs):
+    def __init__(self, *args, store, public_origin=None, demo_public_tour=False, **kwargs):
         self.store = store
         self.public_origin = public_origin
+        self.demo_public_tour = demo_public_tour
         super().__init__(*args, **kwargs)
 
     def log_request(self, code="-", size="-"):
@@ -66,14 +67,22 @@ class Handler(BaseHTTPRequestHandler):
             status, encode(body).encode(), "application/json; charset=utf-8", cookie
         )
 
-    def token(self):
+    def token(self, name="nh_session"):
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get("Cookie", ""))
         except CookieError:
             return None
-        value = cookie.get("nh_session")
+        value = cookie.get(name)
         return value.value if value else None
+
+    def visitor_demo(self):
+        return self.demo_public_tour and not self.public_origin
+
+    def visitor_status(self, current=None):
+        return visitor_access.status(
+            self.store, current or self.token("nh_visitor"), self.token(), demo=self.visitor_demo()
+        )
 
     def session_cookie(self, token):
         secure = "; Secure" if self.public_origin else ""
@@ -149,6 +158,16 @@ class Handler(BaseHTTPRequestHandler):
         return {key: values[0] for key, values in params.items()}
 
     def read_resource(self, path):
+        if path == "/api/catalog/hospitals":
+            from platform_core import hospital_catalog
+
+            params = self.query_fields({"q"})
+            return self.send_json(200, hospital_catalog.search(self.store, self.token(), params.get("q", "")))
+        if path == "/api/care/areas":
+            from platform_core import care_areas
+
+            params = self.query_fields({"buildingId"})
+            return self.send_json(200, care_areas.read(self.store, self.token(), params.get("buildingId", "")))
         if path == "/api/scheduled-work":
             return self.send_json(200, scheduled_work.read(self.store, self.token()))
         if path == "/api/provider/usage":
@@ -194,6 +213,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(200, raw, mime)
         if path in ("/visit", "/visit/"):
             return self.respond(200, (WEB / "visit.html").read_bytes(), "text/html; charset=utf-8")
+        if path in ("/roomtour", "/roomtour/", "/visit/roomtour"):
+            return self.respond(200, (WEB / "roomtour.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/api/public/visitor/status":
+            return self.send_json(200, self.visitor_status())
         if path == "/api/public/reception":
             return self.send_json(200, lead_intake.reception(self.store))
         if path == "/api/leads/schedule":
@@ -486,6 +509,24 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, image, mime)
 
     def write_resource(self, path):
+        if path == "/api/care/admission/preview":
+            return self.send_json(200, self.store.admission_preview(self.token(), self.read_json(SMALL_BODY)))
+        if path == "/api/inventory/matches":
+            from platform_core import inventory_dedupe
+
+            return self.send_json(200, inventory_dedupe.preview(self.store, self.token(), self.read_json(4096)))
+        if path == "/api/public/visitor/code":
+            result = visitor_access.request_code(
+                self.store, self.read_json(512), self.client_address[0], demo=self.visitor_demo()
+            )
+            return self.send_json(200, result)
+        if path == "/api/public/visitor/verify":
+            token = visitor_access.verify(
+                self.store, self.read_json(512), self.client_address[0], demo=self.visitor_demo()
+            )
+            secure = "; Secure" if self.public_origin else ""
+            cookie = f"nh_visitor={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={visitor_access.SESSION_TTL}{secure}"
+            return self.send_json(200, self.visitor_status(token), cookie)
         health = re.fullmatch(r"/api/residents/([A-Za-z0-9_-]{1,100})/health-profile/draft", path)
         if health:
             return self.send_json(200, resident_health.draft(self.store, self.token(), health[1], self.read_json(SMALL_BODY)))
@@ -857,14 +898,14 @@ class InvalidMedia(ValueError):
 
 def dispatch_scheduled_work(store, stopped):
     from platform_core.care import archive_retention, trial_expiry
+    from platform_core.operations import billing_lifecycle
 
     while not stopped.is_set():
-        try:
-            trial_expiry.maintain(store)
-            archive_retention.maintain(store)
-            scheduled_work.tick(store)
-        except Exception:
-            logging.getLogger(__name__).exception("定时工单检查未完成，将在下一次检查时重试")
+        for maintain in (trial_expiry.maintain, archive_retention.maintain, scheduled_work.tick, billing_lifecycle.tick):
+            try:
+                maintain(store)
+            except Exception:
+                logging.getLogger(__name__).exception("定时任务 %s 未完成，将在下一次检查时重试", maintain.__module__)
         stopped.wait(10)
 
 
@@ -878,6 +919,7 @@ def main():
         "--public-origin",
         help="通过机构 HTTPS 反向代理访问时的完整源，例如 https://care.example.org",
     )
+    parser.add_argument("--demo-public-tour", action="store_true", help="仅本机人工演示 Roomtour 短信验证")
     parser.add_argument(
         "--initial-data",
         choices=("empty", "demo"),
@@ -886,6 +928,8 @@ def main():
     )
     args = parser.parse_args()
     origin = (args.public_origin or "").rstrip("/") or None
+    if origin and args.demo_public_tour:
+        parser.error("对外访问时不能使用 Roomtour 演示验证码")
     if origin:
         parsed = urlsplit(origin)
         if (
@@ -914,7 +958,7 @@ def main():
     store = Store(
         args.db, initial_data=args.initial_data, initial_owner_password=initial_password
     )
-    handler = partial(Handler, store=store, public_origin=origin)
+    handler = partial(Handler, store=store, public_origin=origin, demo_public_tour=args.demo_public_tour)
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
         store.backups.start()
         store.rounds.start()

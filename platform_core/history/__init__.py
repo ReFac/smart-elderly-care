@@ -92,7 +92,7 @@ def record(
         "agent"
         if action.startswith("agent.") or actor["id"] == "rounds-agent"
         else "system"
-        if actor["id"] in ("platform-operator", "archive-service", "trial-service", "scheduled-work", "demo-operator")
+        if actor["id"] in ("platform-operator", "archive-service", "trial-service", "scheduled-work", "demo-operator", "billing-lifecycle")
         or actor["id"].startswith("channel-")
         else "human"
     )
@@ -240,6 +240,8 @@ class Reader:
             return own and can_read_agent_history(self.db, self.user, row["revision"])
         if action in ("leads.public", "trial.expire"):
             return policy.has(self.user, "intake")
+        if action == "ops.billingLifecycle":
+            return policy.has(self.user, "finance")
         if action == "family.consent":
             return policy.has(self.user, "relatives") and policy.has(
                 self.user, "family.share"

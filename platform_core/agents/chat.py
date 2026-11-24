@@ -1,4 +1,4 @@
-"""Private conversational turns with a single metered DeepSeek call and no write tools."""
+"""Private conversation with metered evidence reads and explicit human actions."""
 
 from contextlib import closing
 from hashlib import sha256
@@ -12,7 +12,7 @@ from .. import access_policy as policy, provider
 from ..provider import deepseek, token_receipt
 from ..store import Conflict, SignedOut
 from . import chat_context as ctx
-from . import chat_navigation, chat_web, ward_brief
+from . import chat_navigation, chat_web, react, ward_brief
 
 CONTEXT_LIMIT = 100_000
 OUTPUT_LIMIT = 1800
@@ -285,6 +285,7 @@ def build_body(
 def token_allowance(body):
     return (
         len(ctx.compact(body["messages"]).encode()) + body["max_tokens"] + CONTEXT_PAD
+        + (len(ctx.compact(body["tools"]).encode()) if "tools" in body else 0)
     )
 
 
@@ -438,8 +439,10 @@ def reply(store, token, data, *, transport=None):
         elif actions.get("care") == "scheduledMeal":
             feature = "assistant.scheduledMeal"
         lines = []
+        lookup_actions = ()
 
         def private_body(db, state):
+            nonlocal lookup_actions
             facts = ctx.evidence(store, db, user, state, selected, hours, topics)
             if brief:
                 lines[:] = ward_brief.phrases(brief, facts)
@@ -451,7 +454,9 @@ def reply(store, token, data, *, transport=None):
                         {"role":"user", "content":ctx.compact({"当前问题":text, "事实":dict(enumerate(lines,1))})},
                     ],
                 }
-            return build_body(
+            if not actions and not web_enabled and ctx.institution_access(user):
+                lookup_actions = react.chat_actions(facts, read_latest, topics)
+            body = build_body(
                 db,
                 model,
                 user,
@@ -465,6 +470,18 @@ def reply(store, token, data, *, transport=None):
                 text,
                 web_enabled=web_enabled,
             )
+            if lookup_actions:
+                body["tools"] = [action.function() for action in lookup_actions]
+                body["tool_choice"] = "auto"
+                body["messages"][0]["content"] += "\n可按需要调用已授权工具，复核最新的记录再回答。"
+            return body
+
+        def read_latest():
+            with closing(store.connect()) as live:
+                live.execute("BEGIN")
+                visible = current_search_state(live)
+                actor = store.actor(live, token)
+                return ctx.evidence(store, live, actor, visible, selected, hours, topics)
 
         consider_search = (
             web_enabled
@@ -602,7 +619,15 @@ def reply(store, token, data, *, transport=None):
         if remote_receipt is None:
             raise ValueError
         charged = remote_receipt.total
-        _, answer, action = extract(response, actions, request, scope)
+        if lookup_actions and response["choices"][0]["finish_reason"] == "tool_calls":
+            observation = react.from_response(response, lookup_actions)
+            answer = react.answer(
+                store, uid, request, SYSTEM, text, observation,
+                context=last["question"] if last and text != topics else "",
+            )
+            action = None
+        else:
+            _, answer, action = extract(response, actions, request, scope)
         if brief:
             # Only display authenticated ledger readings and observations. A cloud response
             # selects the lead fact; it cannot invent a measurement or omit an exception.
@@ -634,6 +659,8 @@ def reply(store, token, data, *, transport=None):
     except chat_web.SearchFailure as err:
         # No synthesis was sent. Topic-selection tokens and the search call have their own receipts.
         status, failure, rejected = "closed", str(err), True
+    except (Conflict, SignedOut, PermissionError, FileNotFoundError) as err:
+        preparation_error, status = err, "closed"
     except HTTPError as err:
         rejected = err.code in deepseek.REJECTED_HTTP
         status = "closed" if rejected else "uncertain"

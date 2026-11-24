@@ -1,6 +1,7 @@
 import { admissionPayment } from './billing.js';
 import { residentAnchor, residentLabel, staffLabel } from './people-labels.js';
-import { allocate, billingSchedule, bindContractFields, contractFields, isTrial, monthlyDayField } from './admission.js';
+import { allocate, billingSchedule, bindAdmissionDate, bindContractFields, contractFields, isTrial, monthlyDayField } from './admission.js';
+import { admissionFinance, admissionFinanceFields } from './admission-fees.js';
 import { profile } from './residency.js';
 import { trialLength, trialTermFields } from './trial-terms.js';
 import { bedName, btn, canAct, choose, facts, field, link, memo, money, named, nextDay, node, section, select, table, today } from './shared.js';
@@ -12,33 +13,42 @@ export function confirmStay(ctx, person, targetBed = null) {
   if (needsBed && !free.length) return ctx.toast('当前范围暂无空床。可在有空床后确认入住，或登记取消入住。');
   const day = today(ctx);
   const starts = person.trialEndsAt > day ? person.trialEndsAt : day;
+  const finance = admissionFinance(ctx, 'care.confirmStay', ({ bedId, billingDay, contractTerm, endDate, ...terms }) => {
+    const payload = { residentId: person.id, ...terms, billingDay: Number(billingDay), endDate: contractTerm === 'fixed' ? endDate : '' };
+    if (selectBed) payload.bedId = bedId;
+    return payload;
+  });
   const dialog = ctx.dialog({
     title: '试住转正式入住',
-    description: residentLabel(ctx, person) + ' · ' + (needsBed ? '原试住床位已释放，请重新选床' : bedName(ctx, person.bedId)) + ' · 正式月费从 ' + starts + ' 起算。',
+    description: residentLabel(ctx, person) + ' · ' + (needsBed ? '原试住床位已释放，请重新选床' : bedName(ctx, person.bedId)) +
+      (starts > day ? ' · 已约定的试住期间保留，正式月费最早从 ' + starts + ' 起算。' : ''),
     fields: [
       ...(selectBed ? [select('bedId', '正式入住床位', [
         { value: '', label: '请选择当前空闲床位' },
         ...free.map(b => ({ value: b.id, label: [...(ctx.state.bedLocations?.[b.id] || [b.ward]), b.label].join(' / ') })),
       ], { value: targetBed?.id || '' })] : []),
+      field('admittedAt', '正式入住生效日', { type: 'date', value: day, min: needsBed ? day : person.admittedAt, max: day }),
       monthlyDayField(day, person.billingDay, '转正日'),
       ...contractFields(day, person.endDate || ''),
+      ...admissionFinanceFields(ctx),
     ],
     submitLabel: '核对转正',
-    onSubmit: async ({ bedId, billingDay, contractTerm, endDate }) => {
-      const payload = { residentId: person.id, billingDay: Number(billingDay), endDate: contractTerm === 'fixed' ? endDate : '' };
-      if (selectBed) payload.bedId = bedId;
+    onSubmit: async (values) => {
+      const { payload, expectedRevision, fields } = await finance.review(values);
       const done = await ctx.command('care.confirmStay', payload, {
         title: '确认试住转正式入住', target: residentLabel(ctx, person),
         fields: [
-          ['床位', bedName(ctx, bedId || person.bedId)], ['月费起算日', starts], ['收费安排', billingSchedule(payload)],
-          ['合同期限', payload.endDate || '无期限'],
-        ], confirmLabel: '确认转正',
+          ['床位', bedName(ctx, payload.bedId || person.bedId)], ['收费安排', billingSchedule(payload)],
+          ['合同期限', payload.endDate || '无期限'], ...fields,
+        ], expectedRevision, confirmLabel: '确认转正',
       });
       if (done) admissionPayment(ctx.current(), person.id);
       return done;
     },
   });
+  bindAdmissionDate(dialog, '转正日', { preserveBillingDay: Boolean(person.billingDay), contractMin: day });
   bindContractFields(dialog);
+  finance.mount(dialog);
 }
 
 export async function endTrial(ctx, person) {

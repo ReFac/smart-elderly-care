@@ -2,7 +2,7 @@ import { groups } from '../lib/navigation.js';
 import { btn, node } from './shared.js';
 
 const grantGroups = [
-  ['入住与照护', ['residents', 'intake', 'care', 'care.schedule', 'clinical', 'clinical.rules', 'health.overview']],
+  ['入住与照护', ['residents', 'intake', 'care', 'care.schedule', 'care.areas', 'clinical', 'clinical.rules', 'health.overview']],
   ['医疗档案与亲属', ['medical', 'medical.write', 'relatives', 'family.share']],
   ['机构运营', ['inventory', 'finance', 'longCare', 'shifts', 'reports']],
   ['智能协作与设备', ['assistants', 'gateway.simulate', 'alerts', 'voice', 'voice.confirm']],
@@ -24,6 +24,10 @@ const commands = {
       assess: '登记评估',
       approvePlan: '复核照护计划',
       addTask: '派发工单',
+      areaSave: '维护楼栋区域',
+      areaArchive: '归档楼栋区域',
+      areaMap: '调整照护范围',
+      areaAssign: '分配护工的照护区域',
       saveSchedule: '配置定时工单',
       setScheduleEnabled: '暂停或启用定时工单',
       scheduleMenu: '更新指定日期菜品',

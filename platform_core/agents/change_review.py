@@ -17,6 +17,8 @@ DOMAINS = {
     "ltci.record": "长护险",
     "ops.bill": "费用核算",
     "ops.addItem": "物资管理",
+    "ops.editStockItem": "物资管理",
+    "ops.mergeStockItem": "物资管理",
     "ops.stock": "物资管理",
     "ops.pay": "收款核销",
     "ops.deposit": "收款核销",

@@ -16,7 +16,7 @@ import {
   today,
 } from './shared.js';
 
-export function scaleForm(ctx) {
+export function scaleForm(ctx, residentId = '') {
   const scale = ctx.state.careScale;
   if (!scale || !hasGrant(ctx, 'clinical', 'medical')) return;
   const values = [];
@@ -48,7 +48,7 @@ export function scaleForm(ctx) {
     scoreBox.append(node('section', 'fx-section', [node('h3', '', group), scores]));
   }
   scoreBox.append(sum);
-  const subject = residentField(ctx);
+  const subject = residentField(ctx, { value: residentId });
   subject.options.unshift({ value: '', label: '请选择本次评估的长者' });
   const dialog = ctx.dialog({
     title: '标准量表评估',

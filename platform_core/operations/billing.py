@@ -51,11 +51,11 @@ def apply_deposit(state, account, today):
         (
             b
             for b in state["bills"]
-            if b["residentId"] == account["residentId"] and b["balance"]
+            if b["residentId"] == account["residentId"] and b["balance"] and b.get("kind") != "security"
         ),
         key=lambda b: (
             b.get("billingDate") or b.get("startDate") or b["month"],
-            b.get("kind") != "trial",
+            {"trial": 0, "security": 2}.get(b.get("kind"), 1),
         ),
     )
     for bill in debt:
@@ -223,7 +223,11 @@ def quote_bill(state, payload, today):
     )
     last_part = parts[-1]
     package_fee = currency_amount(payload.get("packageFee", 0), "月套餐费")
-    lines = invoice_lines(parts, package_fee, payload.get("items", []), days, leave)
+    extras = payload.get("items", [])
+    if not isinstance(extras, list):
+        raise ValueError("请核对本期的费用明细")
+    agreement = resident.get("admissionTerms", {}).get("feeItems", [])
+    lines = invoice_lines(parts, package_fee, [*agreement, *extras], days, leave)
     amount = currency_amount(
         sum(Decimal(str(item["amount"])) for item in lines), "账单合计"
     )
@@ -273,8 +277,8 @@ def record_trial_fee(state, resident, today):
         id=new_id("bill"),
         kind="trial",
         residentId=resident["id"],
-        month=today[:7],
-        billingDate=today,
+        month=resident["admittedAt"][:7],
+        billingDate=resident["admittedAt"],
         date=today,
         startDate=resident["admittedAt"],
         endDate=resident["trialEndsAt"],
@@ -287,6 +291,7 @@ def record_trial_fee(state, resident, today):
     )
     state["bills"].insert(0, bill)
     apply_deposit(state, get_account(state, resident["id"]), today)
+    return bill
 
 
 def charge_segments(state, resident, p, begin, end):

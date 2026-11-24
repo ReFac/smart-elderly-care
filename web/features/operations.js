@@ -26,20 +26,7 @@ import {
 import { downloadDocument, openDocumentButton } from './secure-documents.js';
 import { supplyOrders } from './assistant-actions.js';
 import { monthlyPanel } from './monthly.js';
-
-function addItem(ctx) {
-  runForm(ctx, {
-    title: '建立物资品目',
-    description: '品目建立后，在入库流水中登记期初实存数量。',
-    action: 'ops.addItem',
-    fields: [
-      field('name', '物资名称', { maxLength: 80 }),
-      field('unit', '计量单位', { maxLength: 16, placeholder: '如：盒、包、瓶' }),
-      field('minimum', '库存下限', { type: 'number', min: 0, max: 999999999, step: 1, value: 0 }),
-    ],
-    submitLabel: '建立品目',
-  });
-}
+import { addItem, editStockItem, itemDetails } from './inventory-dedupe.js';
 
 function stock(ctx, type, itemId) {
   runForm(ctx, {
@@ -54,7 +41,7 @@ function stock(ctx, type, itemId) {
         '物品',
         ctx.state.inventory.map((i) => ({
           value: i.id,
-          label: i.name + '（' + i.unit + '）',
+          label: i.name + '（' + i.unit + '）' + (itemDetails(i) ? ' · ' + itemDetails(i) : ''),
         }))
       ),
       field('quantity', '数量', {
@@ -101,8 +88,8 @@ export function inventory(ctx) {
             title: '库存明细',
             rows: state.inventory,
             search: {
-              placeholder: '搜索物品名称',
-              value: (r) => r.name,
+              placeholder: '搜索物品、品牌或规格',
+              value: (r) => [r.name, r.brand, r.specification, ...(r.aliases || [])].filter(Boolean).join(' '),
             },
             filter: {
               value: low,
@@ -110,7 +97,7 @@ export function inventory(ctx) {
             cols: [
               {
                 label: '物品名称',
-                view: (i) => named(i.name, i.id),
+                view: (i) => named(i.name, itemDetails(i) || i.unit),
               },
               {
                 label: '现有库存',
@@ -135,6 +122,9 @@ export function inventory(ctx) {
                         facts([
                           ['现有库存', i.quantity + ' ' + i.unit],
                           ['库存下限', i.minimum + ' ' + i.unit],
+                          ['品牌', i.brand || '待登记'],
+                          ['容量 / 规格 / 型号', i.specification || '待登记'],
+                          ['其他名称', (i.aliases || []).join('、') || '—'],
                         ]),
                         records(
                           state.transactions.filter((t) => t.itemId === i.id),
@@ -146,7 +136,8 @@ export function inventory(ctx) {
                         ),
                         choose(
                           btn(ctx, '入库', () => stock(ctx, '入库', i.id)),
-                          btn(ctx, '出库', () => stock(ctx, '出库', i.id))
+                          btn(ctx, '出库', () => stock(ctx, '出库', i.id)),
+                          canAct(ctx, 'ops.editStockItem') ? btn(ctx, '编辑品牌和规格', () => editStockItem(ctx, i)) : null,
                         ),
                       ])
                     )
@@ -221,7 +212,6 @@ export function shifts(ctx) {
           value: today(ctx),
         }),
         select('period', '班次', options(['早班', '中班', '夜班'])),
-        field('area', '负责区域'),
       ],
     });
   }
@@ -229,15 +219,15 @@ export function shifts(ctx) {
     ctx,
     '排班管理',
     hasGrant(ctx, 'care')
-      ? '按班次分配人员及责任区域，查看当日工单量。'
-      : '按班次分配人员和责任区域。',
+      ? '安排值班人员并查看当日工单量。'
+      : '按分院和日期安排值班人员。',
     btn(ctx, '安排班次', create, 'primary'),
     table(ctx, {
       title: '人员排班',
       rows: [...state.shifts].sort((a, b) => b.date.localeCompare(a.date)),
       search: {
-        placeholder: '搜索人员、区域或日期',
-        value: (s) => s.staff + ' ' + s.area + ' ' + s.date,
+        placeholder: '搜索人员或日期',
+        value: (s) => s.staff + ' ' + s.date,
       },
       filter: {
         value: (s) => s.period,
@@ -261,10 +251,6 @@ export function shifts(ctx) {
           view: (s) =>
             (ctx.state.campusOptions || []).find((c) => c.id === (s.campusId || 'campus-main'))
               ?.name || '本部',
-        },
-        {
-          label: '责任区域',
-          view: (s) => s.area,
         },
         ...(hasGrant(ctx, 'care')
           ? [

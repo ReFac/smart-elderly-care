@@ -153,6 +153,73 @@ class MedicalVisitTests(TestCase):
         self.store.execute("access.create", p, self.rev(), self.token)
         return self.store.login(username, PASSWORD)[0]
 
+    def test_supplements_append_to_original_visit_and_respect_id_and_date(self):
+        root = visits.preview(self.store, self.token, RID, self.body())
+        self.sign(root)
+        before = self.data()["medicalVisits"][0]
+        extra = self.file(png((14, 3, 128)), "检查报告")
+        explicit = self.body(
+            mode="manual",
+            requestId="visit-supplement",
+            visitId=before["id"],
+            fields={},
+            attachments=[extra],
+        )
+        with self.assertRaises(FileNotFoundError):
+            visits.preview(self.store, self.token, "r002", explicit)
+        with self.assertRaisesRegex(ValueError, "原件"):
+            visits.preview(
+                self.store, self.token, RID, {**explicit, "attachments": [self.note]}
+            )
+        draft = visits.preview(self.store, self.token, RID, explicit)
+        self.assertEqual(draft["fixedDate"], before["fields"]["eventDate"])
+        self.assertEqual(draft["parentVisitId"], before["id"])
+        with self.assertRaisesRegex(ValueError, "日期"):
+            self.sign(draft, fields={"eventDate": "2026-11-20", "tests": "不应签入"})
+        self.sign(draft, fields={**draft["fields"], "tests": "补充检查结果"})
+        self.sign(draft, fields={**draft["fields"], "tests": "补充检查结果"})
+        rows = self.data()["medicalVisits"]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(next(row for row in rows if row["id"] == before["id"]), before)
+        latest = next(row for row in rows if row.get("parentVisitId") == before["id"])
+        self.assertEqual(latest["fields"]["tests"], "补充检查结果")
+        self.assertEqual(latest["parentVisitId"], before["id"])
+        self.assertEqual(
+            visits.original(self.store, self.token, latest["attachments"][0]["id"])[0],
+            png((14, 3, 128)),
+        )
+        with self.assertRaises(FileNotFoundError):
+            visits.preview(
+                self.store,
+                self.token,
+                RID,
+                {**explicit, "requestId": "nested", "visitId": latest["id"]},
+            )
+
+    def test_new_wizard_requires_date_and_detects_mismatched_ocr_date(self):
+        missing = self.body(mode="ai", fields={}, consent=True, visitId="")
+        with self.assertRaises(ValueError):
+            visits.preview(self.store, self.token, RID, missing)
+        self.metering()
+        ocr, classify = self.cloud(
+            "门诊日期：2026年11月20日\n医院：平顶山市第一人民医院",
+            "影像片",
+            classify={"facility": [2]},
+        )
+        draft = visits.preview(
+            self.store,
+            self.token,
+            RID,
+            {**missing, "fields": {"eventDate": "2026-11-21"}},
+        )
+        self.assertTrue(draft["identityConflict"])
+        self.assertTrue(any("就诊日期" in item for item in draft["warnings"]))
+        self.assertEqual(ocr.call_count, 2)
+        classify.assert_not_called()
+        with self.assertRaises(ValueError):
+            self.sign(draft)
+        self.assertEqual(self.data()["medicalVisits"], [])
+
     def test_draft_ownership_medical_and_campus_scope_rechecked_at_read_and_sign(self):
         rights = ["medical", "medical.write", "clinical"]
         staff = self.account("other-clinician", rights)

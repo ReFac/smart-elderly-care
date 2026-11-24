@@ -46,3 +46,25 @@
   .medical-visit-fields .medical-visit-group,.medical-file { grid-template-columns:1fr; }
   .medical-file { gap:4px; }
 }
+
+.medical-visit-step { display: grid; gap: 14px; min-width: 0; }
+.medical-visit-step > h3 { font-size: 17px; margin: 0; }
+.medical-visit-step > .field { width: min(100%, 510px); }
+.medical-visit-step > .field > select { min-width: 0; }
+.medical-visit-selection { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; color: var(--muted); }
+.medical-visit-selection strong { color: var(--ink); }
+.medical-visit-field:has(.medical-hospital-options) { position: relative; }
+.medical-hospital-options {
+  position: absolute; left: 0; right: 0; z-index: 3; max-height: 210px;
+  list-style: none; overflow-y: auto; margin: 4px 0 0; padding: 3px; background: white;
+  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 7px 22px #20385823;
+}
+.medical-hospital-options > li { display: grid; gap: 3px; padding: 6px 8px; cursor: pointer; border-radius: 4px; }
+.medical-hospital-options > li:hover, .medical-hospital-options > li[aria-selected='true'] { background: var(--soft); }
+.medical-hospital-options small { color: var(--muted); }
+.medical-hospital-options small:empty, .medical-hospital-status:empty { display: none; }
+.medical-visit-supplement { border: 1px solid var(--line); border-radius: 7px; padding: 12px; }
+.medical-visit-supplement > summary { cursor: pointer; color: var(--accent); }
+.medical-visit-supplement > div { margin-top: 12px; }
+.medical-visit-history .fx-timeline-head > .medical-visit-actions { margin-inline-start: auto; }
+.medical-visit-history .fx-timeline-head > .medical-visit-actions .btn { margin-inline-start: 0; }

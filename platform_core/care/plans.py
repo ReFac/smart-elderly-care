@@ -23,17 +23,18 @@ SERVICE_ITEMS = {
 }
 
 
-def match_staff(state, resident, day, campus_id=None):
-    ward = lookup(state, "beds", resident["bedId"])["ward"]
+def match_staff(state, day, campus_id=None, preferred=()):
     candidates = {
         s["staff"]
         for s in state.get("shifts", [])
         if s["date"] == day
-        and s["area"] == ward
         and (campus_id is None or s.get("campusId", "campus-main") == campus_id)
     }
+    cover = candidates.intersection(preferred)
     if not candidates:
-        raise ValueError("今天本区尚无排班，请指定负责照护的人员。")
+        raise ValueError("长者所在分院今天尚无排班，请指定照护人员。")
+    if cover:
+        candidates = cover
     outstanding = {person: 0 for person in candidates}
     for task in state["tasks"]:
         if (
@@ -50,7 +51,7 @@ def assess(state, p, today):
     level = care_level(p.get("level"))
     note = required_field(p, "note", "评估结果与照护需求")
     assigned = text_field(p.get("assignee"), "照护责任人")
-    source = "人工指定" if assigned else "同区当日排班与待办量"
+    source = "人工指定" if assigned else "当日排班、区域职责与待办量"
     observations = p.get("observations", {})
     if not isinstance(observations, dict) or any(
         key not in SERVICE_ITEMS or value not in ("可独立完成", "需协助", "待观察")
@@ -75,7 +76,7 @@ def assess(state, p, today):
     assignee = assigned or (
         ""
         if historical
-        else match_staff(state, resident, today, p.get("matchCampusId"))
+        else match_staff(state, today, p.get("matchCampusId"), p.get("matchAreaStaff", ()))
     )
     if scale:
         for group, subtotal in scale["subtotals"].items():

@@ -1,5 +1,6 @@
 import { add, btn, canAct, facts, node, today } from './shared.js';
 import { residentLabel, staffLabel } from './people-labels.js';
+import { hospitalOptions } from './medical-hospital-picker.js';
 
 const fieldGroups = [
   ['就诊信息', [['eventDate', '就诊日期'], ['facility', '就诊机构'], ['department', '科室']]],
@@ -8,7 +9,7 @@ const fieldGroups = [
 ];
 export const clinicalKeys = fieldGroups.slice(1).flatMap(([, fields]) => fields.map(([key]) => key));
 
-export function visitFields(ctx, values = {}, refs = {}) {
+function visitFields(ctx, values = {}, refs = {}, fixedDate = '') {
   const element = node('div', 'medical-visit-fields');
   const controls = new Map();
   for (const [group, fields] of fieldGroups) {
@@ -24,11 +25,13 @@ export function visitFields(ctx, values = {}, refs = {}) {
         control.type = 'date';
         control.max = today(ctx);
         control.required = true;
+        control.readOnly = Boolean(fixedDate);
       }
       controls.set(key, control);
       const item = node('div', 'medical-visit-field', node('label', 'field', [
         node('span', '', label + (key === 'eventDate' ? ' *' : '')), control,
       ]));
+      if (key === 'facility') item.append(...hospitalOptions(ctx, control));
       if (refs[key]?.length) item.append(sourceNotes(refs[key]));
       box.append(item);
     }
@@ -81,18 +84,20 @@ function clinicalContent(fields) {
 
 export function reviewVisit(ctx, person, draft, localUrls, origin) {
   let revision = draft.revision ?? ctx.state.revision;
-  const fields = visitFields(ctx, draft.fields, draft.sourceRefs);
+  const fields = visitFields(ctx, draft.fields, draft.sourceRefs, draft.fixedDate);
+  const supplemental = Boolean(draft.parentVisitId);
   const check = node('input');
   check.type = 'checkbox';
   check.required = true;
   const error = node('p', 'form-error');
   error.setAttribute('role', 'alert');
-  const submit = node('button', 'btn btn-primary', '确认添加此病例');
+  const submit = node('button', 'btn btn-primary', supplemental ? '确认补充资料' : '确认添加此病例');
   submit.type = 'submit';
   submit.disabled = Boolean(draft.identityConflict);
   const form = node('form', 'medical-visit-form');
   form.autocomplete = 'off';
-  const factsLine = node('p', 'medical-visit-target', [ctx.ui.icon('folder', 18), '写入长者档案', node('strong', '', residentLabel(ctx, person))]);
+  const factsLine = node('p', 'medical-visit-target', [ctx.ui.icon('folder', 18),
+    supplemental ? '补充原就诊病例' : '写入长者档案', node('strong', '', residentLabel(ctx, person))]);
   const content = node('div', 'medical-visit-review-content', [
     draft.attachments?.length ? originals(draft.attachments, localUrls) : null,
     fields.element,
@@ -105,7 +110,7 @@ export function reviewVisit(ctx, person, draft, localUrls, origin) {
     node('label', 'access-check', [check, '我已核对长者、就诊日期、用药和医嘱，确认保存以上内容。']),
     error,
   );
-  const dialog = ctx.detail('核对就诊病例', form);
+  const dialog = ctx.detail(supplemental ? '核对就诊补充资料' : '核对就诊病例', form);
   dialog.classList.add('medical-visit-dialog');
   dialog.dataset.roundsResidentId = person.id;
   form.append(node('footer', 'medical-visit-actions', [
@@ -115,7 +120,7 @@ export function reviewVisit(ctx, person, draft, localUrls, origin) {
     event.preventDefault();
     if (submit.disabled || !form.reportValidity()) return;
     const values = fields.values();
-    if (!clinicalContent(values)) {error.textContent = '请至少填写一项就诊经过、检查、用药或医嘱。'; return;}
+    if (!clinicalContent(values) && !(draft.fixedDate && draft.attachments.length)) {error.textContent = '请至少填写一项就诊经过、检查、用药或医嘱。'; return;}
     submit.disabled = true;
     error.textContent = '';
     try {
@@ -137,8 +142,9 @@ export function reviewVisit(ctx, person, draft, localUrls, origin) {
       if (dialog.open) dialog.close();
       if (origin.open) origin.close();
       if (!(await ctx.refreshWorkspace())) return;
-      document.querySelectorAll('[data-visit-history]').forEach(panel => panel.dispatchEvent(new Event('visit-saved')));
-      ctx.toast('已将本次就诊病例写入' + residentLabel(ctx, person) + '的档案。');
+      document.querySelectorAll('[data-visit-history], [data-visit-detail]').forEach(panel =>
+        panel.dispatchEvent(new Event('visit-saved')));
+      ctx.toast(supplemental ? '补充资料已关联原就诊。' : '已将本次就诊病例写入' + residentLabel(ctx, person) + '的档案。');
     } catch (e) {
       if (dialog.open) error.textContent = e.message || '请检查网络后重试。';
     } finally {
@@ -148,28 +154,67 @@ export function reviewVisit(ctx, person, draft, localUrls, origin) {
   return dialog;
 }
 
-function showVisit(ctx, person, record) {
+function visitContent(ctx, record) {
   const fields = record.fields;
-  const body = node('article', 'medical-visit-detail', [
-    node('p', 'medical-visit-target', [ctx.ui.icon('folder', 18), residentLabel(ctx, person)]),
-    facts([
-      ['就诊日期', fields.eventDate], ['就诊机构', fields.facility], ['科室', fields.department],
-      ['资料整理', record.mode === 'manual' ? '手工录入' : 'AI 整理后人工核对'],
-      ['核对人员', staffLabel(ctx, { id: record.reviewerId, displayName: record.reviewer, role: record.reviewerRole })],
-      ['存档时间', record.recordedAt?.replace('T', ' ').slice(0, 19)],
-    ]),
-  ]);
+  const body = node('div', 'medical-visit-detail', facts([
+    ['就诊日期', fields.eventDate], ['就诊机构', fields.facility], ['科室', fields.department],
+    ['资料整理', record.mode === 'manual' ? '手工录入' : 'AI 整理后人工核对'],
+    ['核对人员', staffLabel(ctx, {id: record.reviewerId, displayName: record.reviewer, role: record.reviewerRole})],
+    ['存档时间', record.recordedAt?.replace('T', ' ').slice(0, 19)],
+  ]));
   for (const [, group] of fieldGroups.slice(1)) {
     for (const [key, label] of group) {
-      if (!fields[key]) continue;
-      body.append(node('section', 'medical-visit-text', [
+      if (fields[key]) body.append(node('section', 'medical-visit-text', [
         node('h3', '', label), node('p', '', fields[key]),
         record.sourceRefs?.[key]?.length ? sourceNotes(record.sourceRefs[key]) : null,
       ]));
     }
   }
   body.append(originals(record.attachments));
-  ctx.detail('就诊病例详情', body);
+  return body;
+}
+
+export function visitsFor(ctx, residentId) {
+  const records = (ctx.state.medicalVisits || []).filter(row => row.residentId === residentId);
+  const byDate = (a, b) => (b.recordedAt || '').localeCompare(a.recordedAt || '');
+  const children = new Map();
+  for (const row of records) {
+    if (!row.parentVisitId) continue;
+    if (!children.has(row.parentVisitId)) children.set(row.parentVisitId, []);
+    children.get(row.parentVisitId).push(row);
+  }
+  return records.filter(row => !row.parentVisitId).sort((a,b) => b.fields.eventDate.localeCompare(a.fields.eventDate) || byDate(a,b))
+    .map(row => ({...row, supplements: (children.get(row.id) || []).sort(byDate)}));
+}
+
+function showVisit(ctx, person, record, openEditor) {
+  const body = node('article', 'medical-visit-detail');
+  body.dataset.visitDetail = person.id;
+  function draw() {
+    const live = ctx.current?.() || ctx;
+    const current = visitsFor(live, person.id).find(row => row.id === record.id);
+    if (!current) { body.replaceChildren(node('p', 'fx-muted', '该就诊档案暂不可查阅。')); return; }
+    const details = current.supplements.map(item =>
+      node('details', 'medical-visit-supplement', [
+        node('summary', '', [
+          '补充资料', item.recordedAt?.replace('T', ' ').slice(0, 16),
+          item.attachments.length + ' 份原件',
+        ].filter(Boolean).join(' · ')),
+        visitContent(live, item),
+      ]));
+    body.replaceChildren(...[
+      node('p', 'medical-visit-target', [live.ui.icon('folder', 18), residentLabel(live, person)]),
+      openEditor && canAct(live, 'dossier.confirmVisit')
+        ? node('div', 'medical-visit-actions', btn(live, '补充本次就诊', () => openEditor(live, person, 'ai', record.id))) : null,
+      visitContent(live, current),
+      ...details,
+    ].filter(Boolean));
+  }
+  body.addEventListener('visit-saved', draw);
+  draw();
+  const dialog = ctx.detail('就诊病例详情', body);
+  dialog.dataset.roundsResidentId = person.id;
+  return dialog;
 }
 
 export function visitHistory(ctx, person, openEditor) {
@@ -177,21 +222,31 @@ export function visitHistory(ctx, person, openEditor) {
   panel.dataset.visitHistory = person.id;
   const draw = () => {
     const live = ctx.current?.() || ctx;
-    if (!live.state || !live.state.residents?.some(r => r.id === person.id)) {panel.replaceChildren(); return;}
-    const rows = (live.state.medicalVisits || []).filter(r => r.residentId === person.id).sort((a, b) =>
-      b.fields.eventDate.localeCompare(a.fields.eventDate) || b.recordedAt.localeCompare(a.recordedAt));
+    if (!live.state || !live.state.residents?.some(row => row.id === person.id)) {
+      panel.replaceChildren();
+      return;
+    }
+    const rows = visitsFor(live, person.id);
+    const actions = openEditor && canAct(live, 'dossier.confirmVisit') ? node('div', 'medical-visit-actions', [
+      btn(live, '手动录入病例', () => openEditor(live, person, 'manual')),
+      btn(live, '上传就诊资料', () => openEditor(live, person, 'ai'), 'primary'),
+    ]) : null;
     const header = node('header', 'fx-timeline-head', [
-      node('h3', '', [live.ui.icon('folder', 18), '就诊病例与过往记录']), node('span', 'fx-count', rows.length + ' 次'),
-      openEditor && canAct(live, 'dossier.confirmVisit') ? btn(live, '手动录入病例', () => openEditor(live, person, 'manual')) : null,
+      node('h3', '', [live.ui.icon('folder', 18), '就诊病例与过往记录']),
+      node('span', 'fx-count', rows.length + ' 次'), actions,
     ]);
-    const items = rows.map(r => node('article', 'fx-time-row', [
-      node('time', '', r.fields.eventDate),
-      node('div', 'fx-named', [
-        node('strong', '', r.fields.diagnosis || r.fields.reason || '就诊记录'),
-        node('small', '', [r.fields.facility, r.fields.department, r.attachments.length + ' 份原件'].filter(Boolean).join(' · ')),
-      ]),
-      btn(live, '查看病例', () => showVisit(live, person, r), 'ghost'),
-    ]));
+    const items = rows.map(row => {
+      const files = row.attachments.length + row.supplements.reduce((n, item) => n + item.attachments.length, 0);
+      return node('article', 'fx-time-row', [
+        node('time', '', row.fields.eventDate),
+        node('div', 'fx-named', [
+          node('strong', '', row.fields.diagnosis || row.fields.reason || '就诊记录'),
+          node('small', '', [row.fields.facility, row.fields.department, files + ' 份原件',
+            row.supplements.length ? row.supplements.length + ' 次补充' : ''].filter(Boolean).join(' · ')),
+        ]),
+        btn(live, '查看病例', () => showVisit(live, person, row, openEditor), 'ghost'),
+      ]);
+    });
     panel.replaceChildren(header, ...(items.length ? items : [node('p', 'fx-muted', '尚无已核对的就诊病例。')]));
   };
   panel.addEventListener('visit-saved', draw);

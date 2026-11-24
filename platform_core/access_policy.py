@@ -5,6 +5,7 @@ PERMISSIONS = {
     "intake": "意向客户、接待、入住和床位管理",
     "care": "评估、照护和工单执行",
     "care.groupConfirm": "核对集体活动参加名单并签认",
+    "care.areas": "管理授权楼栋的照护区域和人员职责",
     "care.schedule": "配置授权区域的定时工单和菜单",
     "health.overview": "查阅授权区域的健康汇总人数与异常项数",
     "clinical": "体征、异常、医嘱和用药复核",
@@ -71,7 +72,7 @@ ROUTE_GRANTS = {
     "assessments": ("care",),
     "care": ("care", "clinical", "care.groupConfirm", "care.schedule"),
     "medications": ("clinical",),
-    "beds": ("intake", "care", "clinical", "residents"),
+    "beds": ("intake", "care", "clinical", "residents", "care.areas"),
     "rooms": ("intake", "care", "clinical", "residents"),
     "tour": (),
     "inventory": ("inventory",),
@@ -118,6 +119,10 @@ ACTION_GRANTS = {
     "care.timelineSettings": "care",
     "care.completeTask": "care",
     "care.confirmScheduledMeal": "care",
+    "care.areaSave": "care.areas",
+    "care.areaArchive": "care.areas",
+    "care.areaMap": "care.areas",
+    "care.areaAssign": "care.areas",
     "care.saveSchedule": "care.schedule",
     "care.setScheduleEnabled": "care.schedule",
     "care.scheduleMenu": "care.schedule",
@@ -151,6 +156,8 @@ ACTION_GRANTS = {
     "ops.publishNotice": "notices.publish",
     "ops.stock": "inventory",
     "ops.addItem": "inventory",
+    "ops.editStockItem": "inventory",
+    "ops.mergeStockItem": "inventory",
     "ops.shift": "shifts",
     "ops.bill": "finance",
     "ops.deposit": "finance",
@@ -158,6 +165,7 @@ ACTION_GRANTS = {
     "ops.importReceipt": "finance",
     "ops.paymentOrder": "finance",
     "ops.remindBill": "finance",
+    "ops.residentBillingPolicy": "finance",
     "ops.expense": "finance",
     "ops.importExpenses": "finance",
     "ops.submitReport": "reports",
@@ -200,6 +208,7 @@ COLLECTION_GRANTS = {
     "depositEntries": "finance",
     "payments": "finance",
     "paymentOrders": "finance",
+    "billingNotices": "finance",
     "paymentFeeSettings": "finance",
     "channelReceipts": "finance",
     "expenses": "finance",
@@ -456,6 +465,8 @@ def can_view_audit(user, action, *, agent_initiator=None, agent_grants=()):
         return True
     if action in ("leads.public", "trial.expire"):
         return has(user, "intake")
+    if action == "ops.billingLifecycle":
+        return has(user, "finance")
     if action == "family.consent":
         return has(user, "relatives") and has(user, "family.share")
     if action == "dossier.signHealthIntro":
@@ -568,6 +579,8 @@ def visible_data(state, user):
             basic.append("contact")
         if any_grant("intake", "finance"):
             basic.extend(["admittedAt", "dischargedAt", "billingDay", "stayType", "formalizedAt", "trialEndsAt", "trialPrice", "trialDays"])
+        if has(user, "finance"):
+            basic.extend(["admissionTerms", "admissionPayment"])
         if any_grant("clinical", "medical"):
             basic.extend(["risk", "allergies", "summary"])
         data["residents"] = [select_fields(r, basic) for r in state["residents"]]

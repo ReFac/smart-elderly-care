@@ -20,6 +20,7 @@ import {
   residentName,
   byRecent,
   btn,
+  choose,
   link,
   named,
   badge,
@@ -36,6 +37,7 @@ import { medicationReminders, drugRules } from './medication-rules.js';
 import { levels } from './residency.js';
 import { handovers } from './handovers.js';
 import { groupActivities } from './group-activities.js';
+import { assessmentStages, healthDesk } from './care-workbench.js';
 
 const personSearch = (ctx, extra) => ({
   placeholder: '搜索长者或记录',
@@ -74,14 +76,24 @@ function observationFields() {
 
 export function assessments(ctx) {
   const state = ctx.state;
-  function assess() {
+  const canUseScale = state.careScale && hasGrant(ctx, 'clinical', 'medical');
+  const currentResidents = new Map(state.residents.filter((r) => r.status === '在住').map((r) => [r.id, r]));
+  const latest = new Map();
+  const assessedOn = (r) => r.scale?.assessedOn || r.date;
+  for (const row of byRecent(state.assessments).sort((a,b) => assessedOn(b).localeCompare(assessedOn(a)))) {
+    if (!row.historyOnly && currentResidents.has(row.residentId) && !latest.has(row.residentId))
+      latest.set(row.residentId, row);
+  }
+  const upcoming = [...latest.values()].filter((r) => r.reviewDate)
+    .sort((a,b) => a.reviewDate.localeCompare(b.reviewDate));
+  function assess(residentId = '') {
     runForm(ctx, {
       title: '登记能力评估',
       description: '填写评估人员确认的等级和服务需求，保存后生成照护计划草稿。',
       submitLabel: '保存评估并生成草稿',
       action: 'care.assess',
       fields: [
-        residentField(ctx),
+        residentField(ctx, { value: residentId }),
         select('source', '观察记录来源', options(['线上采集', '纸质观察记录'])),
         select('level', '评定照护等级', options(levels)),
         ...observationFields(),
@@ -137,10 +149,6 @@ export function assessments(ctx) {
   const evaluationList = () =>
     table(ctx, {
       title: '评估记录',
-      action:
-        state.careScale && hasGrant(ctx, 'clinical', 'medical')
-          ? btn(ctx, '标准量表评估', () => scaleForm(ctx))
-          : null,
       rows: byRecent(state.assessments),
       search: personSearch(ctx, (r) => r.note),
       cols: [
@@ -180,24 +188,30 @@ export function assessments(ctx) {
         },
       ],
     });
+  const grading = () => table(ctx, {
+    title: '在住长者的最近一次等级判定',
+    rows: [...latest.values()],
+    search: personSearch(ctx, (row) => (row.scale?.gradeName || '') + ' ' + row.level),
+    cols: [
+      personCol(ctx),
+      { label: '量表能力等级', view: (r) => r.scale?.gradeName || '未录入标准量表' },
+      { label: '本次核定的照护等级', view: (r) => badge(ctx, r.level) },
+      { label: '档案当前照护等级', view: (r) => currentResidents.get(r.residentId).level },
+      { label: '评估日期', view: assessedOn },
+      { label: '判定依据', align: 'end', view: (r) => link(ctx,'查看评估与依据',() => evaluationDetails(ctx,r)) },
+    ],
+    empty: '暂无可查看的在住长者评估，可先登记新评估。',
+  });
   const reviews = () =>
     table(ctx, {
       title: '复评安排',
-      rows: byRecent(state.assessments)
-        .filter(
-          (r) =>
-            r.reviewDate &&
-            state.residents.some((p) => p.id === r.residentId && p.status === '在住')
-        )
-        .sort((a, b) => b.date.localeCompare(a.date))
-        .filter((r, i, arr) => arr.findIndex((x) => x.residentId === r.residentId) === i)
-        .sort((a, b) => a.reviewDate.localeCompare(b.reviewDate)),
+      rows: upcoming,
       search: personSearch(ctx),
       cols: [
         personCol(ctx),
         {
           label: '上次评估',
-          view: (r) => r.date,
+          view: assessedOn,
         },
         {
           label: '预约复评',
@@ -213,6 +227,15 @@ export function assessments(ctx) {
         {
           label: '负责人员',
           view: (r) => staffLabel(ctx, r.assignee, r.assigneeId),
+        },
+        {
+          label: '办理', align: 'end',
+          view: (r) => choose(
+            link(ctx, '查看上次评估', () => evaluationDetails(ctx, r)),
+            canAct(ctx, 'care.assess')
+              ? link(ctx, '登记复评', () => canUseScale ? scaleForm(ctx, r.residentId) : assess(r.residentId))
+              : null,
+          ),
         },
       ],
     });
@@ -243,17 +266,21 @@ export function assessments(ctx) {
             r.status === '待复核'
               ? link(ctx, '复核派发', () => approve(r))
               : link(ctx, '查看', () =>
-                  ctx.detail(
-                    '照护计划',
+                  ctx.detail('个性化照护方案', node('div', 'fx-profile', [
                     facts([
                       ['长者', residentName(ctx, r.residentId)],
                       ['计划', r.title],
                       ['内容', r.note],
+                      ['负责人员', staffLabel(ctx, r.assignee, r.assigneeId)],
+                      ['匹配依据', r.assignmentSource || '人工指定'],
                       ['状态', r.status],
                       ['复核人', staffLabel(ctx, r.reviewer)],
+                      ['派发日期', r.reviewedAt],
                       ['复评日期', r.reviewDate],
-                    ])
-                  )
+                    ]),
+                    section('照护项目', records(r.items || ['执行个体照护计划'], (item) => item)),
+                    link(ctx, '查看已派发照护工单', () => ctx.go('care','tasks')),
+                  ]))
                 ),
         },
       ],
@@ -262,9 +289,18 @@ export function assessments(ctx) {
     ctx,
     '评估与计划',
     '记录长者能力与服务需求，复核方案后派发照护工单。',
-    btn(ctx, '登记评估', assess, 'primary'),
+    choose(
+      btn(ctx, '登记照护观察', () => assess()),
+      canUseScale ? btn(ctx, '标准量表评估', () => scaleForm(ctx), 'primary') : null,
+    ),
+    assessmentStages(ctx, {
+      total: state.assessments.length, classified: latest.size,
+      pendingPlans: state.plans.filter((r) => r.status === '待复核').length,
+      dueReviews: upcoming.filter((r) => r.reviewDate <= today(ctx)).length,
+    }),
     tabs('assessments', [
       ['assess', '评估记录', evaluationList],
+      ['grading', '等级判定', grading],
       ['plans', '照护计划', plans],
       ['review', '复评安排', reviews],
     ])
@@ -457,6 +493,31 @@ function vitalForm(ctx) {
   });
 }
 
+function vitalDetail(ctx, row) {
+  ctx.detail('体征与处置凭证', facts([
+    ['长者', residentAnchor(ctx, row.residentId)],
+    ['体征项目', row.metric],
+    ['测量结果', [row.value,row.unit].filter(Boolean).join(' ')],
+    ['登记日期', row.date],
+    ['状态', row.status],
+    ['记录人', staffLabel(ctx, row.operator, row.operatorId)],
+    ['观察记录', row.note],
+    ['处置人', row.resolvedBy ? staffLabel(ctx, row.resolvedBy, row.resolvedById) : ''],
+    ['处置日期', row.resolvedAt],
+    ['处置记录', row.resolution || row.resolutionNote],
+  ]));
+}
+
+function resolveVital(ctx, row) {
+  runForm(ctx, {
+    title: '记录异常处置', action: 'care.resolveVital',
+    description: [residentName(ctx,row.residentId), row.metric, [row.value,row.unit].filter(Boolean).join(' '),row.note].filter(Boolean).join(' · '),
+    fields: [memo('note', '核实与处置记录', true)],
+    map: (values) => ({ ...values, vitalId: row.id }),
+    submitLabel: '确认处置记录',
+  });
+}
+
 function vitals(ctx) {
   return table(ctx, {
     title: '体征记录',
@@ -486,45 +547,32 @@ function vitals(ctx) {
       {
         label: '操作',
         align: 'end',
-        view: (r) =>
-          r.status === '待复核'
-            ? link(ctx, '记录处理', () =>
-                runForm(ctx, {
-                  title: '处理异常上报',
-                  action: 'care.resolveVital',
-                  fields: [memo('note', '处理记录', true)],
-                  map: (v) => ({
-                    ...v,
-                    vitalId: r.id,
-                  }),
-                })
-              )
-            : link(ctx, '查看', () =>
-                ctx.detail(
-                  '体征记录',
-                  facts([
-                    ['长者', residentName(ctx, r.residentId)],
-                    ['项目', r.metric],
-                    ['测量结果', r.value + ' ' + (r.unit || '')],
-                    ['状态', r.status],
-                    ['记录人', staffLabel(ctx, r.operator, r.operatorId)],
-                    ['记录', r.note],
-                    ['处理记录', r.resolution || r.resolutionNote],
-                  ])
-                )
-              ),
+        view: (r) => choose(
+          link(ctx, '查看凭证', () => vitalDetail(ctx,r)),
+          r.status === '待复核' && canAct(ctx, 'care.resolveVital')
+            ? link(ctx, '记录处置', () => resolveVital(ctx,r))
+            : null,
+        ),
       },
     ],
   });
 }
 
 export function care(ctx) {
+  const showDesk = hasGrant(ctx, 'care', 'clinical');
   return page(
     ctx,
     '照护服务',
-    canAct(ctx, 'care.addTask') ? '执行照护工单并登记班次交接。' : '登记体征测量与异常处理结果。',
+    canAct(ctx,'care.vital')
+      ? '核对体征异常、交班和医嘱，查看各项业务凭证。'
+      : canAct(ctx,'care.addTask') ? '执行照护工单、登记班次交接并查阅服务凭证。' : '',
     canAct(ctx, 'care.addTask') ? btn(ctx, '新建任务', () => taskForm(ctx), 'primary') : null,
     tabs('care', [
+      ...(showDesk ? [['healthDesk', '健康工作台', () => healthDesk(ctx, {
+        vitalForm: () => vitalForm(ctx),
+        inspectVital: (row) => vitalDetail(ctx, row),
+        resolveVital: (row) => resolveVital(ctx, row),
+      })]] : []),
       ...(canAct(ctx, 'care.completeTask') ? [
         ['tasks', '照护工单', () => taskHistory(ctx)],
         ['completed', '已完成服务', () => careTimeline(ctx, 'work', '', (id) => serviceProof(ctx, id))],
@@ -547,6 +595,28 @@ export function care(ctx) {
 }
 
 export function medications(ctx) {
+  const warnings = (row) => row.warnings || [];
+  function detail(row) {
+    ctx.detail('医嘱、核查与执行凭证', node('div', 'fx-profile', [
+      facts([
+        ['长者', residentAnchor(ctx, row.residentId)],
+        ['药品', row.name],
+        ['医嘱', row.instruction],
+        ['状态', row.status],
+        ['负责人员', staffLabel(ctx, row.assignee, row.assigneeId)],
+        ['计划给药时间', row.scheduledAt?.replace('T', ' ')],
+        ['复核人', staffLabel(ctx, row.reviewer)],
+        ['审核意见', row.note],
+        ['执行人', staffLabel(ctx, row.operator, row.operatorId)],
+        ['执行登记时间', (row.executedTime || row.executedAt)?.replace('T', ' ')],
+        ['执行补充', row.executionNote],
+      ]),
+      section('筛查提醒', records(warnings(row),(warning) => warning,'当前凭证没有筛查提醒')),
+      section('核查历史', records(row.reviews || [], (entry) =>
+        named([entry.date, staffLabel(ctx, entry.reviewer)].filter(Boolean).join(' · '),
+          [...(entry.warnings || []), entry.note].filter(Boolean).join(' · ')))),
+    ]));
+  }
   function create() {
     runForm(ctx, {
       title: '登记用药计划',
@@ -572,14 +642,14 @@ export function medications(ctx) {
     runForm(ctx, {
       title: '复核用药计划',
       action: 'care.reviewMedication',
-      description: [residentName(ctx, r.residentId), r.name, r.instruction, ...r.warnings].join(
+      description: [residentName(ctx, r.residentId), r.name, r.instruction, ...warnings(r)].join(
         ' · '
       ),
       fields: [
         memo(
           'note',
-          r.warnings.length ? '筛查提醒的核实结果' : '复核意见',
-          Boolean(r.warnings.length)
+          warnings(r).length ? '筛查提醒的核实结果' : '复核意见',
+          Boolean(warnings(r).length)
         ),
       ],
       map: (v) => ({
@@ -598,7 +668,7 @@ export function medications(ctx) {
         r.name,
         r.instruction,
         r.scheduledAt && '计划给药 ' + r.scheduledAt.replace('T', ' '),
-        ...r.warnings,
+        ...warnings(r),
       ]
         .filter(Boolean)
         .join(' · '),
@@ -610,6 +680,14 @@ export function medications(ctx) {
       submitLabel: '确认执行',
     });
   }
+  const orderAction = (row) => choose(
+    link(ctx, '查看医嘱凭证', () => detail(row)),
+    row.status === '待复核' && canAct(ctx, 'care.reviewMedication')
+      ? link(ctx, '复核', () => review(row))
+      : row.status === '待执行' && canAct(ctx, 'care.giveMedication')
+        ? link(ctx, '登记执行', () => execute(row))
+        : null,
+  );
   return page(
     ctx,
     '用药管理',
@@ -634,7 +712,7 @@ export function medications(ctx) {
               {
                 label: '筛查提醒',
                 view: (r) =>
-                  r.warnings.length ? badge(ctx, r.warnings.length + ' 项提醒', 'amber') : '—',
+                  warnings(r).length ? badge(ctx, warnings(r).length + ' 项提醒', 'amber') : '—',
               },
               {
                 label: '负责人员',
@@ -647,44 +725,27 @@ export function medications(ctx) {
               {
                 label: '操作',
                 align: 'end',
-                view: (r) =>
-                  r.status === '待复核'
-                    ? link(ctx, '复核', () => review(r))
-                    : r.status === '待执行'
-                      ? link(ctx, '登记执行', () => execute(r))
-                      : link(ctx, '查看凭证', () =>
-                          ctx.detail(
-                            '用药凭证',
-                            facts([
-                              ['长者', residentName(ctx, r.residentId)],
-                              ['药品', r.name],
-                              ['医嘱', r.instruction],
-                              ['筛查提醒', r.warnings.join('、')],
-                              ['审核意见', r.note],
-                              ['复核人', staffLabel(ctx, r.reviewer)],
-                              ['执行人', staffLabel(ctx, r.operator, r.operatorId)],
-                              ['执行补充', r.executionNote],
-                              ['计划给药时间', r.scheduledAt?.replace('T', ' ')],
-                              ['执行登记时间', (r.executedTime || r.executedAt)?.replace('T', ' ')],
-                              [
-                                '核查历史',
-                                (r.reviews || [])
-                                  .map((v) =>
-                                    [v.date, staffLabel(ctx, v.reviewer), ...v.warnings, v.note]
-                                      .filter(Boolean)
-                                      .join(' · ')
-                                  )
-                                  .join('；'),
-                              ],
-                              ['状态', r.status],
-                            ])
-                          )
-                        ),
+                view: orderAction,
               },
             ],
           }),
       ],
       ['reminders', '定时提醒', () => medicationReminders(ctx, execute)],
+      ['safety', '筛查提醒', () => table(ctx, {
+        title: '过敏、重复用药与配伍提醒',
+        rows: byRecent(ctx.state.medications).filter((row) => warnings(row).length ||
+          row.reviews?.some((review) => review.warnings?.length)),
+        search: personSearch(ctx, (row) => row.name + ' ' + warnings(row).join(' ')),
+        filter: statusFilter,
+        cols: [
+          personCol(ctx),
+          { label: '药品与医嘱', view: (r) => named(r.name,r.instruction) },
+          { label: '当前提醒', view: (r) => warnings(r).length ? warnings(r).join(' · ') : '查看历史核查' },
+          { label: '状态', view: (r) => badge(ctx,r.status) },
+          { label: '办理与追溯', align: 'end', view: orderAction },
+        ],
+        empty: '授权范围内暂无用药筛查提醒。',
+      })],
       ['rules', '配伍规则', () => drugRules(ctx)],
     ])
   );

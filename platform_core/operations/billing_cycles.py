@@ -93,7 +93,7 @@ def selected_period(resident, payload, today):
 
 def billed(bills, candidate):
     for b in bills:
-        if b.get("kind") == "trial":
+        if b.get("kind") in ("trial", "security"):
             continue
         if b.get("billingDate") == candidate["billingDate"]:
             return True

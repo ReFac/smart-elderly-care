@@ -228,7 +228,9 @@ def contract_end(value, today):
     return end
 
 
-def admit(state, p, today):
+def admit(state, p, today, *, preview=False):
+    from ..operations import admission_finance
+
     if not p.get("residentId") or set(p) - {
         "residentId",
         "bedId",
@@ -238,7 +240,8 @@ def admit(state, p, today):
         "billingDay",
         "trialDays",
         "trialPrice",
-    }:
+        "admittedAt",
+    } - admission_finance.TERMS:
         raise ValueError("请先建立长者档案，办理入住时只选择已有未入住档案。")
     resident = lookup(state, "residents", p["residentId"])
     if resident["status"] != "未入住" or resident.get("bedId"):
@@ -246,13 +249,16 @@ def admit(state, p, today):
             "请选择未入住档案。在住长者请转床，归档老人再次入住须建立本次档案。"
         )
     bed = vacant_bed(state, p.get("bedId"))
+    arrival = admission_finance.admission_date(p, today)
+    if any(bed["id"] in (move.get("bedId"), move.get("beforeBedId")) and move["date"] > arrival
+           for move in state.get("bedMoves", ())):
+        raise ValueError("入住日期早于该床位最近的占用变化，请确认入住房间和日期")
     level = care_level(p.get("level") or resident["level"])
     stay_type = p.get("stayType", "formal")
     if stay_type not in ("formal", "trial"):
         raise ValueError("请选择正式入住或试住。")
     terms = {}
     if stay_type == "trial":
-        from ..operations.billing import record_trial_fee
         from ..operations.records import currency_amount
 
         defaults = (state.get("trialPolicies") or [{}])[0]
@@ -262,29 +268,33 @@ def admit(state, p, today):
             raise ValueError("请填写本次试住总价；免费试住请明确填写 0 元。")
         terms.update(
             trialDays=days,
-            trialEndsAt=offset_date(today, days - 1),
+            trialEndsAt=offset_date(arrival, days - 1),
             trialPrice=float(currency_amount(price, "试住总价")),
         )
+        if terms["trialEndsAt"] < today:
+            raise ValueError("试住结束日期已过，请核对入住日期和天数")
     elif {"trialDays", "trialPrice"} & p.keys():
         raise ValueError("正式入住请使用月付账期。")
     if stay_type == "formal" or p.get("billingDay") not in (None, ""):
-        terms["billingDay"] = monthly_billing_day(p.get("billingDay"), today)
+        terms["billingDay"] = monthly_billing_day(p.get("billingDay"), arrival)
     resident.update(
         status="在住",
         stayType=stay_type,
-        admittedAt=today,
-        endDate=contract_end(p.get("endDate"), today),
+        admittedAt=arrival,
+        endDate=contract_end(p.get("endDate"), arrival),
         level=level,
         **terms,
     )
-    move(state, resident, today, "入住", new_bed=bed)
+    move(state, resident, arrival, "入住", new_bed=bed)
     inquiry = next(
         (r for r in state["inquiries"] if r["id"] == resident.get("inquiryId")), None
     )
     if inquiry:
         inquiry["status"] = "已入住"
+    quote = admission_finance.post(state, resident, p, today, preview=preview)
+    if preview:
+        return quote
     if stay_type == "trial":
-        record_trial_fee(state, resident, today)
         return (
             f"为{resident['name']}办理{days}天试住，分配{bed['label']}，"
             f"试住至{terms['trialEndsAt']}，整次费用 ¥{terms['trialPrice']:.2f}"
@@ -302,13 +312,16 @@ def undecided_trial(state, resident_id):
     return resident
 
 
-def confirm_stay(state, p, today):
+def confirm_stay(state, p, today, *, preview=False):
+    from ..operations import admission_finance
+
     if not p.get("residentId") or set(p) - {
         "residentId",
         "billingDay",
         "endDate",
         "bedId",
-    }:
+        "admittedAt",
+    } - admission_finance.TERMS:
         raise ValueError("请从长者档案确认试住转正式入住。")
     resident = undecided_trial(state, p["residentId"])
     new_bed = current = None
@@ -322,13 +335,15 @@ def confirm_stay(state, p, today):
         if not p.get("bedId"):
             raise ValueError("试住床位已释放，请选择当前空闲床位。")
         new_bed = vacant_bed(state, p["bedId"])
-    billing_day = monthly_billing_day(
-        p.get("billingDay", resident.get("billingDay")), today
-    )
+    formal = admission_finance.admission_date(p, today, resident["admittedAt"])
+    if not current and formal != today:
+        raise ValueError("试住床位已释放，请从今日重新登记正式入住")
+    first_regular_day = max(formal, resident.get("trialEndsAt") or formal)
+    billing_day = monthly_billing_day(p.get("billingDay", resident.get("billingDay")), first_regular_day)
     resident.update(
         status="在住",
         stayType="formal",
-        formalizedAt=today,
+        formalizedAt=formal,
         billingDay=billing_day,
         endDate=contract_end(p.get("endDate", resident.get("endDate")), today),
     )
@@ -341,6 +356,9 @@ def confirm_stay(state, p, today):
             old_bed=current,
             new_bed=new_bed,
         )
+    quote = admission_finance.post(state, resident, p, today, preview=preview)
+    if preview:
+        return quote
     return f"为{resident['name']}办理试住转正式入住，月付账单日为每月{billing_day}日"
 
 

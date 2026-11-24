@@ -4,6 +4,7 @@ import { healthProfile } from './resident-health.js';
 import { renderMedicationReports } from './medication-reports.js';
 import { dailyTimeline } from './daily-timeline.js';
 import { billDetail } from './billing.js';
+import { billingNotices } from './billing-notices.js';
 import { editResident } from './profile-editor.js';
 import { displayAmount, loadProfileChoices, regionPicker } from './profile-controls.js';
 import { contactBook } from './family-contacts.js';
@@ -14,6 +15,7 @@ import { asBase64, originalViewer } from './document-original.js';
 import { pendingDocument, recognizeDocument, reviewReceipt } from './document-ocr.js';
 import { openVisitEditor } from './medical-visit-intake.js';
 import { visitHistory } from './medical-visit-review.js';
+import { residencyDetails } from './residency.js';
 import {
   node,
   add,
@@ -178,6 +180,8 @@ function myFamily(ctx) {
     ])
   ]);
   const panels = [];
+  if (me.portalScopes.includes('billingNotices'))
+    panels.push(['billingNotices', '缴费提醒', () => billingNotices(ctx)]);
   if (me.portalSelf && me.portalScopes.includes('personalHealth'))
     panels.push(['personalHealth', '我的生活与健康', () => node('div', 'personal-life', [
       residentDailyReadOnly(ctx, resident.id), healthProfile(ctx, resident), dailyTimeline(ctx, resident),
@@ -617,6 +621,7 @@ export function openDossier(ctx, resident, lifeEvent) {
     actions.append(btn(ctx, '核对动态档案摘要', () => previewSummary(ctx, resident, showDocument)));
   const recentChanges = scopedHistoryButton(ctx, 'resident', resident.id);
   if (recentChanges) actions.append(recentChanges);
+  const stay = residencyDetails(ctx, resident);
   if (!archived && allowed(ctx, 'care')) contents.append(careTimeline(ctx, 'resident', resident.id));
   if (hasGrant(ctx, 'care', 'clinical', 'medical')) contents.prepend(healthProfile(ctx, resident), renderMedicationReports(ctx, resident.id));
   if (hasGrant(ctx, 'care', 'clinical', 'care.groupConfirm') || lifeEvent && hasGrant(ctx, 'residents', 'medical'))
@@ -631,10 +636,12 @@ export function openDossier(ctx, resident, lifeEvent) {
         facts([
           ['姓名', residentLabel(ctx, resident)],
           ['年龄', resident.age == null ? '' : resident.age + ' 岁'],
+          ['性别', resident.gender],
           ...displayed(basicFields, profile)
         ])
       )
     );
+  add(side, stay.enrollment);
   if (allowed(ctx, 'relatives'))
     side.append(
       disclosure('家庭情况', facts(displayed(householdFields, profile))),
@@ -689,6 +696,7 @@ export function openDossier(ctx, resident, lifeEvent) {
   }
   if (allowed(ctx, 'relatives')) contents.append(contactBook(ctx, resident, profile, archived));
   if (!archived && ctx.state.familyRoundRecipients) contents.append(familyRecipients(ctx, resident));
+  add(contents, stay.history, stay.clinical);
   if (resident.status==='在住' && (allowed(ctx, 'care') || allowed(ctx, 'clinical'))) contents.prepend(residentInsights(ctx, resident.id));
   if (!side.childElementCount) side.remove();
   if (!contents.childElementCount) contents.remove();

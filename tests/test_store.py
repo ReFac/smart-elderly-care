@@ -91,8 +91,19 @@ class WorkspaceTransactions(unittest.TestCase):
     def test_observed_needs_create_reviewable_tasks_and_match_actual_shift(self):
         before = self.store.snapshot(self.token)
         person = before["data"]["residents"][0]
-        bed = next(b for b in before["data"]["beds"] if b["id"] == person["bedId"])
-        shift = next(s for s in before["data"]["shifts"] if s["area"] == bed["ward"])
+        staff = {s["staff"] for s in before["data"]["shifts"]}
+        least_busy = min(
+            staff,
+            key=lambda name: (
+                sum(
+                    t["status"] == "待执行"
+                    and t["date"] == self.date.date().isoformat()
+                    and t["assignee"] == name
+                    for t in before["data"]["tasks"]
+                ),
+                name,
+            ),
+        )
         result = self.execute(
             "care.assess",
             {
@@ -106,7 +117,7 @@ class WorkspaceTransactions(unittest.TestCase):
         draft = self.store.snapshot(self.token)["data"]
         self.assertEqual(len(before["data"]["tasks"]), len(draft["tasks"]))
         plan = draft["plans"][-1]
-        self.assertEqual(plan["assignee"], shift["staff"])
+        self.assertEqual(plan["assignee"], least_busy)
         self.execute(
             "care.approvePlan",
             {"planId": plan["id"], "reviewer": "复核人"},

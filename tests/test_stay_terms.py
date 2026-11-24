@@ -84,7 +84,10 @@ class StayTermsTests(unittest.TestCase):
             ("formal", "2028-03-01", self.today, 1),
         )
         self.assertEqual(active_card(self.state, self.person), card)
-        self.assertEqual(len(self.state["bills"]), 1)
+        self.assertCountEqual(
+            [(b["kind"], b["billingDate"]) for b in self.state["bills"]],
+            [("trial", "2028-02-28"), ("monthly", "2028-03-01"), ("security", "2028-03-01")],
+        )
         with self.assertRaises(ValueError):
             self.apply("confirmStay", date="2028-03-01")
 

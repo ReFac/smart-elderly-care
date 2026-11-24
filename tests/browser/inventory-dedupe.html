@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>库存品目查重回归</title>
+<link rel="stylesheet" href="../../web/style.css"><body><output>运行中</output><div id="announcer"></div>
+<script type="module">
+import { addItem } from '../../web/features/inventory-dedupe.js';
+import * as ui from '../../web/lib/ui.js';
+import { detail, formDialog } from '../../web/lib/dialogs.js';
+
+const output = document.querySelector('output');
+const writes = [];
+const ctx = {
+  ui, dialog: formDialog, detail,
+  state: { allowedActions: ['ops.addItem', 'ops.mergeStockItem', 'ops.editStockItem'] },
+  async command(...args) { writes.push(args); return true; },
+};
+const catalog = [
+  { id: 'correct', name: '医用检查手套', brand: '示例', specification: '50 副', unit: '盒',
+    minimum: 2, quantity: 10, relation: 'equivalent', matchToken: 'fixture' },
+  { id: 'other', name: '医用检查手套', brand: '示例', specification: '50 副', unit: '箱',
+    minimum: 2, quantity: 5, relation: 'related', blockedReason: '库存计量单位不同' },
+];
+const drafts = [];
+window.fetch = async (path, options) => {
+  if (path !== '/api/inventory/matches' || options.method !== 'POST') throw new Error('接口调用有误');
+  drafts.push(JSON.parse(options.body));
+  return Response.json({ source: 'deepseek', matches: catalog, exactExists: false });
+};
+function check(ok, message) { if (!ok) throw new Error(message); }
+async function settle() { await new Promise(resolve => setTimeout(resolve, 20)); }
+
+try {
+  let dialog = addItem(ctx);
+  const form = dialog.querySelector('form');
+  form.elements.name.value = '医用一次性检查手套'; form.elements.unit.value = '盒';
+  form.elements.brand.value = '示例'; form.elements.specification.value = '50 副';
+  form.elements.openingQuantity.value = '3';
+  form.requestSubmit(); await settle();
+  const first = document.querySelector('dialog[open]');
+  check(first?.textContent.includes('库存计量单位不同'), '单位冲突应显示');
+  check(writes.length === 0, '显示相似项前不能发出写入请求');
+  const actions = [...first.querySelectorAll('button')];
+  check(actions.filter(btn => btn.textContent === '合并到此品目').length === 1, '只允许合并安全项');
+  actions.find(btn => btn.textContent === '返回修改').click(); await settle();
+  dialog = document.querySelector('dialog[open]');
+  check(dialog.querySelector('input[name=brand]').value === '示例', '返回应保留品牌');
+  dialog.querySelector('form').requestSubmit(); await settle();
+  const review = document.querySelector('dialog[open]');
+  [...review.querySelectorAll('button')].find(btn => btn.textContent === '合并到此品目').click();
+  await settle();
+  check(writes.length === 1 && writes[0][0] === 'ops.mergeStockItem', '只发一次明确的合并');
+  check(writes[0][1].itemId === 'correct' && writes[0][1].openingQuantity === '3', '目标和期初数应正确');
+  check(drafts.length === 2 && drafts[1].specification === '50 副', '重新核对保留规格');
+  output.textContent = 'PASS';
+} catch (error) { output.textContent = 'FAIL ' + error.stack; }
+</script></body></html>

@@ -35,7 +35,7 @@ export async function roundsWrite(ctx, url, data, revision, review) {
   return result;
 }
 
-function evidenceList(items, empty) {
+function evidenceList(items, empty, includeSources = true) {
   if (!items.length) return node('p', 'fx-muted', empty);
   return node(
     'div',
@@ -44,7 +44,7 @@ function evidenceList(items, empty) {
       const list = item.evidence || [];
       return node('div', 'rounds-paragraph', [
         node('p', '', item.text),
-        list.length
+        includeSources && list.length
           ? node('details', 'rounds-evidence', [
               node('summary', '', '查看依据（' + list.length + '）'),
               node(
@@ -145,8 +145,8 @@ export function residentDailyReadOnly(ctx, residentId) {
   return panel;
 }
 
-export function residentInsights(ctx, residentId) {
-  const box = node('section', 'rounds-card');
+export function residentInsights(ctx, residentId, {compact = false} = {}) {
+  const box = node('section', compact ? 'rounds-card resident-brief-card' : 'rounds-card');
   box.dataset.roundsResidentId = residentId;
   const url = '/api/rounds/residents/' + encodeURIComponent(residentId);
   const name = residentLabel(ctx, residentId);
@@ -157,7 +157,8 @@ export function residentInsights(ctx, residentId) {
       info = await ctx.get(url);
       draw();
     } catch (e) {
-      box.replaceChildren(node('p', 'fx-muted', e.message), btn(ctx, '重新加载', load));
+      box.replaceChildren(node('h3', '', '近期变化与建议'), node('p', 'fx-muted', e.message));
+      if (!compact) box.append(btn(ctx, '重新加载', load));
     }
   }
   async function submit(path, data, review) {
@@ -215,9 +216,9 @@ export function residentInsights(ctx, residentId) {
           ),
         ]),
       ]),
-      badge(ctx, modes[info.effectiveMode], 'blue'),
+      compact ? null : badge(ctx, modes[info.effectiveMode], 'blue'),
     ]);
-    const controls = choose(
+    const controls = compact ? null : choose(
       info.canGenerate
         ? btn(
             ctx,
@@ -251,18 +252,20 @@ export function residentInsights(ctx, residentId) {
         const rows = report.changes.filter(row => row.day === date);
         contents.push(node('section', 'rounds-life-day', [
           dayHeading(ctx, date),
-          evidenceList(rows, ''),
+          evidenceList(rows, '', !compact),
         ]));
       }
       if (report.suggestions.length) contents.push(node('section', 'rounds-life-advice', [
-        node('h4', '', '接下来留意'), evidenceList(report.suggestions, ''),
+        node('h4', '', '接下来留意'), evidenceList(report.suggestions, '', !compact),
       ]));
+      if (!contents.length) contents.push(node('p', 'fx-muted', '最近两天暂无可展示的生活记录。'));
     } else {
-      contents.push(node('p', 'rounds-empty', report
+      contents.push(node('p', 'rounds-empty', compact
+        ? '最近两天暂无可展示的生活简报。' : report
         ? '这份简报来自旧版护理统计。点击「更新简报」，即可查看近期的生活记录。'
         : '生成后可查看最近两天已记录的起居、三餐和活动。'));
     }
-    if (currentFormat && report.cough?.noticeable) {
+    if (!compact && currentFormat && report.cough?.noticeable) {
       const c = report.cough;
       contents.push(
         node('details', 'rounds-observation', [
@@ -331,7 +334,7 @@ export function residentInsights(ctx, residentId) {
         ]),
       );
     }
-    if (currentFormat && report.today.pending && info.canGenerate && hasGrant(ctx, 'assistants') && hasGrant(ctx, 'care')) {
+    if (!compact && currentFormat && report.today.pending && info.canGenerate && hasGrant(ctx, 'assistants') && hasGrant(ctx, 'care')) {
       const extra = node('details', 'rounds-handoff', [node('summary', '', '护理交班工具')]);
       extra.addEventListener('toggle', () => {
         if (extra.open && extra.childElementCount === 1) extra.append(priorityPanel(ctx, url, report, () => info.revision, load));
@@ -339,16 +342,14 @@ export function residentInsights(ctx, residentId) {
       contents.push(extra);
     }
     box.replaceChildren(
-      head,
-      ...contents,
-      controls,
+      head, ...contents, ...(controls ? [controls] : []),
       node('p', 'rounds-warning', [
         ctx.ui.icon('shield', 16),
         'AI 可能出错。请核对原始记录；诊断、用药和治疗决定须由医护人员作出。',
       ]),
     );
   }
-  box.append(node('p', 'fx-muted', '正在读取巡查简报…'));
+  box.append(node('h3', '', '近期变化与建议'), node('p', 'fx-muted', '正在读取巡查简报…'));
   load();
   return box;
 }

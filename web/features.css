@@ -825,10 +825,33 @@
 .fx-history-grid {
   gap: 8px;
 }
+.dialog:has(.resident-brief) {
+  width: min(740px, calc(100% - 32px));
+}
+.dialog-head .resident-brief-open {
+  flex: none;
+  margin-inline-start: auto;
+  color: #fff;
+}
+.resident-brief > .fx-section {
+  margin: 0;
+}
+.rounds-card.resident-brief-card {
+  gap: 10px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+}
+.resident-brief-card p {
+  margin: 0;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.resident-brief-card .rounds-paragraph + .rounds-paragraph {
+  margin-block-start: 5px;
+}
 @media (min-width: 920px) {
   .dialog:has(.fx-dossier),
-  .dialog:has(.fx-document),
-  .dialog:has(.fx-admission-profile) {
+  .dialog:has(.fx-document) {
     width: min(1000px, calc(100vw - 90px));
   }
   .fx-dossier-grid:has(> :nth-child(2)) {
@@ -839,9 +862,6 @@
   }
   .fx-history-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .fx-admission-profile > .fx-facts {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .fx-document-sheet:has(.fx-original) {
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);

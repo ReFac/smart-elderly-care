@@ -123,10 +123,35 @@ def _digest(value):
     return sha256(dossier.pack(value).encode()).hexdigest()
 
 
-def _stage(db, rid, actor, request, name, mode, fields, files):
-    signature = _digest(
-        [rid, mode, fields, [(digest, meta) for _, digest, meta in files]]
-    )
+def _root_visit(db, rid, visit_id):
+    row = db.execute(
+        """SELECT metadata FROM dossier_visit_records WHERE id=? AND resident_id=?
+           AND json_extract(metadata,'$.parentVisitId') IS NULL""",
+        (visit_id, rid),
+    ).fetchone()
+    if not row:
+        raise FileNotFoundError("找不到属于这位长者的原就诊记录")
+    return json.loads(row[0])
+
+
+def _check_supplement_files(db, rid, visit_id, manifests):
+    if not visit_id or not manifests:
+        return
+    repeated = db.execute(
+        """SELECT 1 FROM dossier_visit_records r,json_each(r.metadata,'$.attachments') a
+           WHERE r.resident_id=? AND (r.id=? OR json_extract(r.metadata,'$.parentVisitId')=?)
+             AND json_extract(a.value,'$.id') IN (SELECT value FROM json_each(?)) LIMIT 1""",
+        (rid, visit_id, visit_id, json.dumps([item["id"] for item in manifests])),
+    ).fetchone()
+    if repeated:
+        raise ValueError("该次就诊已存档其中的原件，请只上传本次要补充的新资料")
+
+
+def _stage(db, rid, actor, request, name, mode, fields, files, visit_id, fixed_date):
+    contents = [rid, mode, fields, [(digest, meta) for _, digest, meta in files]]
+    if fixed_date:
+        contents.extend((visit_id, fixed_date))
+    signature = _digest(contents)
     old = db.execute(
         "SELECT * FROM dossier_visit_drafts WHERE actor=? AND request=?",
         (actor, request),
@@ -150,6 +175,7 @@ def _stage(db, rid, actor, request, name, mode, fields, files):
             (rid, digest),
         ).fetchone()
         manifest.append({**meta, "id": did})
+    _check_supplement_files(db, rid, visit_id, manifest)
     key = (
         _digest(sorted(item["id"] for item in manifest))
         if files
@@ -183,6 +209,7 @@ def preview(store, token, rid, p):
         "requestId",
         "consent",
         "revision",
+        "visitId",
     }:
         raise ValueError("请核对本组就诊资料")
     mode = p.get("mode")
@@ -191,17 +218,42 @@ def preview(store, token, rid, p):
     request = dossier.text(p, "requestId", 100, True)
     if not re.fullmatch(r"[a-zA-Z0-9._-]{1,100}", request):
         raise ValueError("就诊请求编号无效")
+    visit_id = dossier.text(p, "visitId", 32)
+    if visit_id and not re.fullmatch(r"[a-f0-9]{32}", visit_id):
+        raise ValueError("就诊记录编号无效")
+    today = store.now().date().isoformat()
+    raw_fields = p.get("fields", {})
+    fields = _fields(
+        raw_fields,
+        today,
+        date_required=not visit_id and (mode == "manual" or "visitId" in p),
+    )
     with closing(store.connect()) as db:
         _session(store, db, token, rid)
-    today = store.now().date().isoformat()
-    fields = _fields(p.get("fields", {}), today, date_required=mode == "manual")
+        if visit_id:
+            target_date = _root_visit(db, rid, visit_id)["fields"]["eventDate"]
+            if fields["eventDate"] and fields["eventDate"] != target_date:
+                raise ValueError("补充资料须归属原就诊日期")
+            fields["eventDate"] = target_date
+    fixed_date = fields["eventDate"] if "visitId" in p else ""
     files = _attachments(p.get("attachments", []), mode)
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
         actor, name, revision = _session(store, db, token, rid)
         if type(p.get("revision")) is not int or p["revision"] != revision:
             raise Conflict("档案已更新，请重新核对所选长者后继续")
-        draft = _stage(db, rid, actor["id"], request, name, mode, fields, files)
+        draft = _stage(
+            db,
+            rid,
+            actor["id"],
+            request,
+            name,
+            mode,
+            fields,
+            files,
+            visit_id,
+            fixed_date,
+        )
     manifest = json.loads(draft["attachments"])
     did = draft["id"]
     if not draft["result"]:
@@ -222,6 +274,10 @@ def preview(store, token, rid, p):
             result = visit_extraction.organize(
                 store, token, actor["id"], rid, name, files, manifest, fields, authorize
             )
+        if fixed_date:
+            result["fixedDate"] = fixed_date
+        if visit_id:
+            result["parentVisitId"] = visit_id
         with closing(store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             authorize(db, token)
@@ -266,9 +322,23 @@ def confirm(db, state, p, user, now):
     result = json.loads(draft["result"])
     if person["name"] != draft["resident_name"] or result["identityConflict"]:
         raise ValueError("就诊资料与所选长者或就诊时间不一致，请重新分组")
+    attachments = json.loads(draft["attachments"])
+    parent_id = result.get("parentVisitId", "")
+    fixed_date = result.get("fixedDate", "")
     fields = _fields(
-        p["fields"], now.date().isoformat(), date_required=True, signed=True
+        p["fields"],
+        now.date().isoformat(),
+        date_required=True,
+        signed=not (fixed_date and attachments),
     )
+    if fixed_date and fields["eventDate"] != fixed_date:
+        raise ValueError("就诊日期已与本组原件绑定，请返回上一步重新选择")
+    if (
+        parent_id
+        and _root_visit(db, rid, parent_id)["fields"]["eventDate"]
+        != fields["eventDate"]
+    ):
+        raise ValueError("补充资料须归属原就诊日期")
     prior = db.execute(
         "SELECT id,metadata FROM dossier_visit_records WHERE resident_id=? AND group_key=?",
         (rid, draft["group_key"]),
@@ -277,21 +347,28 @@ def confirm(db, state, p, user, now):
         if prior[0] == draft["id"] and json.loads(prior[1])["fields"] == fields:
             return "这次就诊已经签认存档"
         raise ValueError("这组就诊资料已经签认，请查看档案中的既有病例")
+    _check_supplement_files(db, rid, parent_id, attachments)
     record = {
         "mode": draft["mode"],
         "fields": fields,
-        "attachments": json.loads(draft["attachments"]),
+        "attachments": attachments,
         "sourceRefs": result["sourceRefs"],
         "reviewer": user["displayName"],
         "reviewerId": user["id"],
         "reviewerRole": user["role"],
         "recordedAt": now.isoformat(timespec="seconds"),
     }
+    if parent_id:
+        record["parentVisitId"] = parent_id
     db.execute(
         "INSERT INTO dossier_visit_records VALUES(?,?,?,?)",
         (draft["id"], rid, draft["group_key"], dossier.pack(record)),
     )
-    return "已将本次就诊病例签认并归入长者档案"
+    return (
+        "已签认补充资料并关联原就诊病例"
+        if parent_id
+        else "已将本次就诊病例签认并归入长者档案"
+    )
 
 
 def project(db, data, user):

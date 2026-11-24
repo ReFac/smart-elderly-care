@@ -138,7 +138,14 @@ def projection(db, state, user):
 
 
 def authorize_command(db, user, action, payload, state):
+    if action in ("ops.bill", "ops.deposit", "ops.residentBillingPolicy"):
+        require_resident(db, user, payload.get("residentId"), state)
+    elif action in ("ops.pay", "ops.importReceipt", "ops.paymentOrder", "ops.remindBill"):
+        bill = next((row for row in state["bills"] if row["id"] == payload.get("billId")), None)
+        if bill:
+            require_resident(db, user, bill["residentId"], state)
     if action in (
+        "care.areaSave", "care.areaArchive", "care.areaMap", "care.areaAssign",
         "care.saveSchedule", "care.setScheduleEnabled", "care.scheduleMenu",
         "care.confirmScheduledMeal",
     ):

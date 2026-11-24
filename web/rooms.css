@@ -585,3 +585,27 @@ button.room-bed-row:hover,
 .survey-loaded .room-plan-tile[aria-pressed='true'] {
   background: color-mix(in srgb, var(--accent) 83%, transparent);
 }
+
+.bed-list-controls { padding: 12px 15px; display: grid; gap: 10px; }
+.bed-list-fields {
+  display: grid;
+  grid-template-columns: minmax(195px, 2fr) repeat(3, minmax(140px, 1fr));
+  gap: 10px;
+}
+.bed-list-control { display: grid; gap: 5px; min-width: 0; }
+.bed-list-control > span { color: var(--muted); font-size: 12px; font-weight: 600; }
+.bed-list-control > .fx-input { width: 100%; min-width: 0; }
+.bed-list-status, .bed-list-room-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.bed-list-room-heading { margin-bottom: 8px; }
+.bed-list-room-heading .fx-room-title { margin-bottom: 1px; }
+.bed-list-room-heading .btn { min-width: 0; padding: 4px 6px; font-size: 12px; }
+.bed-list-grid .fx-room-layout { grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
+@media(max-width: 850px) {
+  .bed-list-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

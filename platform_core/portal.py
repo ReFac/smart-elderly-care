@@ -1,4 +1,4 @@
-"""Per-account access to the bound resident's service and medication records."""
+"""Per-account access to the bound resident's portal records."""
 
 from .care.records import append_record, text_field
 
@@ -7,6 +7,7 @@ SCOPES = {
     "medication": "查阅已复核医嘱及给药记录",
     "medicationReport": "本人填写及更正体检用药自报",
     "personalHealth": "查看本人的生活简报、时间线与健康简介",
+    "billingNotices": "查看已绑定长者的缴费提醒",
 }
 
 

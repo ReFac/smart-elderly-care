@@ -85,8 +85,8 @@ async function load() {
     if (!response.ok) throw new Error();
     const { institutionName, campuses } = await response.json();
     if (!campuses?.length) throw new Error();
-    document.querySelector('[data-brand]').textContent = institutionName;
-    document.title = '来院参观与咨询 · ' + institutionName;
+    document.querySelectorAll('[data-brand]').forEach(element => { element.textContent = institutionName; });
+    document.title = institutionName + ' · 养老照护与参观';
     for (const form of [visit, callback]) {
       const select = form.elements.campusId;
       select.replaceChildren(...campuses.map(campus => new Option(campus.name, campus.id)));

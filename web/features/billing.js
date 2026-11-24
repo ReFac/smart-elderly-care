@@ -10,6 +10,7 @@ import {
   residentName,
   choose,
   btn,
+  canAct,
   link,
   named,
   badge,
@@ -24,6 +25,32 @@ import { cashierActions, feeSettings, receiptDescription, recordCash } from './c
 import { receiptFacts, receiptLedger, receiptRows } from './receipt-ledger.js';
 import { chargesEditor, feeLedger, lineDescription } from './charge-lines.js';
 import { channelOrders, expensePanel, reminders } from './settlements.js';
+import { billingPolicyFields } from './admission-fees.js';
+import { billingNotices } from './billing-notices.js';
+
+const billType = (bill) => {
+  if (bill.kind === 'trial') return '一次性试住费';
+  if (bill.kind === 'security') return '入住押金';
+  return '月费';
+};
+
+function residentBillingPolicy(ctx, person) {
+  const current = person.admissionTerms;
+  return ctx.dialog({
+    title: '账单提醒与押金设置',
+    description: residentName(ctx, person.id) + ' · 提前天数填 0 时仅在账单日提醒。已出具的押金账单金额保持原约定。',
+    fields: billingPolicyFields(current),
+    onSubmit: ({ reminderDays, securityMode }) => ctx.command('ops.residentBillingPolicy', {
+      residentId: person.id, reminderDays: Number(reminderDays), securityMode,
+    }, {
+      title: '确认账单提醒与押金设置', target: residentName(ctx, person.id),
+      fields: [
+        ['月费提醒', Number(reminderDays) ? '提前 ' + reminderDays + ' 天及账单日' : '账单日'],
+        ['逾期处理', securityMode === 'overdue' ? '可按未用押金余额抵扣，继续提醒' : '按约定提醒'],
+      ],
+    }),
+  });
+}
 
 function generate(ctx, selected, onIssued) {
   if (!ctx.state.allowedActions.includes('ops.bill')) return ctx.toast('当前账号无权核算账单');
@@ -40,7 +67,7 @@ function generate(ctx, selected, onIssued) {
   const unbilled = people.find(
     (r) =>
       r.status === '在住' &&
-      !ctx.state.bills.some((b) => b.kind !== 'trial' && b.residentId === r.id && b.month === month)
+      !ctx.state.bills.some((b) => !['trial', 'security'].includes(b.kind) && b.residentId === r.id && b.month === month)
   );
   resident.value = selected?.residentId || due.keys().next().value || unbilled?.id || people[0].id;
   const editor=chargesEditor(ctx);
@@ -115,35 +142,46 @@ function generate(ctx, selected, onIssued) {
 }
 
 export function admissionPayment(ctx, residentId) {
-  if (!ctx.state.allowedActions.includes('ops.pay')) return;
+  if (!canAct(ctx, 'ops.pay') && !canAct(ctx, 'ops.paymentOrder')) return;
   const person = ctx.state.residents.find((r) => r.id === residentId);
   if (!person) return;
-  const bills = ctx.state.bills.filter((b) => b.residentId === residentId);
+  const related = ctx.state.bills.filter((b) => b.residentId === residentId);
+  const admission = person.admissionPayment;
+  const bills = admission ? [admission.billId, admission.securityBillId]
+    .map((id) => related.find((bill) => bill.id === id)).filter(Boolean) : related;
   const due = ctx.state.billingDue?.find((r) => r.residentId === residentId);
   const account = ctx.state.deposits.find((a) => a.residentId === residentId);
+  const editable = canAct(ctx, 'ops.residentBillingPolicy') && person.admissionTerms &&
+    person.status === '在住' && person.stayType === 'formal';
   const body = node('div', 'fx-profile', [
-    facts([['长者', residentName(ctx, residentId)], ['可用预缴金', money(account?.amount)]]),
-    ...bills.map((bill) => section((bill.kind === 'trial' ? '一次性试住费' : '月费') + ' · ' + (bill.billingDate || bill.month),
+    facts([['长者', residentName(ctx, residentId)],
+      ...(person.admissionStatus ? [['入住交费状态', person.admissionStatus]] : []), ['可用预缴金', money(account?.amount)]]),
+    ...bills.map((bill) => section((admission && bill.kind !== 'trial' && bill.kind !== 'security' ? '首期月费' : billType(bill)) +
+      ' · ' + (bill.billingDate || bill.month),
       node('div', '', [
         facts([['应缴', money(bill.amount)], ['已核销', money(bill.paid)], ['待缴', money(bill.balance)]]),
-        bill.balance > 0 ? cashierActions(ctx, bill, true) : badge(ctx, '已结清'),
+        choose(link(ctx, '查看费用明细', () => billDetail(ctx, bill)),
+          bill.balance > 0 ? cashierActions(ctx, bill, true) : badge(ctx, '已结清')),
       ]))),
-    due && btn(ctx, '核算入住首期账单并收款', () => generate(ctx, due, admissionPayment), 'primary'),
-    btn(ctx, '登记已收预缴金', () => recordCash(ctx, { residentId })),
+    choose(!admission && due && canAct(ctx, 'ops.bill') && btn(ctx, '核算入住首期账单并收款', () => generate(ctx, due, admissionPayment), 'primary'),
+      canAct(ctx, 'ops.deposit') && btn(ctx, '登记已收预缴金', () => recordCash(ctx, { residentId })),
+      editable && btn(ctx, '账单提醒与押金设置', () => residentBillingPolicy(ctx, person))),
   ]);
   ctx.detail('入住交费', body);
 }
 
 export function billDetail(ctx, bill) {
-  const trial = bill.kind === 'trial';
+  const monthly = !['trial', 'security'].includes(bill.kind);
+  const securityUsed = bill.kind === 'security'
+    ? ctx.state.payments.filter((payment) => payment.securityBillId === bill.id).reduce((total, p) => total + p.amount, 0) : null;
   const content = node('div', 'fx-profile', [
     facts([
       ['长者', residentName(ctx, bill.residentId)],
-      ['收费类型', trial ? '一次性试住费' : '月费'],
+      ['收费类型', billType(bill)],
       ['账期', bill.month],
       ...(bill.billingDate ? [['账单日期', bill.billingDate]] : []),
-      ['计费区间', bill.startDate + ' 至 ' + bill.endDate],
-      ...(!trial ? [
+      ...(bill.endDate ? [['计费区间', bill.startDate + ' 至 ' + bill.endDate]] : []),
+      ...(monthly ? [
         ['计费天数', String(bill.serviceDays)],
         ['期末等级快照', bill.careLevel],
         ['期末床位日费', money(bill.bedFee)],
@@ -154,9 +192,10 @@ export function billDetail(ctx, bill) {
       ['应收总额', money(bill.amount)],
       ['已核销总额', money(bill.paid)],
       ['待缴余额', money(bill.balance)],
+      ...(securityUsed != null ? [['已用于账单冲抵', money(securityUsed)], ['在账押金余额', money((bill.paid || 0) - securityUsed)]] : []),
     ]),
     section('全部收费明细',feeLedger(bill)),
-    ...(!trial && bill.segments
+    ...(monthly && bill.segments
       ? [
           section(
             '分段计费依据',
@@ -196,8 +235,8 @@ export function billDetail(ctx, bill) {
       )
     ),
   ]);
-  const vouchers = receiptRows(ctx.state).filter((r) => r.billId === bill.id);
-  if (vouchers.length) content.append(section('原始收款凭证', records(vouchers, receiptFacts)));
+  const vouchers = receiptRows(ctx.state).filter((r) => r.billId === bill.id || r.bills.has(bill.id));
+  if (vouchers.length) content.append(section('原始收款凭证', records(vouchers, (row) => receiptFacts(row, bill.id))));
   if (bill.balance > 0) content.append(cashierActions(ctx, bill));
   ctx.detail('账单明细', content);
 }
@@ -240,7 +279,7 @@ export function billing(ctx) {
               },
               {
                 label: '账期',
-                view: (b) => named(b.billingDate || b.month, b.kind === 'trial' ? '一次性试住费' : '月费'),
+                view: (b) => named(b.billingDate || b.month, billType(b)),
               },
               {
                 label: '应收金额',
@@ -277,6 +316,7 @@ export function billing(ctx) {
       })],
       ['orders', '渠道对账', () => channelOrders(ctx)],
       ['reminders', '欠费提醒', () => reminders(ctx)],
+      ['billingNotices', '账单日提醒', () => billingNotices(ctx, (bill) => billDetail(ctx, bill))],
       ['expenses', '支出登记', () => expensePanel(ctx)],
       [
         'deposits',

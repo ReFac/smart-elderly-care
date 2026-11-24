@@ -14,6 +14,7 @@ function workspaceUrl() {
   ) {
     throw new Error('机构服务需要 HTTPS 地址，或本机开发地址');
   }
+  if (target.pathname === '/' && !target.hash) target.searchParams.set('workspace', '1');
   return target;
 }
 

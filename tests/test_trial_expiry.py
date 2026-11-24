@@ -106,10 +106,11 @@ class TrialDeadlineTests(unittest.TestCase):
                 for p in self.data()["billingDue"]
                 if p["residentId"] == self.rid
             ],
-            ["2028-03-08"],
+            [],
         )
         self.assertEqual(
-            len([b for b in self.data()["bills"] if b["residentId"] == self.rid]), 1
+            sorted((b["kind"], b["startDate"]) for b in self.data()["bills"] if b["residentId"] == self.rid),
+            [("monthly", "2028-03-08"), ("security", "2028-03-08"), ("trial", "2028-02-28")],
         )
 
     def test_cancellation_after_release_archives_and_assigns_one_followup(self):

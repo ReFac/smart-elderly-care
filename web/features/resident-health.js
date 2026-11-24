@@ -26,8 +26,8 @@ function citation(point) {
   ]);
 }
 
-export function healthProfile(ctx, person) {
-  const panel = node('section', 'rounds-card');
+export function healthProfile(ctx, person, {compact = false} = {}) {
+  const panel = node('section', compact ? 'rounds-card resident-brief-card' : 'rounds-card');
   panel.dataset.roundsResidentId = person.id;
   const endpoint = '/api/residents/' + encodeURIComponent(person.id) + '/health-profile';
   const name = residentLabel(ctx, person);
@@ -37,7 +37,8 @@ export function healthProfile(ctx, person) {
       data = await ctx.get(endpoint);
       draw();
     } catch (error) {
-      panel.replaceChildren(node('p', 'fx-muted', error.message), btn(ctx, '重新读取健康简介', load));
+      panel.replaceChildren(node('h3', '', '健康简介'), node('p', 'fx-muted', error.message));
+      if (!compact) panel.append(btn(ctx, '重新读取健康简介', load));
     }
   }
   async function save(action, payload, revision, review) {
@@ -143,11 +144,15 @@ export function healthProfile(ctx, person) {
       const author = intro.staff ? staffLabel(ctx, { id: intro.staffId, displayName: intro.staff, role: intro.role }) : '护理人员';
       children.push(node('small', 'fx-muted', (intro.kind === 'ai' ? 'AI 整理，由' : '由') +
         author + (intro.kind === 'ai' ? '核对' : '填写') + ' · ' + intro.day));
-      if (intro.sources?.length) children.push(node('details', '', [
+      if (!compact && intro.sources?.length) children.push(node('details', '', [
         node('summary', '', '查看简介依据（' + intro.sources.length + '）'), ...intro.sources.map(citation),
       ]));
     } else {
       children.push(node('p', 'fx-muted', '尚未填写健康简介。'));
+    }
+    if (compact) {
+      panel.replaceChildren(...children);
+      return;
     }
     if (data.additions.length) children.push(node('h4', '', '护理人员补充'), ...data.additions.map(r => entry(ctx, r)));
     if (data.conversations.length) children.push(node('details', '', [

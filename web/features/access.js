@@ -252,6 +252,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       ['medication', '查看已复核医嘱和给药时间'],
       ['medicationReport', '本人填写、查看及更正体检用药自报'],
       ['personalHealth', '查看本人的生活简报、时间线与健康简介'],
+      ['billingNotices', '查看绑定长者的缴费提醒'],
     ].map(([key, label]) => {
       const control = node('input');
       control.type = 'checkbox';
@@ -444,6 +445,7 @@ function accounts(ctx) {
             ...(account.portalSelf ? [['体检用药自报', account.portalScopes.includes('medicationReport') ? '可填写及更正' : '未开通']] : []),
             ['医嘱与给药', account.portalScopes.includes('medication') ? '可查阅' : '未开通查阅'],
             ...(account.portalSelf ? [['本人生活与健康档案', account.portalScopes.includes('personalHealth') ? '可查阅' : '未开通查阅']] : []),
+            ['缴费提醒', account.portalScopes.includes('billingNotices') ? '可查阅' : '未开通查阅'],
           ])
         : null,
       account.kind==='staff' ? facts([['岗位职责',account.staffDuties.join('、') || '待登记']]) : null,

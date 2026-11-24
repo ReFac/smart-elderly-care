@@ -3,6 +3,7 @@
 <meta charset="utf-8">
 <title>入住约定与支出核对回归</title>
 <link rel="stylesheet" href="../../web/style.css">
+<link rel="stylesheet" href="../../web/features/admission-fees.css">
 <output>运行中</output>
 <script type="module">
   import { allocate } from '../../web/features/admission.js';
@@ -15,20 +16,39 @@
   const form = () => [...document.querySelectorAll('dialog[open] form')].at(-1);
   const person = { id: 'test-res', name: '测试档案', status: '未入住', level: '自理' };
   const commands = [];
+  const quotes = [];
   const ctx = {
     today: '2026-01-31', current: () => ctx, ui, dialog: formDialog, detail, toast(message) { throw Error(message); },
-    state: { allowedActions: ['care.admit', 'care.confirmStay'], beds: [{ id: 'test-bed', label: '01-A', ward: '东区', status: '空闲' }], trialSettings: { days: 3, fee: null } },
+    state: { revision: 4, allowedActions: ['care.admit', 'care.confirmStay'], beds: [{ id: 'test-bed', label: '01-A', ward: '东区', status: '空闲' }], trialSettings: { days: 3, fee: null } },
     command(action, payload, review) { commands.push({ action, payload, review }); return true; },
   };
-  const change = (control, value) => { control.value = value; control.dispatchEvent(new Event('change')); };
+  const change = (control, value) => { control.value = value; control.dispatchEvent(new Event('change', { bubbles: true })); };
   async function until(predicate) {
     for (let i = 0; i < 100 && !predicate(); i++) await new Promise((r) => setTimeout(r, 10));
     check(predicate(), '没有收到预期的界面结果');
   }
   try {
+    window.fetch = async (path, options) => {
+      const query = JSON.parse(options.body);
+      check(path === '/api/care/admission/preview' && query.revision === 4, '按当前机构版本只读核算');
+      quotes.push(query);
+      const trial = query.payload.stayType === 'trial';
+      const bill = { amount: trial ? 0 : 990, startDate: '2026-01-31', endDate: trial ? '2026-02-02' : '2026-02-14',
+        lineItems: [{ label: trial ? '一次性试住费' : '床位费', amount: trial ? 0 : 990 }] };
+      const securityBill = trial ? null : { amount: 2000, lineItems: [{ label: '入住押金', amount: 2000 }] };
+      return new Response(JSON.stringify({ bill, securityBill, depositAmount: trial ? 0 : 2000,
+        prepaidAmount: 0, dueAmount: trial ? 0 : 2990, admittedAt: query.payload.admittedAt, revision: 4 }));
+    };
     allocate(ctx, person);
     let controls = form().elements;
     check(controls.billingDay.value === '31' && controls.contractTerm.value === 'open', '默认月付日和无期限');
+    check(controls.paymentMode.value === 'standard' && form().textContent.includes('押 1 个月'), '默认押一个月并核实结清');
+    check(!controls.depositMonths && ![...controls.paymentMode.options].some(option => option.value === 'offline'), '无财务权限不改押金或登记实收');
+    change(controls.admittedAt, '2026-01-30');
+    check(controls.billingDay.value === '30', '未手工调整时账单日同步日期');
+    change(controls.billingDay, '20');
+    change(controls.admittedAt, '2026-01-31');
+    check(controls.billingDay.value === '20', '保留自选账单日');
     check(controls.endDate.disabled && controls.trialPrice.disabled, '隐藏不适用项');
     change(controls.contractTerm, 'fixed');
     check(!form().checkValidity(), '固定期限须填写日期');
@@ -39,16 +59,25 @@
     check(controls.trialDays.closest('label').textContent.includes('2026-02-02'), '三天两夜跨月结束日');
     controls.trialPrice.value = '0';
     form().requestSubmit();
+    await until(() => commands.length === 1);
     const trial = commands.at(-1);
-    check(trial.action === 'care.admit' && trial.payload.trialPrice === 0 && !('billingDay' in trial.payload) && !('endDate' in trial.payload), '明确免费且不发送隐藏字段');
+    check(trial.action === 'care.admit' && trial.payload.trialPrice === 0 && trial.payload.admittedAt === '2026-01-31' &&
+      !('billingDay' in trial.payload) && !('endDate' in trial.payload) && !('depositMonths' in trial.payload) &&
+      !('paymentMode' in trial.payload), '明确免费且不发送隐藏字段');
     await until(() => !form());
     confirmStay(ctx, { ...person, billingDay: null, trialEndsAt: '2026-02-02', bedId: 'test-bed' });
     controls = form().elements;
     check(controls.billingDay.value === '31' && controls.contractTerm.value === 'open', '转正默认约定');
     change(controls.billingDay, '15');
+    [...form().querySelectorAll('button')].find(b => b.textContent === '核算首期费用').click();
+    await until(() => form().querySelector('.admission-price').textContent.includes('入住押金'));
+    check(commands.length === 1 && quotes.length === 2, '报价无入住副作用');
+    change(controls.paymentMode, 'temporary');
     form().requestSubmit();
+    await until(() => commands.length === 2);
     const formal = commands.at(-1);
-    check(formal.action === 'care.confirmStay' && formal.payload.billingDay === 15 && formal.payload.endDate === '', '转正可自选账单日');
+    check(formal.action === 'care.confirmStay' && formal.payload.billingDay === 15 && formal.payload.endDate === '' && formal.payload.paymentMode === 'temporary' &&
+      formal.review.expectedRevision === 4 && formal.review.fields.some(([label]) => label === '入住押金'), '转正可自选账单日且确认包含费用明细');
     await until(() => !form());
 
     const rows = ['ready','duplicate','review','excluded'].map((status, i) => ({

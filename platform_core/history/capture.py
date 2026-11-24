@@ -99,6 +99,8 @@ def watch(db, action):
     prefixes = PREFIXES.get(action.partition(".")[0], ())
     if action in ("care.proposeGroupActivity", "care.confirmGroupActivity", "care.confirmScheduledMeal"):
         prefixes = ("daily_life_",)
+    if action.startswith("care.area"):
+        prefixes = ("care_area",)
     if action in ("care.saveSchedule", "care.setScheduleEnabled", "care.scheduleMenu", "care.releaseSchedules"):
         prefixes = ("scheduled_work_",)
     if action == "care.confirmMedRound":
@@ -108,7 +110,7 @@ def watch(db, action):
     if action in ("care.reportMedication", "portal.reportMedication"):
         prefixes = ("resident_medication_reports",)
     if action in ("backup.apply", "history.undo"):
-        prefixes = (*tuple(k for group in PREFIXES.values() for k in group), "daily_life_", "resident_health_notes", "resident_medication_reports", "medication_round_receipts", "legacy_bed_cards", "scheduled_work_")
+        prefixes = (*tuple(k for group in PREFIXES.values() for k in group), "daily_life_", "resident_health_notes", "resident_medication_reports", "medication_round_receipts", "legacy_bed_cards", "scheduled_work_", "care_area")
     if not prefixes:
         return
     for (table,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'"):

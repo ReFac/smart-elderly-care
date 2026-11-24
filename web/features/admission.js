@@ -10,12 +10,12 @@ import {
   table,
   today,
   canAct,
-  money,
 } from './shared.js';
 import { admissionPayment } from './billing.js';
 import { profile } from './residency.js';
 import { trialLength, trialLastDay, trialTermFields } from './trial-terms.js';
 import { confirmStay, endTrial } from './trial-stays.js';
+import { admissionFinance, admissionFinanceFields } from './admission-fees.js';
 
 const statuses = { 未入住: '未入住', 在住: '在住', 已退住: '归档老人' };
 export const isTrial = (row) => ['在住', '试住到期待确认'].includes(row.status) && row.stayType === 'trial';
@@ -60,6 +60,23 @@ export function monthlyDayField(day, defaultDay, eventName) {
       value: String(i + 1),
       label: '每月 ' + (i + 1) + ' 日' + (i + 1 === anchor ? '（' + eventName + '）' : ''),
     })), { value: String(defaultDay || anchor) });
+}
+
+export function bindAdmissionDate(dialog, eventName, { preserveBillingDay = false, contractMin = '' } = {}) {
+  const { admittedAt, billingDay, endDate } = dialog.querySelector('form').elements;
+  let billingDayEdited = preserveBillingDay;
+  billingDay.addEventListener('change', () => { billingDayEdited = true; });
+  const sync = () => {
+    if (!admittedAt.value) return;
+    const anchor = Number(admittedAt.value.slice(-2));
+    for (const option of billingDay.options) {
+      option.textContent = '每月 ' + option.value + ' 日' + (Number(option.value) === anchor ? '（' + eventName + '）' : '');
+    }
+    if (!billingDayEdited) billingDay.value = String(anchor);
+    endDate.min = admittedAt.value > contractMin ? admittedAt.value : contractMin;
+  };
+  admittedAt.addEventListener('change', sync);
+  sync();
 }
 
 export function register(ctx, inquiry) {
@@ -170,13 +187,22 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
   }
   const action = transfer ? 'care.transfer' : 'care.admit';
   const day = today(ctx);
+  const finance = !transfer && admissionFinance(ctx, action, ({ contractTerm, ...terms }) => {
+    const payload = { residentId: person.id, ...terms };
+    if (terms.stayType === 'trial') {
+      payload.trialDays = Number(terms.trialDays);
+      payload.trialPrice = Number(terms.trialPrice);
+    } else payload.billingDay = Number(terms.billingDay);
+    if (contractTerm !== 'fixed') delete payload.endDate;
+    return payload;
+  });
   const dialog = ctx.dialog({
     title: transfer ? '转移床位' : '从档案办理入住',
     description:
       residentLabel(ctx, person) +
       ' · 档案 ' +
       person.id +
-      (transfer ? ' · 当前床位 ' + bedLabel(ctx, person.bedId) : ' · 入住日期 ' + day),
+      (transfer ? ' · 当前床位 ' + bedLabel(ctx, person.bedId) : ''),
     fields: [
       select(
         'bedId',
@@ -190,22 +216,18 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
             select('level', '照护等级', options(['自理', '半失能', '失能']), {
               value: person.level,
             }),
+            field('admittedAt', '入住日期', { type: 'date', value: day, max: day }),
             ...trialTermFields(ctx.state.trialSettings),
             monthlyDayField(day, null, '入住日'),
             ...contractFields(day),
+            ...admissionFinanceFields(ctx),
           ]
         : []),
     ],
     submitLabel: transfer ? '核对转床' : '核对入住',
     onSubmit: async (values) => {
-      const { contractTerm, ...terms } = values;
-      const payload = { residentId: person.id, ...terms };
-      if (transfer) payload.fromBedId = person.bedId;
-      else if (payload.stayType === 'trial') {
-        payload.trialDays = Number(values.trialDays);
-        payload.trialPrice = Number(values.trialPrice);
-      } else payload.billingDay = Number(values.billingDay);
-      if (contractTerm !== 'fixed') delete payload.endDate;
+      const quote = transfer ? null : await finance.review(values);
+      const payload = quote?.payload || { residentId: person.id, fromBedId: person.bedId, bedId: values.bedId };
       const fields = transfer
         ? [
             ['原床位', bedLabel(ctx, person.bedId)],
@@ -219,15 +241,16 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
             ['照护等级', payload.level],
             ...(payload.stayType === 'trial'
               ? [
-                ['约定试住', trialLength(payload.trialDays) + ' · 至 ' + trialLastDay(day, payload.trialDays)],
-                ['一次性试住费', money(payload.trialPrice)],
+                ['约定试住', trialLength(payload.trialDays) + ' · 至 ' + trialLastDay(payload.admittedAt, payload.trialDays)],
               ]
               : [['收费约定', billingSchedule(payload)], ['合同期限', payload.endDate || '无期限']]),
+            ...quote.fields,
           ];
       const done = await ctx.command(action, payload, {
         title: transfer ? '确认将' + residentLabel(ctx, person) + '从原床位转至新床位？' : '确认从档案办理入住',
         target: residentLabel(ctx, person),
         fields,
+        expectedRevision: quote?.expectedRevision,
         confirmLabel: transfer ? '确认转床' : payload.stayType === 'trial' ? '确认试住' : '确认入住',
       });
       if (done && !transfer) admissionPayment(ctx.current(), person.id);
@@ -235,7 +258,9 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
     },
   });
   if (!transfer) {
+    bindAdmissionDate(dialog, '入住日');
     bindContractFields(dialog);
+    finance.mount(dialog);
     const form = dialog.querySelector('form');
     const controls = form.elements;
     const hint = node('small', 'fx-muted', '遇短月时按当月最后一天出账。');
@@ -251,10 +276,11 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
         const hidden = trial || (input === controls.endDate && controls.contractTerm.value !== 'fixed');
         input.closest('label').hidden = input.disabled = hidden;
       }
-      dates.textContent = '预计试住结束日 ' + trialLastDay(day, controls.trialDays.value);
+      dates.textContent = '预计试住结束日 ' + trialLastDay(controls.admittedAt.value || day, controls.trialDays.value);
     };
     controls.stayType.addEventListener('change', sync);
     controls.trialDays.addEventListener('change', sync);
+    controls.admittedAt.addEventListener('change', sync);
     sync();
   }
 }
@@ -297,7 +323,10 @@ export function registry(ctx, { bed = null, stayType = 'formal' } = {}) {
             view: (r) =>
               node('div', 'fx-named', [node('strong', '', residentAnchor(ctx, r)), node('small', '', r.id)]),
           },
-          { label: '状态', view: (r) => badge(ctx, statusLabel(r)) },
+          { label: '状态', view: (r) => choose(
+            badge(ctx, statusLabel(r)),
+            !isTrial(r) && r.admissionStatus === '欠费临时入住' ? badge(ctx, r.admissionStatus, 'amber') : null,
+          ) },
           {
             label: '床位 / 归档日期',
             view: (r) => (r.bedId ? bedLabel(ctx, r.bedId) : r.dischargedAt || '—'),
@@ -307,6 +336,8 @@ export function registry(ctx, { bed = null, stayType = 'formal' } = {}) {
             align: 'end',
             view: (r) =>
               choose(
+                !bed && !isTrial(r) && r.status === '在住' && r.admissionStatus && canAct(ctx, 'ops.pay')
+                  ? btn(ctx, '入住交费', () => admissionPayment(ctx, r.id), 'ghost') : null,
                 isTrial(r) && canAct(ctx, 'care.confirmStay')
                   ? btn(ctx, '确认入住', () => confirmStay(ctx, r, bed), 'ghost') : null,
                 isTrial(r) && canAct(ctx, 'care.endTrial')

@@ -73,6 +73,7 @@ PERSON_ACTIONS = {
     "care.archive",
     "ops.bill",
     "ops.deposit",
+    "ops.residentBillingPolicy",
     "dossier.document",
     "care.screen",
     "care.refer",
@@ -95,6 +96,11 @@ def for_person(data, resident_id):
 
 
 def locate(db, data, action, payload, actor):
+    if action.startswith("care.area") and isinstance(payload.get("buildingId"), str):
+        building = db.execute(
+            "SELECT name,campusId FROM facility_building_directory WHERE id=?", (payload["buildingId"],)
+        ).fetchone()
+        return {"room": building["name"], "campusId": building["campusId"]} if building else {}
     if action == "care.confirmScheduledMeal":
         selected = payload.get("entries")
         if isinstance(selected, list):

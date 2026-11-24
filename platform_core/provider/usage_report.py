@@ -11,6 +11,7 @@ from . import ZONE, local_time
 
 FEATURES = {
     "assistant.chat": "健康助理 · 对话",
+    "assistant.toolAnswer": "健康助理 · 核对资料后回答",
     "assistant.scheduledMeal": "健康助理 · 伙食工单确认入口",
     "assistant.medication": "健康助理 · 服药确认入口",
     "assistant.finance": "健康助理 · 经营快报",
@@ -30,6 +31,7 @@ FEATURES = {
     "dossier.visitExtraction": "就诊资料 · 病例整理",
     "dossier.healthIntroduction": "长者档案 · 健康简介",
     "dossier.summary": "长者档案 · 健康摘要",
+    "inventory.similarity": "物资品目 · 查重核对",
     "agent.routing": "智能协作 · 任务分派",
     "agent.voiceAsr": "智能协作 · 语音转写",
     "agent.specialist.care": "智能协作 · 照护说明",

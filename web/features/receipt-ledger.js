@@ -17,6 +17,7 @@ export function receiptRows(state) {
       voucher = {
         id, date: row.date, residentId: row.residentId,
         billId: row.originBillId || row.billId || channelRow?.billId || '',
+        bills: new Map(),
         method: row.method || channelRow?.channel || '', channel: row.channel || channelRow?.channel || '',
         merchantOrder: row.merchantOrder || channelRow?.merchantOrder || '',
         transactionId: row.transactionId || channelRow?.transactionId || '',
@@ -27,6 +28,7 @@ export function receiptRows(state) {
     const amount = cents(row.amount);
     voucher.gross += amount;
     voucher[advance ? 'advance' : 'applied'] += amount;
+    if (!advance && row.billId) voucher.bills.set(row.billId, (voucher.bills.get(row.billId) || 0) + amount);
     if (row.feeAmount == null || voucher.fee == null) {
       voucher.fee = null;
       voucher.net = null;
@@ -45,12 +47,14 @@ function tender(row) {
   return row.method || row.channel || '历史凭证未记载';
 }
 
-export function receiptFacts(row) {
+export function receiptFacts(row, billId) {
+  const billIds = [...row.bills.keys()];
+  const applied = billId ? row.bills.get(billId) || 0 : row.applied;
   return facts([
     ['凭证编号', row.id], ['到账日期', row.date], ['收款方式', tender(row)],
-    ['实收总额', currency(row.gross)], ['核销本单', currency(row.applied)], ['转入预缴', currency(row.advance)],
+    ['实收总额', currency(row.gross)], [billId ? '核销本单' : '凭证核销总额', currency(applied)], ['转入预缴', currency(row.advance)],
     ['机构承担手续费', currency(row.fee)], ['净入账', currency(row.net)],
-    ...(row.billId ? [['账单号', row.billId]] : []),
+    ...(billIds.length ? [['关联账单', billIds.join('、')]] : row.billId ? [['账单号', row.billId]] : []),
     ...(row.merchantOrder ? [['商户订单号', row.merchantOrder]] : []),
     ...(row.transactionId ? [['渠道交易流水号', row.transactionId]] : []),
   ]);
@@ -106,7 +110,7 @@ export function receiptLedger(ctx) {
       ['期间净入账', currency(totals.unknown ? null : totals.gross - totals.fee)],
     ]), table(ctx, {
       title: '实收流水', rows: visible, empty: '此时段尚无到账凭证。',
-      search: { placeholder: '搜索长者、凭证或流水号', value: (r) => [residentName(ctx, r.residentId), r.id, r.billId, r.transactionId, r.merchantOrder].join(' ') },
+      search: { placeholder: '搜索长者、账单或凭证号', value: (r) => [residentName(ctx, r.residentId), r.id, r.billId, ...r.bills.keys(), r.transactionId, r.merchantOrder].join(' ') },
       cols: [
         { label: '到账日期', view: (r) => r.date },
         { label: '长者', view: (r) => residentAnchor(ctx, r.residentId) },

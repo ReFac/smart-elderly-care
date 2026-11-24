@@ -3,7 +3,7 @@
 from contextlib import closing
 import json
 
-from . import preflight, runtime
+from . import preflight, react, runtime
 from .. import access, campus_access
 from ..operations import assistants
 from ..provider import generation, model_name
@@ -27,7 +27,7 @@ def measures(artifact):
     return result
 
 
-def collect(check, state, actor, day):
+def collect(check, state, actor, day, provider_plan=None):
     args = check["args"]
     log = Events()
     artifacts = runtime.execute(
@@ -38,6 +38,7 @@ def collect(check, state, actor, day):
         args["residentId"],
         day,
         log,
+        provider_plan=provider_plan,
         member_ids=frozenset(check["resolved"]["residentIds"])
         if check["resolved"]
         else None,
@@ -81,10 +82,34 @@ def prepare(store, token, payload, revision, *, suggestion=False):
             check = preflight(db, state, actor, payload)
             if check["prior"]:
                 return None
-            artifacts, log = collect(
-                check, state, actor, store.now().date().isoformat()
-            )
             req = [revision, check["request"], check["fingerprintScope"]]
+    if not suggestion:
+        day = store.now().date().isoformat()
+        provider_plan = None
+        if check["args"].get("planning") == "platform" and check["args"]["scope"] == "auto":
+            choices = tuple(
+                react.Action(spec.key, spec.title, lambda: None) for spec in check["specs"]
+            )
+            goal = check["args"]["goal"]
+            if check["args"]["residentId"]:
+                goal += "\n这是个体照护核对，请至少选择 care。"
+            selected = react.choose(store, actor["id"], ["specialist-plan", req], goal, choices, feature="agent.routing")
+            provider_plan = {"mode": "deepseek", "specialistIds": selected}
+            # Recheck current authorization and the captured revision before observing any records.
+            with closing(store.connect()) as db, db:
+                db.execute("BEGIN")
+                actor = store.actor(db, token)
+                current, data = db.execute("SELECT revision,data FROM workspace WHERE id=1").fetchone()
+                if current != revision:
+                    raise Conflict("数据已更新，请核对最新内容后重新提交")
+                state = json.loads(data)
+                latest = preflight(db, state, actor, payload)
+                if latest["prior"]:
+                    return None
+                if latest["resolved"] != check["resolved"]:
+                    raise PermissionError("授权区域已变化，请重新生成")
+                check = latest
+        artifacts, log = collect(check, state, actor, day, provider_plan)
     for artifact in artifacts:
         facts = measures(artifact)
         explanation = generation.summarize(

@@ -45,16 +45,12 @@ def seed(today: str, state: dict) -> dict:
         t["assignee"] for t in state.get("tasks", []) if t.get("assignee")
     )
     staff_names = list(dict.fromkeys([*scheduled, "林晓", "陈悦", "周宁"]))
-    wards = list(
-        dict.fromkeys(b["ward"] for b in state.get("beds", []) if b.get("ward"))
-    ) or ["照护区"]
     for index, period in enumerate(("早班", "中班", "夜班")):
         assign_shift(
             state,
             dict(
                 staff=staff_names[index],
                 period=period,
-                area=wards[index % len(wards)],
                 date=today,
             ),
             today,

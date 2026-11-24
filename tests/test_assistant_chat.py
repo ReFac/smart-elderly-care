@@ -91,6 +91,46 @@ class ChatTests(unittest.TestCase):
         body = self.transport.call_args.args[1]
         return json.loads(body["messages"][1]["content"])["本次可见资料"]
 
+    def test_cloud_evidence_action_rechecks_scope_and_bills_synthesis(self):
+        def choose(_key, body):
+            tools = {entry["function"]["name"] for entry in body["tools"]}
+            self.assertIn("inventory_evidence", tools)
+            self.assertNotIn("account_evidence", tools)
+            self.command("ops.stock", {"itemId": "stock-1", "type": "入库", "quantity": 2})
+            return {
+                "usage": {"total_tokens": 80},
+                "choices": [{"finish_reason": "tool_calls", "message": {"tool_calls": [
+                    {"type": "function", "function": {"name": "inventory_evidence", "arguments": "{}"}}
+                ]}}],
+            }
+
+        self.transport.side_effect = choose
+        with patch("platform_core.provider.deepseek.send", return_value={
+            "usage": {"total_tokens": 42},
+            "choices": [{"finish_reason": "stop", "message": {"content": '{"text":"已核对库存。"}'}}],
+        }) as final:
+            result = self.ask("护理用具库存怎么样")
+        self.assertEqual(result["messages"][-1]["content"], "已核对库存。")
+        observed = json.loads(final.call_args.args[1]["messages"][1]["content"])["最新工具观察"]
+        self.assertEqual(list(observed), ["inventory_evidence"])
+        with closing(self.store.connect()) as db:
+            rows = dict(db.execute("SELECT feature,charged FROM api_usage WHERE feature LIKE 'assistant.%'"))
+        self.assertEqual(rows, {"assistant.chat": 80, "assistant.toolAnswer": 42})
+
+    def test_tool_cannot_override_authorized_scope(self):
+        self.transport.return_value = {
+            "usage": {"total_tokens": 80},
+            "choices": [{"finish_reason": "tool_calls", "message": {"tool_calls": [
+                {"type": "function", "function": {
+                    "name": "inventory_evidence", "arguments": '{"residentId":"r001"}'
+                }}
+            ]}}],
+        }
+        with patch("platform_core.provider.deepseek.send") as final:
+            with self.assertRaises(chat.Unavailable):
+                self.ask("护理用具库存怎么样")
+        final.assert_not_called()
+
     def test_window_facts_followups_and_idempotent_read_only_turn(self):
         original = self.now
         self.now -= timedelta(hours=36)

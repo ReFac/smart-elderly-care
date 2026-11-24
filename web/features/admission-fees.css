@@ -1,0 +1,81 @@
+.dialog:has(.admission-finance-form) {
+  width: min(790px, calc(100% - 32px));
+}
+
+.admission-finance,
+.admission-payment-hint {
+  grid-column: 1 / -1;
+}
+
+.admission-payment-hint {
+  display: grid;
+  gap: 8px;
+  margin-top: -7px;
+  min-width: 0;
+}
+
+.admission-payment-hint:has(> [hidden] + [hidden]) {
+  display: none;
+}
+
+.admission-security-choice {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: fit-content;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.admission-security-choice input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.admission-finance {
+  display: grid;
+  gap: 16px;
+}
+
+.admission-quote {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #f9fbff;
+}
+
+.admission-quote h3 {
+  font-size: 15px;
+}
+
+.admission-quote-content {
+  grid-column: 1 / -1;
+}
+
+.admission-price-breakdown {
+  display: grid;
+  gap: 14px;
+}
+
+.admission-price-breakdown .fx-facts dd {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.admission-price-breakdown .fx-facts > :last-child dd {
+  color: var(--accent);
+}
+
+.admission-price-breakdown .fx-section .fx-records {
+  background: white;
+}
+
+@media (max-width: 500px) {
+  .admission-quote {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>区域设置电脑端检查</title>
+  <link rel="stylesheet" href="../../web/style.css">
+  <link rel="stylesheet" href="../../web/features.css">
+  <link rel="stylesheet" href="../../web/features/care-areas.css">
+</head>
+<body>
+  <main></main>
+  <output>检查中</output>
+  <script type="module">
+    import { careAreas } from '../../web/features/care-areas.js';
+    import { detail } from '../../web/lib/dialogs.js';
+    import * as ui from '../../web/lib/ui.js';
+
+    const main = document.querySelector('main');
+    const buildings = [
+      {id:'east', name:'主楼', campusName:'安康家园'},
+      {id:'west', name:'康复楼', campusName:'安康家园'},
+    ];
+    const areas = [
+      {id:'a1', buildingId:'east', parentId:'',name:'东区',path:'东区', floorIds:['f1'], roomIds:[]},
+      {id:'a2', buildingId:'east', parentId:'a1', name:'东区夜班',path:'东区 / 东区夜班', floorIds:[], roomIds:['r2']},
+      {id:'a3', buildingId:'west', parentId:'',name:'康复护理区',path:'康复护理区', floorIds:['f3'], roomIds:[]},
+    ];
+    const floors = [{id:'f1', label:'一层',areaId:'a1'}, {id:'f2', label:'二层',areaId:''}, {id:'f3', label:'三层',areaId:'a3'}];
+    const rooms = [
+      {id:'r1',floorId:'f1',number:'101',areaId:'',effectiveAreaId:'a1'},
+      {id:'r2',floorId:'f2',number:'201',areaId:'a2',effectiveAreaId:'a2'},
+      {id:'r3',floorId:'f3',number:'301',areaId:'',effectiveAreaId:'a3'},
+    ];
+    const requests = [];
+    const commands = [];
+    let canManage = true;
+    const ctx = {
+      ui, detail, state:{user:{id:'owner',kind:'owner'}},
+      async get(path) {
+        const url = new URL(path, location.origin);
+        verify(url.pathname==='/api/care/areas','位置使用真实区域接口');
+        const buildingId = url.searchParams.get('buildingId') || 'east';
+        requests.push(buildingId);
+        const first = buildingId === 'east';
+        const pickedFloors = first ? floors.slice(0,2) : floors.slice(2);
+        return {
+          buildings, buildingId, canManage,
+          areas: areas.filter(area => area.buildingId === buildingId), floors: pickedFloors,
+          rooms: rooms.filter(room => pickedFloors.some(floor => floor.id===room.floorId)),
+          staff: [{id:'s1',name:'黄文',role:'护工',username:'huang',areaIds:first?['a2']:['a3'],selectable:canManage}],
+        };
+      },
+      async command(action,payload,review) { commands.push({action,payload,review}); return true; },
+    };
+    const dialog = () => document.querySelector('dialog[open]');
+    function verify(ok, reason) { if (!ok) throw new Error(reason); }
+    function click(text, scope = main) {
+      const button = [...scope.querySelectorAll('button')].find(b => b.textContent.trim()===text);
+      verify(button, '找不到入口 ' + text);
+      button.click();
+    }
+    function check(text) {
+      const label = [...dialog().querySelectorAll('.care-area-check')].find(l=>l.textContent.includes(text));
+      verify(label,'找不到勾选项 '+text);
+      label.querySelector('input').click();
+    }
+    async function wait(test, error) {
+      for (let i=0;i<45;i++) {
+        if(test()) return;
+        await new Promise(resolve=>setTimeout(resolve,25));
+      }
+      verify(test(), error);
+    }
+    try {
+      main.append(careAreas(ctx));
+      await wait(() => main.querySelector('[data-area=a2]'), '读取区域树');
+      click('东区夜班');
+      verify(main.querySelector('.care-area-detail').textContent.includes('201 房'), '子区显示单独房间');
+      click('编辑区域');
+      const text = dialog().querySelector('input[type=text]');
+      verify(text.value==='东区夜班' && dialog().querySelector('select').value==='a1','已填子区域的原归属');
+      text.value='东区夜班护理';
+      check('整层 · 一层');
+      click('核对并保存',dialog());
+      await wait(() => commands.length===1 && !dialog(),'编辑子区域');
+      verify(commands[0].action==='care.areaSave' && commands[0].payload.id==='a2' &&
+        commands[0].payload.floorIds.join()==='f1' && commands[0].payload.roomIds.join()==='r2' &&
+        commands[0].review.fields.some(([title]) => title==='改归本区'), '保留独立房间并核对楼层重新划分');
+      click('分配区域');
+      check('东区');
+      click('核对并保存',dialog());
+      await wait(() => commands.length===2 && !dialog(),'提交多区分配');
+      verify(commands[1].payload.buildingId==='east' && commands[1].payload.areaIds.join()==='a1,a2',
+        '当前楼栋允许同时选择上级和另一子区');
+      const building = main.querySelector('[aria-label=选择楼栋]');
+      building.value='west';
+      building.dispatchEvent(new Event('change'));
+      await wait(() => main.querySelector('[data-area=a3]'), '切换建筑');
+      verify(!main.querySelector('[data-area=a2]') && requests.at(-1)==='west','楼栋筛选隔离区域');
+      click('分配区域');
+      verify(dialog().querySelectorAll('input[type=checkbox]').length===1 &&
+        dialog().querySelector('input[type=checkbox]').checked,'当前楼栋保留自己的分配');
+      dialog().close();
+      canManage=false;
+      main.replaceChildren(careAreas(ctx));
+      await wait(() => main.querySelector('[data-area=a3]'), '只读区域列表');
+      verify(![...main.querySelectorAll('button')].some(b=>['新建区域','分配区域'].includes(b.textContent)), '只读权限隐藏管理入口');
+      document.documentElement.dataset.result='pass';
+      document.querySelector('output').textContent='PASS';
+    } catch(error) {
+      document.documentElement.dataset.result='fail';
+      document.querySelector('output').textContent=error.stack;
+    }
+  </script>
+</body>
+</html>

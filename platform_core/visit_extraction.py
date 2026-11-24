@@ -80,7 +80,9 @@ def _recognized(store, token, files, manifest, authorize, name):
     warnings, evidence, dates = [], [], set()
     mismatch = False
     for (raw, _, _), item in zip(files, manifest):
-        result = document_ocr.recognize(store, token, raw, authorize, feature="dossier.visitOcr")
+        result = document_ocr.recognize(
+            store, token, raw, authorize, feature="dossier.visitOcr"
+        )
         pages = {p["page"]: p["state"] for p in result.get("pages", [])}
         label = item["filename"]
         if (
@@ -136,7 +138,7 @@ def _recognized(store, token, files, manifest, authorize, name):
         )
     if len(dates) > 1:
         warnings.append("原件记有多个不同的就诊日期，请按一次就诊分别整理。")
-    return evidence, warnings, mismatch or len(dates) > 1
+    return evidence, warnings, mismatch, dates
 
 
 def organize(store, token, actor, rid, name, files, manifest, initial, authorize):
@@ -147,9 +149,15 @@ def organize(store, token, actor, rid, name, files, manifest, initial, authorize
     batch = generation.fingerprint(
         [rid, [(item[1], meta["category"]) for item, meta in pairs]]
     )
-    evidence, warnings, conflict = _recognized(
+    evidence, warnings, identity_conflict, dates = _recognized(
         store, token, files, manifest, authorize, name
     )
+    date_conflict = bool(
+        dates and initial["eventDate"] and initial["eventDate"] not in dates
+    )
+    if date_conflict:
+        warnings.append("原件标注的就诊日期与所选日期不一致，请返回核对。")
+    conflict = identity_conflict or len(dates) > 1 or date_conflict
     fields, refs = dict(initial), {}
     if evidence and not conflict:
         with closing(store.connect()) as db:
@@ -178,6 +186,13 @@ def organize(store, token, actor, rid, name, files, manifest, initial, authorize
                 if not value or value > store.now().date().isoformat():
                     warnings.append("请从本次就诊记录核对就诊日期。")
                     continue
+            if len(rows) == 1 and field in ("facility", "department"):
+                label = (
+                    r"就诊机构|接诊机构|医疗机构(?:名称)?|医院(?:名称)?"
+                    if field == "facility"
+                    else r"就诊科室|接诊科室|门诊科室|科室"
+                )
+                value = re.sub(r"^(?:" + label + r")\s*[:：]\s*", "", clean(value))
             limit = 200 if field in ("facility", "department") else 4000
             if len(value) > limit:
                 warnings.append(LABELS[field] + "原文较长，请对照原件后手工填写。")

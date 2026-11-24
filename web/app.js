@@ -173,12 +173,15 @@ function go(destination, tab, onArrival) {
 
 function getRoute() {
   const original=location.hash.slice(1).split('?')[0];
-  if (original === 'care' && available('care')) {
-    const params = new URLSearchParams(location.hash.split('?')[1]);
-    if (params.get('tab') === 'scheduledWork' && ['care', 'clinical', 'care.schedule'].some(permitted)) {
-      selectTab('care', 'scheduledWork');
-      history.replaceState(null, '', '#care');
-    }
+  const tab = new URLSearchParams(location.hash.split('?')[1]).get('tab');
+  if (original === 'care' && available('care') && tab === 'scheduledWork' &&
+      ['care', 'clinical', 'care.schedule'].some(permitted)) {
+    selectTab('care', tab);
+    history.replaceState(null, '', '#care');
+  }
+  if (original === 'beds' && available('beds') && tab === 'zones' && permitted('care.areas')) {
+    selectTab('beds', tab);
+    history.replaceState(null, '', '#beds');
   }
   if (original === 'assistants') {
     const home = landing();
@@ -195,10 +198,14 @@ function getRoute() {
   return original || landing();
 }
 
-async function readState() {
+async function readState({publicLanding = false} = {}) {
   const current = epoch;
   const response = await fetch('/api/state', { cache: 'no-store' });
   if (response.status === 401) {
+    if (publicLanding) {
+      location.replace('/visit');
+      return false;
+    }
     signedOut();
     return false;
   }
@@ -365,6 +372,7 @@ function moduleLink([id, label, iconName]) {
   if (id === 'family') {
     const unread = state.familyRoundInbox?.messages.filter((m) => !m.readAt).length;
     if (unread) link.append(el('small', 'family-unread', unread + ' 未读'));
+    else if (todayBillingNotices()) link.append(el('small', 'family-unread', '今日缴费提醒'));
   }
   if (active) link.append(icon('chevron', 13));
   link.addEventListener('click', closeMenu);
@@ -484,6 +492,10 @@ function myTrialFollowups() {
   return (state.trialFollowups || []).filter(r => r.status === '待回访' && r.assigneeId === state.user.id);
 }
 
+function todayBillingNotices() {
+  return (state.billingNotices || []).filter((row) => row.date === state.today).length;
+}
+
 function notices() {
   const list = el('div', 'notice-list');
   const items = [
@@ -544,6 +556,8 @@ function notices() {
     items.unshift(['待我办理的试住回访', myTrialFollowups().length, 'residents', 'trials']);
   if (available('leads') && pendingLeadCalls(state))
     items.unshift(['意向客户待电话回访', pendingLeadCalls(state), 'leads', 'contacts']);
+  if (available('billing') && todayBillingNotices())
+    items.unshift(['今日缴费提醒', todayBillingNotices(), 'billing', 'billingNotices']);
   if (available('inbox')) {
     if (state.roundsNoticeCount)
       items.unshift(['今日巡查提醒', state.roundsNoticeCount, 'inbox', 'rounds']);
@@ -670,6 +684,7 @@ function masthead() {
       myTrialFollowups().length ||
       unresolvedTrials().length ||
       state.groupActivityDue > 0 ||
+      (available('billing') && todayBillingNotices() > 0) ||
       (available('leads') && pendingLeadCalls(state)) ||
       state.supplyOrders?.some(row => row.assigneeId === state.user.id && row.status === '待执行') ||
       (available('inbox') && state.roundsNoticeCount > 0) ||
@@ -802,7 +817,8 @@ function failed(error) {
 async function load() {
   try {
     branding = await get('/api/branding');
-    if (await readState()) render();
+    const publicLanding = location.pathname === '/' && !location.hash && !location.search;
+    if (await readState({ publicLanding })) render();
   } catch (error) {
     failed(error);
   }

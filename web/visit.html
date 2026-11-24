@@ -3,38 +3,130 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#17375a">
-  <title>来院参观与咨询 · 安康家园</title>
+  <meta name="theme-color" content="#f6f8f2">
+  <meta name="description" content="了解安康家园的老人照护、生活环境和来院参观安排。">
+  <title>安康家园 · 养老照护与参观</title>
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/visit.css">
   <script type="module" src="/visit.js"></script>
 </head>
 <body>
-  <header class="public-header"><div><img src="/assets/mark.svg" alt="" width="34" height="34"><strong data-brand>安康家园</strong></div><a href="/">员工与家属登录 <span aria-hidden="true">↗</span></a></header>
-  <main class="reception">
-    <section class="welcome" aria-labelledby="welcome-title">
-      <p class="eyebrow">访客接待</p>
-      <h1 id="welcome-title">来院参观<br>与咨询</h1>
-      <p class="introduction">想为自己或家人了解入住？留下联系方式，接待人员会与您通话，了解需求并确认来访安排。</p>
-      <aside class="callback-card"><h2>先电话聊一聊</h2><p>接听回电，了解试住、收费和照护服务。</p><button type="button" id="open-callback">请给我回电 <span aria-hidden="true">→</span></button></aside>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <header class="site-header">
+    <div class="site-wrap site-nav">
+      <a class="site-brand" href="/visit"><img src="/assets/mark.svg" width="34" height="34" alt=""><strong data-brand>安康家园</strong></a>
+      <nav aria-label="官网导航">
+        <a href="#environment">生活环境</a>
+        <a href="#care">照护服务</a>
+        <a href="#plan">来访安排</a>
+      </nav>
+      <a class="staff-link" href="/?workspace=1">员工与家属登录</a>
+    </div>
+  </header>
+  <main id="main">
+    <section class="site-wrap hero" aria-labelledby="home-title">
+      <div class="hero-copy">
+        <h1 id="home-title" data-brand>安康家园</h1>
+        <h2>为长辈选一个<br>安心的住处</h2>
+        <p>了解起居、用餐和日常照护。先在线走一遍，再和家人一起安排来院参观。</p>
+        <div class="site-actions">
+          <a class="primary" href="/roomtour">进入 3D 环境导览</a>
+          <a class="secondary" href="#appointment">预约来院</a>
+        </div>
+      </div>
+      <figure class="hero-figure">
+        <img src="/assets/visit/lounge.webp" alt="明亮的适老起居空间，有连续扶手、宽通道和庭院窗景" width="1536" height="1024" fetchpriority="high">
+        <figcaption>照护环境设计示意</figcaption>
+      </figure>
     </section>
-    <section class="form-card" aria-labelledby="visit-title">
-      <h2 id="visit-title">申请参观</h2><p class="subhead">告诉我们您想来哪个院区，具体时段以电话确认为准。</p>
-      <form id="visit-form">
-        <label>参观院区<select required name="campusId" class="campuses" disabled><option value="">正在载入院区…</option></select></label>
-        <div class="pair"><label>您的称呼<input name="name" required maxlength="40" autocomplete="name" placeholder="怎么称呼您"></label>
-        <label>联系电话<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" required placeholder="可接通的手机号"></label></div>
-        <fieldset><legend>期望参观时间 <small>选填 · 北京时间</small></legend>
-          <div class="pair"><label><span class="sr-only">期望参观日期</span><input name="day" type="date"></label>
-          <label><span class="sr-only">期望参观时刻</span><select name="time"><option value="">请选择时间</option></select></label></div>
-        </fieldset>
-        <label>希望了解的内容 <small>选填</small><textarea name="note" rows="2" maxlength="400" placeholder="例如：想看看双人间，了解试住费用"></textarea></label>
-        <label class="consent"><input type="checkbox" required name="consent"><span>我同意所选院区使用我填写的号码联系我，安排本次咨询或参观。</span></label>
-        <p class="form-error" role="alert"></p><button class="primary" type="submit" disabled>提交参观意愿</button>
-      </form>
-      <div class="receipt" id="visit-receipt" role="status" tabindex="-1" hidden><h3>参观意愿已送达</h3><p>请留意接待人员的来电。通话确认后，工作人员会为您留出接待时段。</p></div>
+
+    <section class="environment" id="environment" aria-labelledby="environment-title">
+      <div class="site-wrap environment-grid">
+        <div class="environment-copy">
+          <h2 id="environment-title">从门厅走到居室</h2>
+          <p>线上导览提供可旋转的 3D 示范。可查看接待大厅、活动区、长者居室和庭院，再把到院想看的空间记下来。</p>
+          <a class="primary" href="/roomtour">打开 3D 示范</a>
+        </div>
+        <dl class="space-list">
+          <div><dt>接待大厅</dt><dd>了解抵达后的登记和等候动线</dd></div>
+          <div><dt>活动区</dt><dd>查看休息、交流与集体活动空间</dd></div>
+          <div><dt>长者居室</dt><dd>了解床位、床旁通道和收纳示意</dd></div>
+          <div><dt>户外庭院</dt><dd>查看散步路线及坐下休息的位置</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="site-wrap care" id="care" aria-labelledby="care-title">
+      <div class="section-intro">
+        <h2 id="care-title">围绕长辈的一天</h2>
+        <p>每位长者的生活习惯和照护需求不同。参观时可以把平时的作息、饮食和需要协助的地方告诉接待人员。</p>
+      </div>
+      <div class="care-grid">
+        <article><h3>日常生活照护</h3><p>了解起床、活动、卫生和休息的安排，按身体情况沟通需要协助的事项。</p></article>
+        <article><h3>用餐与饮食习惯</h3><p>现场了解用餐时间和当日餐单，提前说明长者的饮食偏好或需要留意的食物。</p></article>
+        <article><h3>健康观察和沟通</h3><p>询问护理记录、异常反馈以及家属如何查阅本人获授权的信息。</p></article>
+      </div>
+    </section>
+
+    <section class="visit-planning" id="plan" aria-labelledby="plan-title">
+      <div class="site-wrap plan-grid">
+        <div class="section-intro">
+          <h2 id="plan-title">安排一次来访</h2>
+          <p>从线上浏览到实地看房，可以按家人的时间一步步来。</p>
+          <ol class="plan-steps">
+            <li><strong>线上了解</strong><span>看看居室和公共空间，记下关心的问题。</span></li>
+            <li><strong>电话确认</strong><span>提交意向后，接待人员通过您留下的号码商定时间。</span></li>
+            <li><strong>来院参观</strong><span>按约定到访，可当面沟通入住、试住和收费项目。</span></li>
+          </ol>
+        </div>
+        <aside class="questions" aria-labelledby="question-title">
+          <h3 id="question-title">参观前常见问题</h3>
+          <details><summary>想先问试住或收费，可以吗？</summary><p>可以先请求回电，并说明最想了解的项目。试住安排和费用由院区接待人员确认。</p></details>
+          <details><summary>填了期望时间，是否已经预约成功？</summary><p>期望时间供接待人员参考。电话确认后，院区会记录来访时段。</p></details>
+          <details><summary>线上看到的是实拍还是示范？</summary><p>此页图片是环境设计示意，3D 导览使用独立演示场景。实际布置请以现场参观为准。</p></details>
+        </aside>
+      </div>
+    </section>
+
+    <section class="site-wrap reception" id="appointment" aria-labelledby="visit-title">
+      <div class="reception-intro">
+        <h2 id="visit-title">预约来院参观</h2>
+        <p>请选择想参观的院区，填写接待人员可以联系到您的号码。日期和时刻可以晚些再定。</p>
+        <aside class="callback-card">
+          <h3>想先电话聊一聊？</h3>
+          <p>留下号码，让接待人员回电介绍试住、费用和照护服务。</p>
+          <button type="button" class="secondary" id="open-callback">请给我回电</button>
+        </aside>
+      </div>
+      <div class="form-card">
+        <h3>填写参观意愿</h3>
+        <form id="visit-form">
+          <label>参观院区<select required name="campusId" class="campuses" disabled><option value="">正在载入院区…</option></select></label>
+          <div class="pair">
+            <label>您的称呼<input name="name" required maxlength="40" autocomplete="name" placeholder="怎么称呼您"></label>
+            <label>联系电话<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" required placeholder="可接通的手机号"></label>
+          </div>
+          <fieldset>
+            <legend>期望参观时间 <small>选填 · 北京时间</small></legend>
+            <div class="pair"><label><span class="sr-only">期望参观日期</span><input name="day" type="date"></label>
+              <label><span class="sr-only">期望参观时刻</span><select name="time"><option value="">请选择时间</option></select></label></div>
+          </fieldset>
+          <label>希望了解的内容 <small>选填</small><textarea name="note" rows="3" maxlength="400" placeholder="例如 想看看双人间，了解试住费用"></textarea></label>
+          <label class="consent"><input type="checkbox" required name="consent"><span>我同意所选院区使用我填写的号码联系我，安排本次咨询或参观。</span></label>
+          <p class="form-error" role="alert"></p>
+          <p class="form-error" role="alert" id="load-error"></p>
+          <button class="primary" type="submit" disabled>提交参观意愿</button>
+        </form>
+        <div class="receipt" id="visit-receipt" role="status" tabindex="-1" hidden><h3>参观意愿已送达</h3><p>请留意接待人员来电。电话确认后，工作人员会为您留出接待时段。</p></div>
+      </div>
     </section>
   </main>
+  <footer class="site-footer">
+    <div class="site-wrap footer-layout">
+      <a class="site-brand" href="/visit"><img src="/assets/mark.svg" width="32" height="32" alt=""><strong data-brand>安康家园</strong></a>
+      <nav aria-label="页脚导航"><a href="/roomtour">环境导览</a><a href="#appointment">来访预约</a><a href="/?workspace=1">员工与家属登录</a></nav>
+    </div>
+  </footer>
   <dialog id="callback" aria-labelledby="callback-title">
     <div class="dialog-head"><h2 id="callback-title">请接待人员回电</h2><button type="button" id="close" aria-label="关闭">×</button></div>
     <form id="callback-form">
@@ -44,8 +136,7 @@
       <label class="consent"><input type="checkbox" required name="consent"><span>我同意所选院区保存这个号码，并就本次养老服务咨询给我回电。</span></label>
       <p class="form-error" role="alert"></p><button class="primary" type="submit" disabled>同意并请求回电</button>
     </form>
-    <div class="receipt" id="callback-receipt" role="status" tabindex="-1" hidden><h3>回电请求已收到</h3><p>感谢留言。如需安排来院参观，也可以填写参观意愿。</p></div>
+    <div class="receipt" id="callback-receipt" role="status" tabindex="-1" hidden><h3>回电请求已收到</h3><p>如需安排来院参观，也可以继续填写参观意愿。</p></div>
   </dialog>
-  <p class="load-error" role="alert" id="load-error"></p>
 </body>
 </html>

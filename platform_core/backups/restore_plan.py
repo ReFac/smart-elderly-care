@@ -19,6 +19,10 @@ MUTABLE = {
     "dossier_relatives": "亲属档案资料",
     "rounds_modes": "长者巡查生成设置",
     "rounds_policy": "机构巡查排程设置",
+    "care_areas": "楼栋照护区域",
+    "care_area_floors": "区域分层",
+    "care_area_rooms": "区域房间分配",
+    "care_area_staff": "区域人员职责",
     "scheduled_work_rules": "定时工单模板",
     "scheduled_work_menus": "指定日期伙食菜单",
 }
@@ -52,6 +56,7 @@ PROTECTED = {
     "longCareEvents": "长护险办理凭证",
     "payments": "收款凭证",
     "bills": "账单",
+    "billingNotices": "已发送的缴费提醒",
     "paymentOrders": "支付订单",
     "channelReceipts": "渠道回执",
     "deposits": "预存余额",
@@ -89,7 +94,7 @@ LABELS = {
 }
 
 
-RECEPTION_COLLECTIONS = ("leadContacts", "leadEvents", "visitBookings", "visitSchedulePolicies")
+RECEPTION_COLLECTIONS = ("leadContacts", "leadEvents", "visitBookings", "visitSchedulePolicies", "billingNotices")
 
 
 def with_reception_collections(state):
@@ -150,6 +155,10 @@ OPTIONAL_TABLES = {
     "rounds_policy",
     "rounds_observations",
     "rounds_reports",
+    "care_areas",
+    "care_area_floors",
+    "care_area_rooms",
+    "care_area_staff",
     "scheduled_work_rules",
     "scheduled_work_menus",
     "scheduled_work_runs",

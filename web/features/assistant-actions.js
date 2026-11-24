@@ -7,6 +7,10 @@ import { routes } from '../lib/navigation.js';
 
 // These destinations are also indexed by the keyboard quick finder.
 export const quickDestinations = [
+  { label: '区域设置', words: '护理区域 子区域 护工职责 楼栋分区', route: 'beds', tab: 'zones' },
+  { label: '健康工作台', words: '健康管理 智慧照护 异常上报', route: 'care', tab: 'healthDesk' },
+  { label: '等级判定', words: '评估结果 护理等级', route: 'assessments', tab: 'grading' },
+  { label: '用药安全筛查', words: '用药冲突 过敏核对 重复用药', route: 'medications', tab: 'safety' },
   { label: '定时工单', words: '自动工单 伙食排期 伙食工单 定时巡查 菜单 照护排程', route: 'care', tab: 'scheduledWork', grant: 'care.completeTask' },
   { label: 'DeepSeek 用量', words: '模型用量 API 用量 Token 用量 OCR ASR 缓存命中率 员工用量', route: 'settings', tab: 'deepseekUsage' },
   { label: '登记集体活动', words: '集体用餐 早餐 午餐 晚餐 登记餐单', route: 'care', tab: 'groupLife', grant: 'care.proposeGroupActivity' },

@@ -128,9 +128,13 @@ def stock_suggestion(state, today):
     return "", "复核物资消耗与补货计划", detail, evidence
 
 
+def finance_line_total(bill):
+    return str(sum(Decimal(str(line["amount"])) for line in bill["lineItems"]))
+
+
 def finance_suggestion(state, today):
     debt = [b for b in state["bills"] if b["balance"] > 0]
-    overdue = [b for b in debt if b["endDate"] < today]
+    overdue = [b for b in debt if b.get("endDate") and b["endDate"] < today]
     due_amount = sum((Decimal(str(b["balance"])) for b in debt), Decimal(0))
     late_amount = sum((Decimal(str(b["balance"])) for b in overdue), Decimal(0))
     evidence = [
@@ -150,6 +154,8 @@ def finance_suggestion(state, today):
         reasons = []
         if bill.get("kind") == "trial":
             expected = Decimal(str(bill["trialPrice"]))
+        elif bill.get("kind") == "security":
+            expected = Decimal(str(bill["depositUnitPrice"])) * bill["depositMonths"]
         else:
             bed_rate, care_rate, package = (
                 Decimal(str(bill[k])) for k in ("bedFee", "careFee", "packageFee")
@@ -171,6 +177,8 @@ def finance_suggestion(state, today):
                 reasons.append(
                     f"护理日价 ¥{care_rate:.2f}，示例等级标准 ¥{default_rate:.2f}"
                 )
+        if bill.get("lineItems") or "lineTotal" in bill:
+            expected = Decimal(bill.get("lineTotal") or finance_line_total(bill))
         if expected != amount or balance + paid != amount:
             reasons.append("计费拆分或核销余额与应收不符")
         if reasons:

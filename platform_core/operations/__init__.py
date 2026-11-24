@@ -6,13 +6,14 @@ from .demo import seed
 from .payment_terms import configure as configure_payment_fees
 from .settlements import create_order, expense, import_receipt, remind
 from .reports import generate_report, submit_report, report_receipt
-from .resources import add_item, assign_shift, record_stock
+from .resources import add_item, assign_shift, edit_item, record_stock
 
 
 __all__ = ["CARE_RATES", "apply", "seed"]
 
 ACTIONS = {
     "ops.addItem": add_item,
+    "ops.editStockItem": edit_item,
     "ops.stock": record_stock,
     "ops.shift": assign_shift,
     "ops.bill": generate_bill,
