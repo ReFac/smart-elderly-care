@@ -68,6 +68,9 @@ PERSON_ACTIONS = {
     "dossier.reviewDocument",
     "dossier.signSummary",
     "dossier.profile",
+    "family.consent",
+    "family.subscribe",
+    "family.read",
 }
 
 

@@ -9,6 +9,7 @@ PERMISSIONS = {
     "medical": "查阅医疗文档原件",
     "medical.write": "登记医疗照片与概括",
     "relatives": "查看授权亲属资料",
+    "family.share": "代录长者对每日巡查简报的分享意愿",
     "inventory": "库存与领用",
     "finance": "财务、收款与结算",
     "shifts": "工作排班",
@@ -16,7 +17,7 @@ PERMISSIONS = {
     "assistants": "运行 Agent 协作、生成与审核建议",
     "gateway.simulate": "登记模拟设备事件",
     "alerts": "护士复核预警并记录处置",
-    "voice": "发起语音变更申请",
+    "voice": "Agent 语音输入、发起语音变更申请",
     "voice.confirm": "确认或退回语音变更",
     "audit": "查阅已授权业务的操作日志",
     "staff.manage": "在本人业务权限内管理员工账号",
@@ -68,7 +69,14 @@ ROUTE_GRANTS = {
     "reports": ("reports", "audit"),
     "activity": ("audit",),
     "dossier": ("residents", "intake", "medical", "relatives"),
-    "inbox": ("gateway.simulate", "alerts", "voice", "voice.confirm"),
+    "inbox": (
+        "gateway.simulate",
+        "alerts",
+        "voice",
+        "voice.confirm",
+        "care",
+        "clinical",
+    ),
     "integrations": ("gateway.simulate", "alerts", "voice", "voice.confirm"),
 }
 ACTION_GRANTS = {
@@ -222,7 +230,10 @@ def resolve_routes(user):
     if "assistants" in routes and not has_agent_domain(user):
         routes.remove("assistants")
     if "inbox" in routes and not (
-        has(user, "care") or has(user, "alerts") or has(user, "gateway.simulate")
+        has(user, "care")
+        or has(user, "clinical")
+        or has(user, "alerts")
+        or has(user, "gateway.simulate")
     ):
         routes.remove("inbox")
     if manages_accounts(user):
@@ -239,6 +250,16 @@ def authorize(user, action, payload, state):
     if not isinstance(action, str) or not isinstance(payload, dict):
         raise ValueError("业务操作格式无效")
     if action == "account.changePassword":
+        return
+    if action == "family.consent":
+        if user["kind"] == "family" and user.get("portalSelf"):
+            return
+        require(user, "relatives")
+        require(user, "family.share")
+        return
+    if action in ("family.subscribe", "family.read"):
+        if user["kind"] != "family" or user.get("portalSelf"):
+            raise PermissionError("仅限亲属本人管理订阅和收件箱")
         return
     if action == "portal.feedback":
         if user["kind"] != "family" or "careSchedule" not in user.get(
@@ -306,6 +327,14 @@ def allowed_actions(user):
         action for action, permission in ACTION_GRANTS.items() if has(user, permission)
     ]
     actions.append("account.changePassword")
+    if user["kind"] == "family":
+        actions.extend(
+            ["family.consent"]
+            if user.get("portalSelf")
+            else ["family.subscribe", "family.read"]
+        )
+    elif has(user, "relatives") and has(user, "family.share"):
+        actions.append("family.consent")
     if user["kind"] == "family" and "careSchedule" in user.get("portalScopes", ()):
         actions.append("portal.feedback")
     if not (has(user, "clinical") and has(user, "medical")):
@@ -346,6 +375,8 @@ def can_view_audit(user, action, *, agent_initiator=None, agent_grants=()):
         return False
     if user["kind"] == "owner":
         return True
+    if action == "family.consent":
+        return has(user, "relatives") and has(user, "family.share")
     if action.startswith("agent."):
         return (
             action in ACTION_GRANTS

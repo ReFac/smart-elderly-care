@@ -87,7 +87,7 @@ def record(
         )
     source = (
         "agent"
-        if action.startswith("agent.")
+        if action.startswith("agent.") or actor["id"] == "rounds-agent"
         else "system"
         if actor["id"] == "platform-operator" or actor["id"].startswith("channel-")
         else "human"
@@ -216,6 +216,14 @@ class Reader:
                     broad and campuses and campuses <= set(local.get("campusIds", ()))
                 ):
                     return False
+        if action == "media.agentVoice":
+            from ..provider.speech import can_read_agent_history
+
+            return own and can_read_agent_history(self.db, self.user, row["revision"])
+        if action == "family.consent":
+            return policy.has(self.user, "relatives") and policy.has(
+                self.user, "family.share"
+            )
         if action == "media.asr":
             return (
                 own and policy.has(self.user, "voice") and policy.has(self.user, "care")
@@ -261,6 +269,10 @@ class Reader:
         if self.user["kind"] == "owner":
             return True
         name = c["collection"]
+        if name == "family_round_preferences":
+            return policy.has(self.user, "relatives") and policy.has(
+                self.user, "family.share"
+            )
         if name == "assessments":
             return policy.can_record_scale(self.user)
         if name in (

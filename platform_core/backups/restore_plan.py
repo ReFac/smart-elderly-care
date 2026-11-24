@@ -16,12 +16,16 @@ MUTABLE = {
     "facility_media": "导览资源",
     "dossier_profiles": "长者档案资料",
     "dossier_relatives": "亲属档案资料",
+    "rounds_modes": "长者巡查生成设置",
+    "rounds_policy": "机构巡查排程设置",
 }
 ORIGINALS = {
     "dossier_documents": "医疗原件",
     "dossier_document_reviews": "文书签认",
     "storage_assets": "环境与历史原件",
     "protected_documents": "签发的加密文书",
+    "rounds_observations": "已核对咳嗽时段观测",
+    "rounds_reports": "已生成的长者巡查简报",
 }
 # A point-in-time restore cannot retract external actions, recorded clinical observations or cash.
 PROTECTED = {
@@ -93,6 +97,26 @@ def completed(rows):
     }
 
 
+OPTIONAL_TABLES = {
+    "rounds_modes",
+    "rounds_policy",
+    "rounds_observations",
+    "rounds_reports",
+}
+
+
+def supported_tables(db, group):
+    # Snapshots from before rounding was introduced have no representation of
+    # these records. Preserve the live records and configuration during import.
+    present = {
+        r[0]
+        for r in db.execute(
+            "SELECT name FROM incoming.sqlite_master WHERE type='table'"
+        )
+    }
+    return {k: v for k, v in group.items() if k not in OPTIONAL_TABLES or k in present}
+
+
 def describe(db):
     def field(schema, query):
         return db.execute(query.format(s=schema)).fetchone()[0]
@@ -141,7 +165,7 @@ def describe(db):
     if not live_campuses <= next_campuses:
         blockers.append("当前员工授权的分院在选定时间点缺失")
 
-    for table, label in {**MUTABLE, **ORIGINALS}.items():
+    for table, label in supported_tables(db, {**MUTABLE, **ORIGINALS}).items():
         removed = difference_count(db, table, "main", "incoming")
         added = difference_count(db, table, "incoming", "main")
         if not (removed or added):
@@ -191,16 +215,17 @@ def describe(db):
 def apply(db):
     # Child references are checked after all related tables have been restored.
     db.execute("PRAGMA defer_foreign_keys=ON")
-    for name in reversed(MUTABLE):
+    mutable = supported_tables(db, MUTABLE)
+    for name in reversed(mutable):
         db.execute(
             f'DELETE FROM main."{name}" AS s WHERE ' + absent(db, name, "incoming")
         )
-    for name in MUTABLE:
+    for name in mutable:
         db.execute(
             f'INSERT INTO main."{name}" SELECT s.* FROM incoming."{name}" AS s WHERE '
             + absent(db, name, "main", compare_values=False)
         )
-    for name in ORIGINALS:
+    for name in supported_tables(db, ORIGINALS):
         db.execute(
             f'INSERT INTO main."{name}" SELECT s.* FROM incoming."{name}" AS s WHERE '
             + absent(db, name, "main", compare_values=False)

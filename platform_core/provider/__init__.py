@@ -20,9 +20,10 @@ PENDING_SECONDS = 90
 
 
 def init(db):
-    from . import media
+    from . import media, round_priorities
 
     media.init(db)
+    round_priorities.init(db)
     db.execute("""CREATE TABLE IF NOT EXISTS api_plans (
         id INTEGER PRIMARY KEY, name TEXT NOT NULL, tokenLimit INTEGER NOT NULL,
         startsOn TEXT NOT NULL, expiresOn TEXT NOT NULL, enabled INTEGER NOT NULL)""")

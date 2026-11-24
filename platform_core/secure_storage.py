@@ -324,6 +324,13 @@ def restore_snapshot(source, target_db, recovery_key_file):
                 for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
             with db:
+                if "family_round_preferences" in existing:
+                    # A disaster-recovery host cannot know which party withdrew consent
+                    # after this point. Keep the encrypted evidence and old receipts;
+                    # require both parties to opt in again before exposing new reports.
+                    db.execute("""UPDATE family_round_preferences
+                        SET allowed=0, subscribed=0, generation=generation+1
+                        WHERE allowed=1 OR subscribed=1""")
                 for table in local_tables:
                     if table in existing:
                         db.execute("DELETE FROM " + table)

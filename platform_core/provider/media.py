@@ -156,12 +156,17 @@ def invoke(kind, raw, filename, mime, key):
         ) from None
 
 
-def audit_asr(db, actor, task, now, summary):
+def audit_asr(db, actor, task, now, summary, scope):
     from .. import activity
 
-    data = json.loads(db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0])
-    person = next((t.get("residentId") for t in data["tasks"] if t["id"] == task), "")
-    scope = activity.for_person(data, person)
+    if scope is None:
+        data = json.loads(
+            db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+        )
+        person = next(
+            (t.get("residentId") for t in data["tasks"] if t["id"] == task), ""
+        )
+        scope = activity.for_person(data, person)
     revision = db.execute(
         "UPDATE workspace SET revision=revision+1 WHERE id=1 RETURNING revision"
     ).fetchone()[0]
@@ -169,7 +174,7 @@ def audit_asr(db, actor, task, now, summary):
         db,
         revision,
         now.isoformat(timespec="seconds"),
-        "media.asr",
+        "media.asr" if not task.startswith("agent:") else "media.agentVoice",
         summary,
         actor,
         scope,
@@ -189,6 +194,7 @@ def execute(
     parse,
     reference="",
     upload=None,
+    audit_scope=None,
 ):
     """Persist the outbound reservation first. A crash or lost reply never causes an automatic re-send."""
     now = store.now()
@@ -248,7 +254,14 @@ def execute(
             ),
         )
         if kind == "asr":
-            audit_asr(db, actor, reference, now, "保存语音原件，提交 DeepSeek 转写")
+            audit_asr(
+                db,
+                actor,
+                reference,
+                now,
+                "保存语音原件，提交 DeepSeek 转写",
+                audit_scope,
+            )
     try:
         obj = invoke(kind, upload if upload is not None else raw, filename, mime, key)
         result, units, source_id = parse(obj)
@@ -278,6 +291,7 @@ def execute(
                     reference,
                     store.now(),
                     "登记语音转写失败或待核对回执",
+                    audit_scope,
                 )
         raise (
             e
@@ -295,7 +309,14 @@ def execute(
         ).rowcount:
             raise ValueError("识别已进入平台对账")
         if kind == "asr":
-            audit_asr(db, actor, reference, store.now(), "记录 DeepSeek 语音转写回执")
+            audit_asr(
+                db,
+                actor,
+                reference,
+                store.now(),
+                "记录 DeepSeek 语音转写回执",
+                audit_scope,
+            )
     with closing(store.connect()) as db:
         authorize(db, token)
     return result

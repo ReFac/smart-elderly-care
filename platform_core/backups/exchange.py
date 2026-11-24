@@ -209,7 +209,21 @@ def restored(svc, packet):
         if info["schemaVersion"] > SCHEMA_VERSION:
             raise ValueError("此备份由更高版本系统创建，请先升级")
         # Apply the same schema migrations as normal startup to the isolated database.
-        Store(path, initial_data="empty")
+        with closing(
+            secure_storage.open_database(path, svc.store._storage_master)
+        ) as original:
+            existing = {
+                row[0]
+                for row in original.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+        isolated = Store(path, initial_data="empty")
+        # A feature introduced after this snapshot has no historical settings or evidence.
+        # Remove only its migration-generated defaults in this temporary import projection.
+        with closing(isolated.connect()) as db, db:
+            for table in restore_plan.OPTIONAL_TABLES - existing:
+                db.execute(f'DROP TABLE "{table}"')
         yield path
 
 

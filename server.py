@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from platform_core.backups import exchange
 from platform_core import access, facility
+from platform_core.provider import round_priorities
 from platform_core.store import Conflict, SignedOut, Store, encode
 
 ROOT = Path(__file__).resolve().parent
@@ -130,6 +131,22 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def read_resource(self, path):
+        priority = re.fullmatch(
+            r"/api/rounds/residents/([A-Za-z0-9_-]{1,100})/priorities", path
+        )
+        if priority:
+            params = parse_qs(urlsplit(self.path).query, max_num_fields=1)
+            return self.send_json(
+                200,
+                round_priorities.read(
+                    self.store,
+                    self.token(),
+                    priority[1],
+                    params.get("reportId", [""])[0],
+                ),
+            )
+        if self.store.rounds.matches(path, False):
+            return self.send_json(200, self.store.rounds.read(self.token(), path))
         token = self.token()
         voice = re.fullmatch(r"/api/voice-proposals/([a-f0-9]{32})", path)
         if voice:
@@ -356,6 +373,21 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, image, mime)
 
     def write_resource(self, path):
+        priority = re.fullmatch(
+            r"/api/rounds/residents/([A-Za-z0-9_-]{1,100})/priorities", path
+        )
+        if priority:
+            return self.send_json(
+                200,
+                round_priorities.generate(
+                    self.store, self.token(), priority[1], self.read_json(SMALL_BODY)
+                ),
+            )
+        if self.store.rounds.matches(path, True):
+            return self.send_json(
+                200,
+                self.store.rounds.write(self.token(), path, self.read_json(SMALL_BODY)),
+            )
         undo = re.fullmatch(r"/api/history/([1-9][0-9]{0,17})/undo", path)
         if undo:
             body = self.read_json(SMALL_BODY)
@@ -473,7 +505,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.store.backups.retry(self.token(), body.get("comment", ""))
             return self.send_json(200, result)
         asr = re.fullmatch(r"/api/media/asr/([a-zA-Z0-9_-]{1,100})", path)
-        if asr:
+        agent_voice = path == "/api/agent/voice/transcriptions"
+        if asr or agent_voice:
             if not self.token():
                 raise SignedOut("请先登录")
             if self.headers.get_content_type() not in (
@@ -482,12 +515,22 @@ class Handler(BaseHTTPRequestHandler):
                 "application/octet-stream",
             ):
                 raise InvalidMedia("请上传 WAV 或 Ogg Opus 录音")
-            result = self.store.transcribe(
-                self.token(),
-                asr[1],
-                self.read_body(8 * 1024 * 1024),
-                self.headers.get("X-DeepSeek-Consent") == "yes",
-            )
+            raw = self.read_body(8 * 1024 * 1024)
+            consent = self.headers.get("X-DeepSeek-Consent") == "yes"
+            if agent_voice:
+                from platform_core.provider import speech
+
+                query = parse_qs(
+                    urlsplit(self.path).query, max_num_fields=4, keep_blank_values=True
+                )
+                if any(len(items) != 1 for items in query.values()):
+                    raise ValueError("区域参数不能重复")
+                region = {key: items[0] for key, items in query.items()} or None
+                result = speech.recognize_agent(
+                    self.store, self.token(), region, raw, consent
+                )
+            else:
+                result = self.store.transcribe(self.token(), asr[1], raw, consent)
             return self.send_json(200, result)
         if path == "/api/payments/checkout":
             body = self.read_json(512)
@@ -637,12 +680,14 @@ def main():
     handler = partial(Handler, store=store, public_origin=origin)
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
         store.backups.start()
+        store.rounds.start()
         print(f"安康医养平台已启动  http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
         finally:
+            store.rounds.stop()
             store.backups.stop()
 
 

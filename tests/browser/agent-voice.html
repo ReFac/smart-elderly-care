@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>Agent 语音栏浏览器回归</title>
+<body>
+<output id="result" role="status">运行中</output>
+<main></main>
+<script type="module">
+  import { voiceBar } from '../../web/features/agent-voice.js';
+  import { icon } from '../../web/lib/ui.js';
+
+  const output = document.querySelector('output');
+  const main = document.querySelector('main');
+  let approved = false;
+  let uploads = 0;
+  let account = 'fixture-staff';
+  let form, input, dock, send;
+  const area = { floorId: 'fixture-floor' };
+  const find = (label) => [...form.querySelectorAll('button')].find((b) => b.textContent === label);
+  const check = (value, reason) => { if (!value) throw new Error(reason); };
+  async function until(predicate, reason) {
+    const end = performance.now() + 5000;
+    while (!predicate() && performance.now() < end) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    check(predicate(), reason);
+  }
+
+  function render() {
+    form = document.createElement('form');
+    form.className = 'agent-voicebar';
+    input = document.createElement('textarea');
+    input.maxLength = 500;
+    send = document.createElement('button');
+    send.type = 'submit';
+    const ctx = {
+      state: {
+        user: { id: account }, uiSettings: { institutionName: '模拟机构' },
+        agentCapabilities: { voiceInput: { state: 'available', path: '/fixture/asr' } },
+      },
+      ui: { icon }, confirmChange: async () => approved,
+      async refreshWorkspace(origin) {
+        const same = origin.isConnected;
+        render();
+        return same;
+      },
+    };
+    dock = voiceBar(ctx, form, input, send, area, { read: () => ({}), restore() {} });
+    main.replaceChildren(form);
+  }
+
+  function chooseAudio() {
+    const file = form.querySelector('input[type=file]');
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array([0, 1])], 'synthetic.wav', { type: 'audio/wav' }));
+    file.files = transfer.files;
+    file.dispatchEvent(new Event('change'));
+    check(form.dataset.phase === 'ready', '选择录音后应允许重录或确认转写');
+  }
+
+  async function run() {
+    window.fetch = async (url, options) => {
+      check(url === '/fixture/asr?floorId=fixture-floor', '保留选定区域');
+      check(options.method === 'POST' && options.headers['X-DeepSeek-Consent'] === 'yes', '逐次付费授权');
+      check(options.body instanceof Blob, '提交原始音频');
+      uploads++;
+      return new Response(JSON.stringify({ text: '检查当班照护工单', transcriptId: 'synthetic' }));
+    };
+    render();
+    check(form.dataset.phase === 'voice' && !dock.canSend(), '语音优先');
+    find('键盘输入').click();
+    check(form.dataset.phase === 'text' && send.disabled, '空任务不能提交');
+    dock.write('输入的任务');
+    check(dock.canSend(), '手工编辑可提交');
+    find('语音输入').click();
+    chooseAudio();
+    find('取消录音').click();
+    check(input.value === '输入的任务', '取消录音应保留文字');
+    find('语音输入').click();
+    chooseAudio();
+    find('确认转写').click();
+    await until(() => form.dataset.phase === 'ready', '取消确认后应恢复可操作状态');
+    check(uploads === 0 && form.dataset.phase === 'ready', '取消授权不可上传录音');
+    approved = true;
+    find('确认转写').click();
+    await until(() => form.dataset.phase === 'text', '等待转写草稿回填');
+    check(uploads === 1 && input.value === '输入的任务\n检查当班照护工单', '刷新后还原可编辑转写');
+    check(dock.receipt() === 'synthetic' && dock.canSend(), '回执与待发送草稿关联');
+    input.value = '甲'.repeat(501);
+    input.dispatchEvent(new Event('input'));
+    check(!dock.canSend(), '超长转写需要核对和精简');
+    find('语音输入').click();
+    chooseAudio();
+    account = 'another-account';
+    find('确认转写').click();
+    await until(() => form.dataset.phase === 'voice', '等待新账号的工作台');
+    check(form.dataset.phase === 'voice' && !input.value && !dock.receipt(), '切换账号期间不应展示此前转写');
+    output.textContent = 'PASS';
+    document.documentElement.dataset.result = 'pass';
+  }
+  run().catch((error) => {
+    output.textContent = error.message;
+    document.documentElement.dataset.result = 'fail';
+  });
+</script>
+</body>
+</html>

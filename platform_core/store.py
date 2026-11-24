@@ -10,7 +10,7 @@ from .room_context import room_context, validate_proposal
 from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, storage_assets
 from .bootstrap import empty_workspace
-from . import backups, history
+from . import backups, history, rounds
 from .access_policy import can_record_scale
 from . import (
     access,
@@ -19,6 +19,7 @@ from . import (
     campus_access,
     care,
     dossier,
+    rounds_family,
     facility,
     gateways,
     handovers,
@@ -88,6 +89,7 @@ class Store:
             if version < 4:
                 access.migrate_branding(db)
             dossier.init(db)
+            rounds_family.init(db)
             gateways.init(db)
             agents.init(db)
             provider.init(db)
@@ -100,9 +102,11 @@ class Store:
                 db.execute("UPDATE workspace SET data=? WHERE id=1", (encode(data),))
             facility.init(db, data)
             backups.init(db)
+            rounds.init(db, self.now())
             history.prune(db, self.now())
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         self.backups = backups.BackupService(self)
+        self.rounds = rounds.RoundService(self)
 
     def actor(self, db, token):
         actor = viewer(db, token)
@@ -183,7 +187,17 @@ class Store:
                 family_permissions.extend(
                     {"id": k, "label": SCOPES[k]} for k in user["portalScopes"]
                 )
-                if not user.get("portalSelf"):
+                if user.get("portalSelf"):
+                    family_permissions.append(
+                        {"id": "family.consent", "label": "管理本人巡查简报的分享授权"}
+                    )
+                else:
+                    family_permissions.append(
+                        {
+                            "id": "family.subscribe",
+                            "label": "管理本账号简报订阅与收件箱",
+                        }
+                    )
                     family_permissions.append(
                         {"id": "dossier.relative", "label": "维护本人的亲属资料"}
                     )
@@ -209,7 +223,14 @@ class Store:
                     and agents.region_visible(db, user, item["runId"])
                 ]
             dossier.project(db, data, user, today)
+            rounds_family.project(db, data, user)
             beds = campus_access.allowed_beds(db, user, include_rooms=True)
+            if user["kind"] in ("owner", "staff") and any(
+                access.has(user, grant) for grant in ("care", "clinical")
+            ):
+                data["roundsNoticeCount"] = rounds.inbox_query(
+                    db, state, beds, access.has(user, "clinical"), today
+                ).fetchone()[0]
             people = (
                 campus_access.resident_ids(state, beds) if beds is not None else None
             )
@@ -461,6 +482,10 @@ class Store:
     def agent_capabilities(self, db, user):
         result = agents.capabilities(user)
         result["plan"] = provider.status(db, user, self.now())
+        if access.has(user, "voice") and agents.specialists(user):
+            from .provider import speech
+
+            result["voiceInput"] = speech.agent_capability(db, self.now())
         if "rooms" in user["routes"]:
             result["facilityTools"] = [
                 {
@@ -695,6 +720,8 @@ class Store:
                     )
                 elif action == "account.changePassword":
                     summary = access.change_own_password(db, user, payload)
+                elif domain == "family":
+                    summary = rounds_family.apply(db, data, action, payload, user, now)
                 elif action == "portal.feedback":
                     from . import portal
 
@@ -737,4 +764,11 @@ class Store:
                 previous,
                 comment=comment,
             )
-            return {"revision": new_revision, "summary": summary, "affected": affected}
+            result = {
+                "revision": new_revision,
+                "summary": summary,
+                "affected": affected,
+            }
+            if action == "agent.start":
+                result["runId"] = run_id
+            return result

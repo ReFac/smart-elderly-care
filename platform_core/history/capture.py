@@ -9,9 +9,24 @@ WINDOW = RETENTION_DAYS * 86400
 PREFIXES = {
     "facility": ("facility_",),
     "dossier": ("dossier_",),
-    "access": ("accounts", "institution_settings", "media_policy"),
+    "access": (
+        "accounts",
+        "institution_settings",
+        "media_policy",
+        "family_round_preferences",
+    ),
+    "family": ("family_round_",),
     "account": ("accounts",),
     "agent": ("agent_",),
+    "rounds": (
+        "rounds_policy",
+        "rounds_modes",
+        "rounds_observations",
+        "rounds_reports",
+        "rounds_staff_inbox",
+        "rounds_priorities",
+        "family_round_messages",
+    ),
     "gw": ("gateway_",),
     "backup": ("backup_",),
     "platform": ("api_", "media_"),
@@ -178,7 +193,9 @@ def collect(db, current, previous):
     people = {s.get("residentId") for s in (current, previous)} - {None, ""}
     rooms = {s.get("roomId") for s in (current, previous)} - {None, ""}
     changes = []
-    campuses = set()
+    campuses = {s.get("campusId") for s in (current, previous)} - {None, ""}
+    for scope in (current, previous):
+        rooms.update(scope.get("roomIds", ()))
     captured = db.execute(
         "SELECT 1 FROM sqlite_temp_master WHERE name='history_capture'"
     ).fetchone()

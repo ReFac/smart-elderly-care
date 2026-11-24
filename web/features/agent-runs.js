@@ -1,8 +1,13 @@
+import { voiceBar } from './agent-voice.js';
 import { commentInput } from '../lib/change-review.js';
 import { node, table, named, badge, btn, link, choose } from './shared.js';
 import { showHandover } from './handovers.js';
 
-const statuses = { awaiting_approval: '待确认', published: '已发布', cancelled: '已取消' };
+const statuses = {
+  awaiting_approval: '待确认',
+  published: '已发布',
+  cancelled: '已取消',
+};
 const names = {
   coordinator: '协调 Agent',
   care: '照护 Agent',
@@ -22,7 +27,11 @@ const events = {
   'run.published': '人工发布',
   'run.cancelled': '人工取消',
 };
-const example = { care: '核对当班照护工单', inventory: '检查耗材补货', finance: '复核欠费账单' };
+const example = {
+  care: '核对当班照护工单',
+  inventory: '检查耗材补货',
+  finance: '复核欠费账单',
+};
 const statusBadge = (ctx, status) =>
   badge(
     ctx,
@@ -31,27 +40,26 @@ const statusBadge = (ctx, status) =>
   );
 
 function composer(ctx, tools) {
-  const form = node('form', 'agent-compose');
+  const form = node('form', 'agent-compose agent-voicebar');
+  const settings = node('section', 'agent-options');
   const input = node('textarea', 'agent-goal');
   input.name = 'goal';
   input.maxLength = 500;
   input.required = true;
   input.rows = 2;
   input.placeholder = '例如：整理本班交接，核对照护工单、耗材库存和欠费账单';
-  const title = node('label', 'agent-prompt-label', [
+  const title = node('h2', 'agent-prompt-label', [
     ctx.ui.icon('spark', 21),
-    node('strong', '', '给协调 Agent 布置任务'),
+    node('strong', '', '今天要处理什么？'),
   ]);
-  title.htmlFor = 'agent-goal';
+  input.setAttribute('aria-label', '给 Agent 的任务');
   input.id = 'agent-goal';
   const examples = node('div', 'agent-examples');
   function addExample(agent, goal) {
     const b = node('button', 'agent-example', [ctx.ui.icon(icons[agent], 14), goal]);
     b.type = 'button';
     b.addEventListener('click', () => {
-      input.value = goal;
-      requestId = undefined;
-      input.focus();
+      dock.write(goal);
     });
     examples.append(b);
   }
@@ -71,6 +79,7 @@ function composer(ctx, tools) {
   for (const t of tools) scope.add(new Option(names[t.agent], t.agent));
   const resident = node('select', 'fx-input');
   resident.setAttribute('aria-label', '照护对象');
+  let wantedResident = '';
   const canChooseResident =
     tools.some((t) => t.agent === 'care') && (!ctx.agentRegion || ctx.agentRegion.roomId);
   resident.add(new Option(ctx.agentRegion ? '本区全部长者' : '全院照护', ''));
@@ -80,6 +89,7 @@ function composer(ctx, tools) {
       .then((room) => {
         for (const bed of room.beds.filter((b) => b.residentId))
           resident.add(new Option(bed.residentName + ' · ' + bed.residentId, bed.residentId));
+        if (wantedResident) resident.value = wantedResident;
       })
       .catch((error) => ctx.toast(error.message));
   } else if (canChooseResident) {
@@ -90,25 +100,48 @@ function composer(ctx, tools) {
     resident.hidden = !canChooseResident || !['auto', 'care'].includes(scope.value);
     if (resident.hidden) resident.value = '';
   });
-  const start = node('button', 'btn btn-primary', [ctx.ui.icon('spark', 16), '开始协作']);
+  const start = node('button', 'btn btn-primary', [ctx.ui.icon('send', 18), '发送']);
   start.type = 'submit';
   const plan = ctx.state.agentCapabilities.plan;
   const mode = node('select', 'fx-input');
   mode.setAttribute('aria-label', '规划方式');
   mode.add(new Option('本地 · 节省额度', 'local'));
   if (plan?.available) mode.add(new Option('平台 AI · 按用量', 'platform'));
-  const controls = node('div', 'agent-controls', [scope, resident, mode, start]);
+  const controls = node('div', 'agent-controls', [scope, resident, mode]);
+  const selectedRegion = Object.fromEntries(
+    Object.entries(ctx.agentRegion || {}).filter(([key]) => key !== 'label'),
+  );
+  const dock = voiceBar(ctx, form, input, start, selectedRegion, {
+    read: () => ({
+      scope: scope.value,
+      resident: resident.value,
+      mode: mode.value,
+    }),
+    restore(saved) {
+      scope.value = saved.scope;
+      scope.dispatchEvent(new Event('change'));
+      mode.value = saved.mode;
+      if (!resident.hidden) {
+        wantedResident = saved.resident;
+        if (wantedResident) resident.value = wantedResident;
+      }
+    },
+  });
   let requestId;
   const freshId = () =>
     Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
       b.toString(16).padStart(2, '0'),
     ).join('');
+  settings.addEventListener('change', () => {
+    requestId = undefined;
+    form.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   form.addEventListener('input', () => {
     requestId = undefined;
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (start.disabled) return;
+    if (start.disabled || !dock.canSend()) return;
     if (!input.value.trim()) {
       input.focus();
       return;
@@ -116,20 +149,34 @@ function composer(ctx, tools) {
     requestId ||= freshId();
     start.disabled = true;
     try {
-      await ctx.command('agent.start', {
-        goal: input.value.trim(),
-        requestId,
-        scope: scope.value,
-        planning: mode.value,
-        residentId: resident.value,
-        ...(ctx.agentRegion
-          ? {
-              region: Object.fromEntries(
-                Object.entries(ctx.agentRegion).filter(([key]) => key !== 'label'),
-              ),
-            }
-          : {}),
-      });
+      const result = await ctx.command(
+        'agent.start',
+        {
+          goal: input.value.trim(),
+          requestId,
+          scope: scope.value,
+          planning: mode.value,
+          residentId: resident.value,
+          ...(ctx.agentRegion ? { region: selectedRegion } : {}),
+          ...(dock.receipt() ? { voiceTranscriptId: dock.receipt() } : {}),
+        },
+        {
+          title: '确认发送给协调 Agent',
+          target: ctx.agentRegion?.label || ctx.state.uiSettings.institutionName,
+          fields: [
+            ['任务', input.value.trim()],
+            ['委派', scope.selectedOptions[0].textContent],
+            ...(resident.value ? [['长者', resident.selectedOptions[0].textContent]] : []),
+            ['规划', mode.selectedOptions[0].textContent],
+            ['结果', '生成可核对的任务简报；发布建议须另行确认。'],
+          ],
+          confirmLabel: '发送并生成简报',
+          returnResult: true,
+        },
+      );
+      if (result?.runId && document.querySelector('.agent-voicebar')) {
+        await showRun(ctx, { id: result.runId });
+      }
     } finally {
       start.disabled = false;
     }
@@ -148,8 +195,8 @@ function composer(ctx, tools) {
       ),
     );
   if (ctx.hasSelectedRegion) region.append(ctx.ui.button('清除区域', ctx.clearAgentRegion, 'text'));
-  form.append(title, region, input, examples, controls);
-  return form;
+  settings.append(title, region, examples, controls);
+  return { settings, form };
 }
 
 function teamPanel(ctx, tools) {
@@ -328,7 +375,12 @@ function roomTasks(ctx, roomId) {
               ],
               submitLabel: '提交人工确认',
               onSubmit: (v) =>
-                ctx.proposeRoom({ roomId, taskId: target.id, note: v.note, requestId }),
+                ctx.proposeRoom({
+                  roomId,
+                  taskId: target.id,
+                  note: v.note,
+                  requestId,
+                }),
             });
           },
           'text',
@@ -355,22 +407,63 @@ function roomTasks(ctx, roomId) {
   return details;
 }
 
+function lastConversation(ctx, run) {
+  const reply = node('div', 'agent-chat-reply', [node('small', '', '协调 Agent')]);
+  const body = node('p', '', '正在读取上次协作的简报…');
+  const open = link(ctx, '查看完整简报', () => showRun(ctx, run));
+  reply.append(body, open);
+  const panel = node('section', 'agent-conversation', [
+    node('div', 'agent-chat-heading', [
+      node('h2', '', '最近一次对话'),
+      statusBadge(ctx, run.status),
+    ]),
+    node('div', 'agent-chat-question', [
+      node('small', '', run.actorName + ' · ' + run.started.slice(0, 16).replace('T', ' ')),
+      node('p', '', run.goal),
+    ]),
+    reply,
+  ]);
+  ctx.get('/api/agent/runs/' + run.id).then(
+    (answer) => {
+      if (!panel.isConnected) return;
+      body.textContent = answer.artifacts.map((a) => a.detail).join('\n') || '本次协作已结束。';
+    },
+    (error) => {
+      if (panel.isConnected) body.textContent = error.message;
+    },
+  );
+  return panel;
+}
+
 export function agentDesk(ctx) {
   const tools = (ctx.state.agentCapabilities?.tools || []).filter(
     (t) => !ctx.agentRegion || t.agent !== 'inventory',
   );
-  const runs = ctx.state.agentRuns || [];
-  const home = node('div', 'agent-home', [composer(ctx, tools), teamPanel(ctx, tools)]);
+  const regionKeys = Object.entries(ctx.agentRegion || {}).filter(([k]) => k !== 'label');
+  const runs = (ctx.state.agentRuns || []).filter((r) =>
+    regionKeys.every(([key, value]) => r.region?.[key] === value),
+  );
+  const { settings, form } = composer(ctx, tools);
+  const home = node('div', 'agent-home', [settings, teamPanel(ctx, tools)]);
   const list = table(ctx, {
     title: '协作任务',
     rows: runs,
-    search: { placeholder: '搜索任务目标或发起人', value: (r) => r.goal + ' ' + r.actorName },
+    search: {
+      placeholder: '搜索任务目标或发起人',
+      value: (r) => r.goal + ' ' + r.actorName,
+    },
     filter: { value: (r) => statuses[r.status] },
     empty: '暂无协作任务。输入任务目标即可生成第一份待确认简报。',
     cols: [
-      { label: '任务目标', view: (r) => named(r.goal, r.agents.map((a) => names[a]).join('、')) },
+      {
+        label: '任务目标',
+        view: (r) => named(r.goal, r.agents.map((a) => names[a]).join('、')),
+      },
       { label: '发起人', view: (r) => r.actorName },
-      { label: '发起时间', view: (r) => r.started.slice(0, 16).replace('T', ' ') },
+      {
+        label: '发起时间',
+        view: (r) => r.started.slice(0, 16).replace('T', ' '),
+      },
       { label: '状态', view: (r) => statusBadge(ctx, r.status) },
       {
         label: '操作',
@@ -386,5 +479,17 @@ export function agentDesk(ctx) {
     ctx.agentRegion?.roomId && ctx.state.allowedActions.includes('gw.propose')
       ? roomTasks(ctx, ctx.agentRegion.roomId)
       : null;
-  return node('div', 'agent-desk', [home, targets, list]);
+  const history = runs.length
+    ? node('details', 'agent-target-list', [
+        node('summary', '', '协作历史（' + runs.length + '）'),
+        list,
+      ])
+    : list;
+  return node('div', 'agent-desk', [
+    home,
+    targets,
+    runs.length ? lastConversation(ctx, runs[0]) : null,
+    history,
+    form,
+  ]);
 }

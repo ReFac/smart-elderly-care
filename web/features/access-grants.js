@@ -3,7 +3,7 @@ import { btn, node } from './shared.js';
 
 const grantGroups = [
   ['入住与照护', ['residents', 'intake', 'care', 'clinical', 'clinical.rules']],
-  ['医疗档案与亲属', ['medical', 'medical.write', 'relatives']],
+  ['医疗档案与亲属', ['medical', 'medical.write', 'relatives', 'family.share']],
   ['机构运营', ['inventory', 'finance', 'shifts', 'reports']],
   ['智能协作与设备', ['assistants', 'gateway.simulate', 'alerts', 'voice', 'voice.confirm']],
   ['人员与审计', ['staff.manage', 'audit']],
@@ -110,6 +110,7 @@ const commands = {
     },
   ],
   account: ['个人账号', { changePassword: '修改本人密码' }],
+  family: ['巡查简报', { consent: '登记长者分享意愿', subscribe: '本人订阅站内简报', read: '签收本人简报' }],
   portal: ['长者与家属服务', { feedback: '评价已完成的服务' }],
 };
 
@@ -136,6 +137,10 @@ export function grantPicker(options, current) {
     element.append(group);
   }
   element.addEventListener('change', ({ target }) => {
+    if (target.value === 'family.share' && target.checked && boxes.has('relatives'))
+      boxes.get('relatives').checked = true;
+    if (target.value === 'relatives' && !target.checked && boxes.has('family.share'))
+      boxes.get('family.share').checked = false;
     if (target.value === 'medical.write' && target.checked && boxes.has('medical'))
       boxes.get('medical').checked = true;
     if (target.value === 'medical' && !target.checked && boxes.has('medical.write'))

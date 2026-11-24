@@ -1,6 +1,7 @@
-"""Validate the paid speech tool's two encodings and bind a transcript to one care task."""
+"""Validate the paid speech tool's two encodings and bind transcripts to their authorized care task or Agent region."""
 
 from contextlib import closing
+from hashlib import sha256
 import io
 import json
 import wave
@@ -131,6 +132,124 @@ def recognize(store, token, task_id, raw, consent):
 
     with closing(store.connect()) as db:
         authorize(db, token)
+    return transcribe(store, token, task_id, raw, authorize)
+
+
+def agent_capability(db, now):
+    from . import configured, latest, local_time
+
+    plan = latest(db)
+    today = local_time(now).date().isoformat()
+    status = "available"
+    if (
+        not plan
+        or not plan["enabled"]
+        or not plan["startsOn"] <= today <= plan["expiresOn"]
+    ):
+        status = "inactive"
+    elif not db.execute("SELECT asr FROM media_policy WHERE id=1").fetchone()[0]:
+        status = "disabled"
+    else:
+        allowance = media.amounts(db, plan["id"], "asr")
+        if allowance["used"] + allowance["held"] >= allowance["limit"]:
+            status = "exhausted"
+        elif not configured():
+            status = "unconfigured"
+    return {
+        "path": "/api/agent/voice/transcriptions",
+        "method": "POST",
+        "regionFields": ["campusId", "buildingId", "floorId", "roomId"],
+        "state": status,
+        "maxSeconds": 120,
+        "requiresConsent": True,
+    }
+
+
+def agent_context(db, user, selected):
+    from .. import agents
+    from ..agents import region
+
+    if user["kind"] not in ("owner", "staff"):
+        raise PermissionError("仅在岗工作人员可使用 Agent 工作台")
+    access.require(user, "assistants")
+    access.require(user, "voice")
+    area = region.resolve(db, region.EMPTY_STATE, user, selected)
+    domains = [
+        s.key
+        for s in agents.specialists(user)
+        if not area or s.key in ("care", "finance")
+    ]
+    if not domains:
+        raise PermissionError("此岗位在所选区域没有可用的专员")
+    rooms = area["roomIds"] if area else []
+    # Different effective room or specialist permissions cannot replay an old transcript.
+    identity = json.dumps(
+        [selected, domains, rooms], sort_keys=True, separators=(",", ":")
+    )
+    return "agent:" + ",".join(domains) + ":" + sha256(
+        identity.encode()
+    ).hexdigest(), area
+
+
+def can_read_agent_history(db, user, revision):
+    from .. import agents
+
+    if not access.has(user, "voice"):
+        return False
+    row = db.execute(
+        """SELECT m.reference FROM history_targets t JOIN media_usage m ON m.id=t.entity
+        WHERE t.kind='entity/media_usage' AND t.revision=? AND m.actor=?""",
+        (revision, user["id"]),
+    ).fetchone()
+    if not row:
+        return False
+    parts = row[0].split(":")
+    return (
+        len(parts) == 3
+        and parts[0] == "agent"
+        and set(parts[1].split(",")) <= {s.key for s in agents.specialists(user)}
+    )
+
+
+def recognize_agent(store, token, selected, raw, consent):
+    from ..agents import region
+
+    if consent is not True:
+        raise ValueError("请确认提交这段录音给 DeepSeek 转写")
+    selected = region.selection(selected) if selected is not None else None
+    with closing(store.connect()) as db:
+        reference, area = agent_context(db, store.actor(db, token), selected)
+    audit_scope = {}
+    if area:
+        audit_scope = {"roomIds": area["roomIds"], "campusId": area["campusId"]}
+        if area.get("roomId"):
+            audit_scope["room"] = area["label"]
+
+    def authorize(db, session):
+        user = store.actor(db, session)
+        current, _ = agent_context(db, user, selected)
+        if current != reference:
+            raise PermissionError("工作区域或专员权限已发生变化，请重新核对")
+        return user
+
+    return transcribe(store, token, reference, raw, authorize, audit_scope)
+
+
+def require_agent_receipt(db, user, selected, receipt):
+    reference, _ = agent_context(db, user, selected)
+    if (
+        not isinstance(receipt, str)
+        or len(receipt) != 32
+        or not db.execute(
+            """SELECT 1 FROM media_usage WHERE id=? AND actor=? AND reference=?
+             AND kind='asr' AND state='complete'""",
+            (receipt, user["id"], reference),
+        ).fetchone()
+    ):
+        raise ValueError("语音回执与经办人或工作区域不匹配")
+
+
+def transcribe(store, token, reference, raw, authorize, audit_scope=None):
     filename, mime, seconds, upload = audio_spec(raw)
 
     def parse(obj):
@@ -159,8 +278,9 @@ def recognize(store, token, task_id, raw, consent):
         mime,
         authorize,
         parse,
-        reference=task_id,
+        reference=reference,
         upload=upload,
+        audit_scope=audit_scope,
     )
     if not result["text"]:
         raise ValueError("DeepSeek 未识别到可用语音，请重新录制或手工录入")

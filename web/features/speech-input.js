@@ -29,7 +29,7 @@ function pcmWave(samples, count, rate) {
 }
 
 // Capture linear PCM at a supported sample rate. Chromium normally records WebM in MediaRecorder.
-async function capture(onReady, onStatus, stillOpen) {
+export async function capture(onReady, onStatus, stillOpen) {
   if (!navigator.mediaDevices?.getUserMedia)
     throw new Error('麦克风需要安全连接，可以选择已有录音。');
   const stream = await navigator.mediaDevices.getUserMedia({

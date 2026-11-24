@@ -161,6 +161,11 @@ def preflight(db, state, user, payload):
         raise ValueError("任务范围或规划模式无效")
     selected = region.selection(payload["region"]) if "region" in payload else None
     args = dict(goal=goal, residentId=resident, scope=scope)
+    if "voiceTranscriptId" in payload:
+        from ..provider.speech import require_agent_receipt
+
+        require_agent_receipt(db, user, selected, payload["voiceTranscriptId"])
+        args["voiceTranscriptId"] = payload["voiceTranscriptId"]
     if mode == "platform":
         args["planning"] = mode
     if selected:

@@ -1,5 +1,6 @@
 import { commentInput } from '../lib/change-review.js';
 import { voiceProposal } from './speech-input.js';
+import { roundsInbox } from './rounds-desk.js';
 import {
   node,
   page,
@@ -381,6 +382,10 @@ function inbox(ctx) {
     metadata.voice = ['care', '待授权护工确认', ctx.state.voiceQueue.length];
     views.push(['voice', '待确认语音', () => queuePanel(ctx, false)]);
   }
+  if (has(ctx, 'care') || has(ctx, 'clinical')) {
+    metadata.rounds = ['care', '待核对的照护事项', null];
+    views.push(['rounds', '巡查提醒', () => roundsInbox(ctx)]);
+  }
   let queue;
   if (views.length) {
     queue = tabs('inbox', views);
@@ -391,9 +396,9 @@ function inbox(ctx) {
       tab.replaceChildren(
         mark(ctx, ic),
         node('span', 'gw-tab-text', [node('strong', '', label), node('small', '', hint)]),
-        node('b', 'gw-tab-count', count),
+        ...(count === null ? [] : [node('b', 'gw-tab-count', count)]),
       );
-      tab.setAttribute('aria-label', label + '，' + hint + count + '条');
+      tab.setAttribute('aria-label', label + '，' + hint + (count === null ? '' : count + '条'));
     }
   } else queue = ctx.ui.empty('可以通过上方按钮登记设备观测或提交语音变更申请。');
   return page(ctx, '预警与人工确认', '', actions, queue);

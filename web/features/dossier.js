@@ -1,3 +1,6 @@
+import { residentInsights } from './resident-insights.js';
+import { contactBook } from './family-contacts.js';
+import { familyInbox, familyRecipients } from './family-rounds.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import { previewSummary } from './dossier-summary.js';
 import { pendingDocument, recognizeDocument, reviewReceipt } from './document-ocr.js';
@@ -251,9 +254,15 @@ function myFamily(ctx) {
           empty: '暂无已复核的医嘱。'
         })
     ]);
+  if (ctx.state.familyRoundInbox) {
+    const unread = ctx.state.familyRoundInbox.messages.filter((m) => !m.readAt).length;
+    panels.push(['briefs', unread ? '巡查简报 · ' + unread + ' 未读' : '巡查简报', () => familyInbox(ctx, resident)]);
+  }
+  if (me.portalSelf && ctx.state.familyRoundRecipients)
+    panels.push(['sharing', '分享授权', () => familyRecipients(ctx, resident)]);
   if (!me.portalSelf) panels.push(['relative', '我的亲属资料', () => body]);
   const content =
-    me.portalScopes.length && panels.length > 1
+    panels.length > 1
       ? tabs('family', panels)
       : panels.length
         ? panels.map(([, , render]) => render())
@@ -663,6 +672,9 @@ export function openDossier(ctx, resident) {
         )
       );
   }
+  if (allowed(ctx, 'relatives')) contents.append(contactBook(ctx, resident, profile));
+  if (ctx.state.familyRoundRecipients) contents.append(familyRecipients(ctx, resident));
+  if (allowed(ctx, 'care') || allowed(ctx, 'clinical')) contents.prepend(residentInsights(ctx, resident.id));
   if (!side.childElementCount) side.remove();
   if (!contents.childElementCount) contents.remove();
   ctx.detail('长者详细档案', body);

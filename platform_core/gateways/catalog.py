@@ -494,7 +494,7 @@ _CAPABILITIES = [
         MODEL,
         "语音输入与流式转写",
         [],
-        "流式分片及中间文本接口预留。护理工作台已接入 DeepSeek 整段转写（POST /api/media/asr/{taskId}）。",
+        "流式分片及中间文本接口预留。DeepSeek 整段转写已连接 Agent 工作台（POST /api/agent/voice/transcriptions）及护理工单（POST /api/media/asr/{taskId}）。",
         obj(
             {"requestId": ID, "audioRef": ID, "locale": TEXT},
             {"sequence": INT, "isFinal": BOOL},

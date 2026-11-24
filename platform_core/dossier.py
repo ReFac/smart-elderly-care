@@ -11,7 +11,7 @@ import zlib
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from . import access, document_ocr
+from . import access, document_ocr, family_contacts
 from .dossier_summary import sign_summary, summary_draft as summary_draft
 from .care.clinical import refresh_medication_warnings
 from .care.records import append_record, lookup
@@ -130,6 +130,9 @@ def edit_profile(db, state, p, user, today):
     if set(p) & HOUSEHOLD.keys():
         access.require(user, "relatives")
         household.update({k: text(p, k, v) for k, v in HOUSEHOLD.items() if k in p})
+    if "familyContact" in p:
+        access.require(user, "relatives")
+        family_contacts.update(household, p["familyContact"], today)
     age = p.get("age", resident.get("age"))
     if basic.get("birthDate"):
         age = years_old(

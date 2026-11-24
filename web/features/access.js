@@ -1,4 +1,5 @@
 import { backupPanel } from './backups.js';
+import { roundsSettings } from './rounds-desk.js';
 import { icon } from '../lib/ui.js';
 import { node, page, table, choose, btn, link, badge, named, section, facts, tabs } from './shared.js';
 import { routes } from '../lib/navigation.js';
@@ -618,6 +619,7 @@ function settings(ctx) {
     null,
     tabs('settings', [
       ['general', '界面与 AI 套餐', () => node('div', 'access-settings-grid', [appearance, deep])],
+      ['rounds', 'Agent 巡查', () => roundsSettings(ctx)],
       ['backups', '备份与恢复', () => backupPanel(ctx)],
     ]),
   );

@@ -1,3 +1,4 @@
+import { residentInsights } from './resident-insights.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import {
   hasGrant,
@@ -202,6 +203,7 @@ export function profile(ctx, row) {
   };
   const summary = node('div', 'fx-profile fx-admission-profile');
   summary.append(recordIdentity(ctx, row, row.level));
+  if (hasGrant(ctx, 'care', 'clinical')) summary.append(residentInsights(ctx, row.id));
   add(
     summary,
     facts([

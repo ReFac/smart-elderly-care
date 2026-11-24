@@ -116,6 +116,9 @@ function applySnapshot(snapshot) {
   const pending = (state.gatewayAlerts || []).filter(
     (r) => r.status === '待复核' && !seenAlerts.has(r.id),
   );
+  const familyMessage = state.familyRoundInbox?.messages.find((m) => m.day === state.today && !m.readAt);
+  const roundsId = familyMessage ? 'family-round:' + familyMessage.id :
+    state.roundsNoticeCount && available('inbox') ? 'staff-round:' + state.today + ':' + state.roundsNoticeCount : '';
   if (pending.length && permitted('alerts')) {
     pending.forEach((r) => seenAlerts.add(r.id));
     try {
@@ -126,6 +129,12 @@ function applySnapshot(snapshot) {
         ? '待核实预警 · ' + pending[0].room
         : '有 ' + pending.length + ' 条新设备预警待核实',
     );
+  } else if (roundsId && !seenAlerts.has(roundsId)) {
+    seenAlerts.add(roundsId);
+    try {
+      sessionStorage.setItem(bucket, JSON.stringify([...seenAlerts].slice(-500)));
+    } catch {}
+    toast(familyMessage ? '今日照护简报已送达，可在家属服务中查看。' : '有 ' + state.roundsNoticeCount + ' 位长者的巡查事项待跟进，请查看右上角铃铛。');
   }
 }
 
@@ -262,7 +271,7 @@ async function submitChange({ action, url, payload, review = {} }) {
     const target = document.querySelector('.change-focus');
     if (target) target.scrollIntoView({ block: 'nearest' });
     focusIds = [];
-    return true;
+    return review.returnResult ? result : true;
   } catch (error) {
     toast(error.message || '连接失败，请刷新后核对记录。');
     return false;
@@ -285,8 +294,11 @@ function context() {
     undoRevision,
     confirmChange,
     focusIds,
-    async refreshWorkspace() {
-      if (await readState()) render();
+    async refreshWorkspace(origin) {
+      if (!(await readState())) return false;
+      const stillHere = !origin || origin.isConnected;
+      render();
+      return stillHere;
     },
     available,
     agentRegion: agentRegion || (campus ? { campusId: campus.id, label: campus.name } : null),
@@ -328,6 +340,10 @@ function moduleLink([id, label, iconName]) {
   link.href = '#' + id;
   if (active) link.setAttribute('aria-current', 'page');
   link.append(icon(iconName, 18), el('span', '', label));
+  if (id === 'family') {
+    const unread = state.familyRoundInbox?.messages.filter((m) => !m.readAt).length;
+    if (unread) link.append(el('small', 'family-unread', unread + ' 未读'));
+  }
   if (active) link.append(icon('chevron', 13));
   link.addEventListener('click', closeMenu);
   return link;
@@ -481,6 +497,8 @@ function notices() {
   if (permitted('care'))
     items.unshift(['待我签收的交班', myPendingHandovers().length, 'care', 'handover']);
   if (available('inbox')) {
+    if (state.roundsNoticeCount)
+      items.unshift(['今日巡查提醒', state.roundsNoticeCount, 'inbox', 'rounds']);
     if (permitted('alerts'))
       items.unshift([
         '待核实设备预警',
@@ -590,6 +608,7 @@ function masthead() {
     const bell = button('', notices, 'icon', 'bell');
     bell.setAttribute('aria-label', '待处理事项');
     if (
+      (available('inbox') && state.roundsNoticeCount > 0) ||
       (available('care') && myPendingHandovers().length) ||
       (state.gatewayAlerts || []).some((r) => r.status === '待复核') ||
       (state.voiceQueue || []).length ||
@@ -740,7 +759,19 @@ async function refresh() {
       return;
     const snapshot = await get('/api/state');
     if (current !== epoch || saving || version !== revision) return;
+    const inbox = snapshot.data.familyRoundInbox;
+    const lostFamilyAccess = state.familyRoundInbox?.messages.some(
+      (message) => !inbox?.messages.some((m) => m.id === message.id),
+    );
+    const movedResident = [...document.querySelectorAll('[data-rounds-resident-id]')].some((el) => {
+      const id = el.dataset.roundsResidentId;
+      const before = state.residents.find((r) => r.id === id);
+      const after = snapshot.data.residents.find((r) => r.id === id);
+      return before && (!after || before.bedId !== after.bedId || before.status !== after.status);
+    });
     const changedUser =
+      movedResident ||
+      lostFamilyAccess ||
       JSON.stringify(state.user) !== JSON.stringify(snapshot.data.user) ||
       JSON.stringify(state.uiSettings.hiddenRoutes) !==
         JSON.stringify(snapshot.data.uiSettings.hiddenRoutes);

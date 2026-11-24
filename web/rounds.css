@@ -1,0 +1,165 @@
+.rounds-card {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--gold);
+  border-radius: 12px;
+  background: white;
+  color: var(--ink);
+  min-width: 0;
+}
+.rounds-card h2,
+.rounds-card h3,
+.rounds-card h4 {
+  margin: 0;
+}
+.rounds-card h2,
+.rounds-card h3 {
+  font-size: 18px;
+}
+.rounds-card h4 {
+  font-size: 14px;
+}
+.rounds-heading,
+.rounds-day,
+.rounds-inbox-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.rounds-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rounds-identity > svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.rounds-day time,
+.rounds-schedule small {
+  font-size: 13px;
+  color: var(--muted);
+}
+.rounds-counts,
+.rounds-schedule {
+  margin: 0;
+  padding: 12px 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--paper);
+  border-radius: 8px;
+}
+.rounds-counts > div,
+.rounds-schedule > div {
+  padding: 0 12px;
+  border-inline-start: 1px solid var(--line);
+}
+.rounds-counts > div:first-child,
+.rounds-schedule > div:first-child {
+  border: 0;
+}
+.rounds-counts dt {
+  font-size: 13px;
+  color: var(--muted);
+}
+.rounds-counts dd {
+  margin: 0;
+  font-size: 23px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.rounds-overdue dd {
+  color: #925411;
+}
+.rounds-columns,
+.rounds-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.rounds-columns > section {
+  min-width: 0;
+}
+.rounds-findings,
+.rounds-evidence ul,
+.rounds-cloud ol {
+  margin: 6px 0 0;
+  padding-inline-start: 19px;
+}
+.rounds-findings li {
+  margin-bottom: 7px;
+}
+.rounds-evidence,
+.rounds-observation,
+.rounds-warning {
+  font-size: 13px;
+}
+.rounds-evidence {
+  margin-top: 3px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.rounds-card summary {
+  cursor: pointer;
+}
+.rounds-observation {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.rounds-observation p {
+  margin-top: 6px;
+}
+.rounds-warning {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 10px;
+  color: #75501b;
+  border-radius: 6px;
+  background: #fff7e7;
+}
+.rounds-warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.rounds-empty {
+  padding: 10px 0;
+  color: var(--muted);
+}
+.rounds-cloud:empty {
+  display: none;
+}
+.rounds-schedule {
+  grid-template-columns: 1fr 1fr;
+}
+.rounds-schedule strong {
+  display: block;
+  margin-top: 3px;
+}
+.rounds-settings {
+  max-width: 920px;
+}
+.rounds-config {
+  display: grid;
+  gap: 18px;
+}
+.rounds-config .btn {
+  justify-self: start;
+}
+@media (max-width: 680px) {
+  .rounds-card {
+    padding: 14px;
+  }
+  .rounds-columns,
+  .rounds-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .rounds-counts > div {
+    padding: 0 6px;
+  }
+}

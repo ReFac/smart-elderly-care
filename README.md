@@ -54,6 +54,10 @@ python3 server.py --db .local/pilot/workspace.sqlite3 --port 8766 --initial-data
 - 总管理员可分别为长者本人和亲属开通服务清单、工单进度或用药凭证。使用者可评价本人绑定的已完成服务。[账号与授权](docs/access.md)
 - 财务可从月度实收下钻到单据，在 Agent 工作台查询本月或指定月份。统计人员可冻结报送版本，登记受理结果或退回原因。[财务与报送](docs/finance-reports.md)
 
+## 每日照护巡查与语音输入
+
+在 Agent 工作台下方说出任务，核对转写后发送。总管理员可在「机构设置 → Agent 巡查」设置频率和提醒时间。护士在长者档案内查看或生成「近期变化与建议」，按证据复核待办和咳嗽频率变化。家属经双方授权后，在自己的门户收取精简简报。[操作说明与声音模型选型](docs/rounds.md) · [语音工作台实拍](docs/previews/agent-workspace.jpg) · [档案巡查实拍](docs/previews/resident-insights.jpg)
+
 ## 从一项协作任务开始
 
 1. 在「工作空间 → Agent 工作台」输入“检查库存和欠费账单”，保持自动分派。物资和运营 Agent 分别检查自己获准读取的台账。
