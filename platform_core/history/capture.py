@@ -48,6 +48,9 @@ SECRET = {
 }
 JSON_COLUMNS = {
     "visual",
+    "config",
+    "items",
+    "issuedRooms",
     "basic",
     "household",
     "details",
@@ -94,8 +97,10 @@ def watch(db, action):
             WHEN OLD.data IS NOT NEW.data BEGIN
             INSERT INTO history_capture VALUES('workspace','1',OLD.data,NEW.data); END""")
     prefixes = PREFIXES.get(action.partition(".")[0], ())
-    if action in ("care.proposeGroupActivity", "care.confirmGroupActivity"):
+    if action in ("care.proposeGroupActivity", "care.confirmGroupActivity", "care.confirmScheduledMeal"):
         prefixes = ("daily_life_",)
+    if action in ("care.saveSchedule", "care.setScheduleEnabled", "care.scheduleMenu", "care.releaseSchedules"):
+        prefixes = ("scheduled_work_",)
     if action == "care.confirmMedRound":
         prefixes = ("medication_round_receipts",)
     if action in ("care.healthNote", "dossier.signHealthIntro"):
@@ -103,7 +108,7 @@ def watch(db, action):
     if action in ("care.reportMedication", "portal.reportMedication"):
         prefixes = ("resident_medication_reports",)
     if action in ("backup.apply", "history.undo"):
-        prefixes = (*tuple(k for group in PREFIXES.values() for k in group), "daily_life_", "resident_health_notes", "resident_medication_reports", "medication_round_receipts", "legacy_bed_cards")
+        prefixes = (*tuple(k for group in PREFIXES.values() for k in group), "daily_life_", "resident_health_notes", "resident_medication_reports", "medication_round_receipts", "legacy_bed_cards", "scheduled_work_")
     if not prefixes:
         return
     for (table,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'"):

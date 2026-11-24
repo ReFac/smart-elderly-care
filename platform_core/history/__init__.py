@@ -92,7 +92,7 @@ def record(
         "agent"
         if action.startswith("agent.") or actor["id"] == "rounds-agent"
         else "system"
-        if actor["id"] in ("platform-operator", "archive-service", "trial-service")
+        if actor["id"] in ("platform-operator", "archive-service", "trial-service", "scheduled-work", "demo-operator")
         or actor["id"].startswith("channel-")
         else "human"
     )

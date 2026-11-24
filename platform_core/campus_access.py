@@ -138,6 +138,12 @@ def projection(db, state, user):
 
 
 def authorize_command(db, user, action, payload, state):
+    if action in (
+        "care.saveSchedule", "care.setScheduleEnabled", "care.scheduleMenu",
+        "care.confirmScheduledMeal",
+    ):
+        # These commands validate their actual rosters, assigned areas and any historical runs.
+        return
     if action in ("care.proposeGroupActivity", "care.confirmGroupActivity"):
         # The complete roster is checked against the event's actual campus and rooms.
         return

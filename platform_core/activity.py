@@ -95,6 +95,21 @@ def for_person(data, resident_id):
 
 
 def locate(db, data, action, payload, actor):
+    if action == "care.confirmScheduledMeal":
+        selected = payload.get("entries")
+        if isinstance(selected, list):
+            ids = {
+                row["taskId"] for row in selected
+                if isinstance(row, dict) and isinstance(row.get("taskId"), str)
+            }
+            tasks = [task for task in data["tasks"] if task["id"] in ids]
+            people = sorted({task["residentId"] for task in tasks})
+            rooms = sorted({task["scheduledRoomId"] for task in tasks if task.get("scheduledRoomId")})
+            campuses = sorted({task["scheduledCampusId"] for task in tasks if task.get("scheduledCampusId")})
+            result = {"residentIds": people, "roomIds": rooms, "campusIds": campuses}
+            if len(people) == 1:
+                result.update(for_person(data, people[0]))
+            return result
     if action == "care.timelineSettings":
         if payload.get("residentId"):
             return for_person(data, payload["residentId"])

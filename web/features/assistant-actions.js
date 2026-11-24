@@ -1,3 +1,4 @@
+import { openScheduledMeal } from './scheduled-meals.js';
 import { openMedicationRound } from './med-rounds.js';
 import { staffLabel } from './people-labels.js';
 import { badge, canAct, field, memo, node, select, table, today } from './shared.js';
@@ -6,6 +7,7 @@ import { routes } from '../lib/navigation.js';
 
 // These destinations are also indexed by the keyboard quick finder.
 export const quickDestinations = [
+  { label: '定时工单', words: '自动工单 伙食排期 伙食工单 定时巡查 菜单 照护排程', route: 'care', tab: 'scheduledWork', grant: 'care.completeTask' },
   { label: 'DeepSeek 用量', words: '模型用量 API 用量 Token 用量 OCR ASR 缓存命中率 员工用量', route: 'settings', tab: 'deepseekUsage' },
   { label: '登记集体活动', words: '集体用餐 早餐 午餐 晚餐 登记餐单', route: 'care', tab: 'groupLife', grant: 'care.proposeGroupActivity' },
   { label: '核对活动参加名单', words: '集体活动待确认 用餐签认', route: 'care', tab: 'groupLife', grant: 'care.confirmGroupActivity' },
@@ -71,7 +73,7 @@ export function assistantPageLinks(ctx, message) {
 export function assistantCommand(ctx, message) {
   const action = message?.action;
   if (message?.role !== 'assistant' || message.webSearched || !action) return null;
-  if (action.kind !== 'navigate') return ['notice', 'workOrder', 'medicationRound'].includes(action.kind) ? action : null;
+  if (action.kind !== 'navigate') return ['notice', 'workOrder', 'medicationRound', 'scheduledMeal'].includes(action.kind) ? action : null;
   const target = pageDestination(ctx, action);
   if (!target) return null;
   const links = assistantPageLinks(ctx, message).filter((link) => link.destination === target.destination);
@@ -82,6 +84,9 @@ export function assistantCommand(ctx, message) {
 export function openAssistantAction(ctx, action) {
   if (!action || !routes.has(action.route) || !ctx.available(action.route))
     return ctx.toast('当前账号无法打开这个页面');
+  if (action.kind === 'scheduledMeal') {
+    return openScheduledMeal(ctx, { text: action.text, region: action.region });
+  }
   if (action.kind === 'medicationRound') {
     return openMedicationRound(ctx, {text: action.text, ...(action.region ? {region: action.region} : {})});
   }

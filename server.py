@@ -3,6 +3,7 @@
 import sys
 import os
 import argparse
+import logging
 from functools import partial
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,6 +11,7 @@ import json
 import mimetypes
 from pathlib import Path
 import re
+from threading import Event, Thread
 from platform_core.secure_storage import OPERATIONAL_ERRORS
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -17,7 +19,7 @@ from platform_core.agents import chat
 from platform_core.operations import expense_import
 from platform_core.backups import exchange
 from platform_core import access, facility
-from platform_core import daily_life, lead_intake, medical_visits, resident_health
+from platform_core import daily_life, lead_intake, medical_visits, resident_health, scheduled_work
 from platform_core.provider import round_priorities
 from platform_core.store import Conflict, SignedOut, Store, encode
 
@@ -147,6 +149,8 @@ class Handler(BaseHTTPRequestHandler):
         return {key: values[0] for key, values in params.items()}
 
     def read_resource(self, path):
+        if path == "/api/scheduled-work":
+            return self.send_json(200, scheduled_work.read(self.store, self.token()))
         if path == "/api/provider/usage":
             from platform_core.provider import usage_report
 
@@ -516,6 +520,10 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 self.store.dossier_summary_draft(self.token(), chart[1], generate=True),
             )
+        if path == "/api/scheduled-work/meals/preview":
+            from platform_core import scheduled_meals
+
+            return self.send_json(200, scheduled_meals.preview(self.store, self.token(), self.read_json(SMALL_BODY)))
         if path == "/api/medication-rounds/preview":
             from platform_core import med_rounds
             return self.send_json(200, med_rounds.preview(self.store, self.token(), self.read_json(SMALL_BODY)))
@@ -847,6 +855,19 @@ class InvalidMedia(ValueError):
     pass
 
 
+def dispatch_scheduled_work(store, stopped):
+    from platform_core.care import archive_retention, trial_expiry
+
+    while not stopped.is_set():
+        try:
+            trial_expiry.maintain(store)
+            archive_retention.maintain(store)
+            scheduled_work.tick(store)
+        except Exception:
+            logging.getLogger(__name__).exception("定时工单检查未完成，将在下一次检查时重试")
+        stopped.wait(10)
+
+
 def main():
     parser = argparse.ArgumentParser(description="安康医养平台 · 机构工作台")
     parser.add_argument("--port", type=int, default=8765)
@@ -897,12 +918,17 @@ def main():
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
         store.backups.start()
         store.rounds.start()
+        stopped = Event()
+        worker = Thread(target=dispatch_scheduled_work, args=(store, stopped), name="scheduled-work", daemon=True)
+        worker.start()
         print(f"安康医养平台已启动  http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
         finally:
+            stopped.set()
+            worker.join(timeout=12)
             store.rounds.stop()
             store.backups.stop()
 

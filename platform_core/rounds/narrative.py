@@ -120,7 +120,7 @@ def daily_facts(db, state, person, now):
                 intake = (e.get("intake") or "").strip().rstrip("。")
                 if intake and not CHANGES.search(intake):
                     text = meal_observation(activity, intake)
-                    if personal_meal(intake):
+                    if e.get("scheduledMeal") or personal_meal(intake):
                         personal = text
                 elif detail:
                     text += f"，餐点有{detail}"
@@ -140,6 +140,7 @@ def daily_facts(db, state, person, now):
         if (
             task["residentId"] != rid
             or task["status"] != "已完成"
+            or task.get("scheduledMealEventId")
             or task.get("kind") not in LIFE_KINDS
         ):
             continue

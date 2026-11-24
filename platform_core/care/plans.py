@@ -215,8 +215,10 @@ def add_task(state, p, today):
     return f"为{resident['name']}派发工单「{title}」"
 
 
-def complete_task(state, p, today):
+def complete_task(state, p, today, *, scheduled_meal=False):
     task = lookup(state, "tasks", p.get("taskId"))
+    if task.get("occurrenceId") and task.get("mealKind") and not scheduled_meal:
+        raise ValueError("请在伙食工单中逐项核对实际进食后签认。")
     resident = get_resident(state, task["residentId"])
     if task["status"] != "待执行" or task["date"] > today:
         raise ValueError("仅当日或逾期待执行工单可完成。")

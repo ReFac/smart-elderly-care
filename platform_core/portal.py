@@ -40,7 +40,7 @@ def require_personal_health(user, rid):
 
 PAGE_SIZE = 30
 VIEWS = {
-    "careSchedule": ("tasks", ("id", "date", "time", "title", "status", "completedAt")),
+    "careSchedule": ("tasks", ("id", "date", "time", "title", "status", "completedAt", "menu")),
     "medication": (
         "medications",
         (

@@ -158,7 +158,7 @@ function myFamily(ctx) {
         rows: ctx.state.familyServiceHistory || [],
         search: { placeholder: '搜索服务项目', value: (r) => r.title },
         cols: [
-          { label: '服务项目', view: (r) => r.title },
+          { label: '服务项目', view: (r) => Array.isArray(r.menu) && r.menu.length ? named(r.title, r.menu.join('、')) : r.title },
           { label: '完成日期', view: (r) => r.completedAt || '未登记' },
           { label: '计划日期', view: (r) => r.date },
           { label: '计划时间', view: (r) => r.time || '未登记' }

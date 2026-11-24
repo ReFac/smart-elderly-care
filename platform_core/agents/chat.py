@@ -30,7 +30,7 @@ SYSTEM = """你是安康医养平台的中文健康助理。像一位熟悉院�
 询问入口、操作步骤，或建议转去某页时，优先请用户直接点击回答下方的具体入口。使用所给页面和页签的原名，只引用与问题直接相关且当前账号可见的入口。页面默认内容无需再进子页，不要因为清单没有列到同名子页就推断用户缺乏权限。指代刚才提到的页面时结合上文辨认，如有歧义请用户选择。
 护理用具工单优先去物资，个人照护工单去照护。只有可选动作列出的路由与种类可以建议。简报不列未被问及的资料缺口。
 """
-ACTION_FORMAT = """指令明确时直接给出 action。界面会立即打开相应页面或审核窗，文案简短告知可以在哪里核对，不要再问用户是否同意打开。工单或通知需经办人在表单中确认才会发布。返回 JSON 对象 {"answer":"实际回答","action":null}，或者 action 为 {"kind":"navigate|workOrder|notice|medicationRound","route":"可选路由号","title":"简短标题","description":"可供经办人核对的概要"}。
+ACTION_FORMAT = """指令明确时直接给出 action。界面会立即打开相应页面或审核窗，文案简短告知可以在哪里核对，不要再问用户是否同意打开。工单或通知需经办人在表单中确认才会发布。返回 JSON 对象 {"answer":"实际回答","action":null}，或者 action 为 {"kind":"navigate|workOrder|notice|medicationRound|scheduledMeal","route":"可选路由号","title":"简短标题","description":"可供经办人核对的概要"}。
 """
 
 
@@ -180,6 +180,11 @@ def permitted_actions(user, routes, text, selected):
         and re.search(r"已|完成|[服喂吃]过药|[服喂吃]完药|服药了|吃药了|今日无需|今天无需|未服|未喂|没有喂|无需喂|无需服", text)
         and not re.search(r"[？?]|[吗么]|怎么|如何|是否|如果|假如|例如|举例|比如|能否|听说|要不要|不要登记|不用登记|别登记|尚未确认|未确认|不确定|查询|查看|查一下|统计|总结|几人|谁已|哪些|有没有|多少", text)):
         return {"care": "medicationRound"}
+    if "care" in routes and policy.has(user, "care") and user["kind"] in ("owner", "staff") and len(text) <= 1500:
+        from ..scheduled_meals import voice_intent
+
+        if voice_intent(text):
+            return {"care": "scheduledMeal"}
     if re.search(
         r"[？?]|不要|不用|不能|不想|别|不必|先不|没有要求|如果|假如|假设|例如|比如|是否|怎么|如何|是什么意思|是什么|需要什么|需要哪些|的流程|吗[。！!]?$|能否|能不能|要不要|可不可以|为什么|建议|[“”「」『』]",
         text,
@@ -307,7 +312,7 @@ def extract(response, actions, request, scope):
         kind, route = candidate.get("kind"), candidate["route"]
         title, desc = candidate.get("title"), candidate.get("description", "")
         if (
-            kind in ("navigate", "workOrder", "notice", "medicationRound")
+            kind in ("navigate", "workOrder", "notice", "medicationRound", "scheduledMeal")
             and actions.get(route) == kind
             and isinstance(title, str)
             and title.strip()
@@ -430,6 +435,8 @@ def reply(store, token, data, *, transport=None):
         feature = "assistant." + (brief or "chat")
         if actions.get("care") == "medicationRound":
             feature = "assistant.medication"
+        elif actions.get("care") == "scheduledMeal":
+            feature = "assistant.scheduledMeal"
         lines = []
 
         def private_body(db, state):
@@ -610,6 +617,12 @@ def reply(store, token, data, *, transport=None):
                 "kind": "medicationRound", "route": "care", "title": "核对服药记录", "text": text,
             }
             answer = "请逐位核对老人、床位、服药时段及例外备注。点击确认后，该老人的记录才会签入档案。"
+        if actions.get("care") == "scheduledMeal":
+            action = {
+                "id": sha256(ctx.compact([scope, request, "scheduledMeal"]).encode()).hexdigest(),
+                "kind": "scheduledMeal", "route": "care", "title": "核对伙食工单", "text": text,
+            }
+            answer = "请核对长者、餐次和实际吃过的菜品。确认后会更新伙食工单和对应长者的用餐记录。"
         if sources is not None:
             answer = chat_web.public_response(answer, sources)
             if not answer:

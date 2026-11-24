@@ -348,9 +348,15 @@ def confirm(db, state, user, p, now):
         ).fetchone()
     ):
         raise ValueError("名单中已有长者签认了当天这顿饭，请对照个人记录并排除重复者")
+    _save_attendance(db, user, now, event_id, e["kind"], e["day"], intake)
+    cancel_duplicate_meals(state, event_id, e["kind"], e["day"], selected, now)
+    return f"已核对{e['kind']}实际参加 {len(ids)} 人，排除 {len(guests) - len(ids)} 人"
+
+
+def _save_attendance(db, user, now, event_id, kind, day, intake):
     db.executemany(
         "INSERT INTO daily_life_attendance VALUES(?,?,?,?,?)",
-        [(event_id, rid, e["kind"], e["day"], intake[rid]) for rid in sorted(ids)],
+        [(event_id, rid, kind, day, intake[rid]) for rid in sorted(intake)],
     )
     position = (
         user["role"]
@@ -367,7 +373,83 @@ def confirm(db, state, user, p, now):
             position,
         ),
     )
-    return f"已核对{e['kind']}实际参加 {len(ids)} 人，排除 {len(guests) - len(ids)} 人"
+
+
+def record_scheduled_meal(
+    db, user, now, event_id, campus, day, kind, starts_at, menu, people
+):
+    """Add a signed meal after the scheduled work service verified every attendee."""
+    request = "scheduled-meal." + event_id
+    room_ids = {row["roomId"] for row, _ in people}
+    room_id = next(iter(room_ids)) if len(room_ids) == 1 else ""
+    db.execute(
+        """INSERT INTO daily_life_events(id,campusId,roomId,day,kind,startsAt,endsAt,
+        details,proposedById,proposedBy,proposedAt,requestId,fingerprint,scopeKey)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            event_id,
+            campus,
+            room_id,
+            day,
+            kind,
+            starts_at,
+            now.strftime("%H:%M"),
+            "、".join(menu),
+            user["id"],
+            user["displayName"],
+            now.isoformat(timespec="seconds"),
+            request,
+            sha256(
+                json.dumps(people, ensure_ascii=False, sort_keys=True).encode()
+            ).hexdigest(),
+            request,
+        ),
+    )
+    db.executemany(
+        "INSERT INTO daily_life_invitees VALUES(?,?,?,?,?,?)",
+        [
+            (
+                event_id,
+                r["residentId"],
+                r["roomId"],
+                r["room"],
+                r["bedId"],
+                r["bedLabel"],
+            )
+            for r, _ in people
+        ],
+    )
+    _save_attendance(
+        db,
+        user,
+        now,
+        event_id,
+        kind,
+        day,
+        {r["residentId"]: intake for r, intake in people},
+    )
+    return event_id
+
+
+def cancel_duplicate_meals(state, event_id, kind, day, attendees, now):
+    """Close any still-pending scheduled order for a resident whose meal is already signed."""
+    if kind not in MEALS or not attendees:
+        return
+    people = set(attendees)
+    for task in state["tasks"]:
+        if (
+            task["status"] == "待执行"
+            and task.get("occurrenceId")
+            and task.get("mealKind") == kind
+            and task["date"] == day
+            and task["residentId"] in people
+        ):
+            task.update(
+                status="已取消",
+                cancellationReason="同餐已有签认",
+                canceledAt=now.isoformat(timespec="seconds"),
+                scheduledMealEventId=event_id,
+            )
 
 
 EVENT_FIELDS = (
@@ -502,7 +584,8 @@ def resident_events(db, resident_id, start_day, end_day):
         dict(r)
         for r in db.execute(
             """SELECT e.id,e.kind,e.day,e.startsAt,e.endsAt,e.details,a.intake,
-        i.roomId,i.roomNumber,s.confirmedAt,s.confirmedBy,s.confirmedById,s.confirmedByPosition
+        i.roomId,i.roomNumber,s.confirmedAt,s.confirmedBy,s.confirmedById,s.confirmedByPosition,
+        CASE WHEN e.requestId LIKE 'scheduled-meal.%' THEN 1 ELSE 0 END AS scheduledMeal
         FROM daily_life_attendance a
         JOIN daily_life_events e ON a.eventId=e.id JOIN daily_life_invitees i USING(eventId,residentId)
         JOIN daily_life_signatures s ON s.eventId=e.id WHERE a.residentId=? AND a.day BETWEEN ? AND ?
@@ -543,7 +626,10 @@ def timeline(store, token, rid, start="", end=""):
         events = resident_events(db, rid, start, end)
         if not personal and user.get("facilityScope"):
             rooms = {
-                room["id"] for room in facility._meta(db, facility._access(db, user, environment=True))
+                room["id"]
+                for room in facility._meta(
+                    db, facility._access(db, user, environment=True)
+                )
             }
             events = [event for event in events if event["roomId"] in rooms]
         if personal:

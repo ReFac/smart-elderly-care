@@ -49,6 +49,7 @@ PAGES = (
     Page("care", "班次交接", ("交接班", "交班记录"), "handover", "care"),
     Page("care", "登记集体活动", ("集体活动", "登记集体用餐", "登记餐单"), "groupLife", "care"),
     Page("care", "核对活动参加名单", ("集体活动待确认", "用餐签认", "确认参加名单"), "groupLife", "care.groupConfirm"),
+    Page("care", "定时工单", ("自动工单", "伙食工单", "伙食排期", "自动派工"), "scheduledWork"),
     Page("care", "健康体征", ("体征记录",), "vitals", "clinical"),
     Page("inventory", "物资仓储", ("仓库", "物资管理")),
     Page(
@@ -124,6 +125,7 @@ def visible(user, routes):
         if p.route in routes
         and (not p.grant or policy.has(user, p.grant))
         and (p.grant != "intake" or "intake" in routes)
+        and (p.tab != "scheduledWork" or any(policy.has(user, grant) for grant in ("care", "clinical", "care.schedule")))
     )
 
 

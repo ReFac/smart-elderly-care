@@ -11,6 +11,7 @@ from . import ZONE, local_time
 
 FEATURES = {
     "assistant.chat": "健康助理 · 对话",
+    "assistant.scheduledMeal": "健康助理 · 伙食工单确认入口",
     "assistant.medication": "健康助理 · 服药确认入口",
     "assistant.finance": "健康助理 · 经营快报",
     "assistant.health": "健康助理 · 健康快报",
@@ -20,6 +21,7 @@ FEATURES = {
     "assistant.voiceAsr": "健康助理 · 语音转写",
     "assistant.readAloud": "健康助理 · 朗读合成",
     "medication.voiceParse": "床旁服药 · 口述解析",
+    "care.scheduledMealVoiceParse": "伙食工单 · 口述解析",
     "care.roundPriorities": "照护巡查 · 事项优先级",
     "care.roundNarrative": "照护巡查 · 生活简报",
     "care.taskAsr": "照护工单 · 语音转写",

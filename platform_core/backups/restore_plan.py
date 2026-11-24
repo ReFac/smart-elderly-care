@@ -19,6 +19,8 @@ MUTABLE = {
     "dossier_relatives": "亲属档案资料",
     "rounds_modes": "长者巡查生成设置",
     "rounds_policy": "机构巡查排程设置",
+    "scheduled_work_rules": "定时工单模板",
+    "scheduled_work_menus": "指定日期伙食菜单",
 }
 ORIGINALS = {
     "legacy_bed_cards": "历史床位补卡凭证",
@@ -39,6 +41,7 @@ ORIGINALS = {
     "protected_documents": "签发的加密文书",
     "rounds_observations": "已核对咳嗽时段观测",
     "rounds_reports": "已生成的长者巡查简报",
+    "scheduled_work_runs": "定时工单派发凭证",
 }
 # A point-in-time restore cannot retract external actions, recorded clinical observations or cash.
 PROTECTED = {
@@ -147,6 +150,9 @@ OPTIONAL_TABLES = {
     "rounds_policy",
     "rounds_observations",
     "rounds_reports",
+    "scheduled_work_rules",
+    "scheduled_work_menus",
+    "scheduled_work_runs",
 }
 
 

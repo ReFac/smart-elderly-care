@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>定时工单工作台检查</title>
+  <link rel="stylesheet" href="../../web/style.css">
+  <link rel="stylesheet" href="../../web/features.css">
+  <link rel="stylesheet" href="../../web/features/scheduled-work.css">
+</head>
+<body>
+  <main id="work"></main>
+  <output>检查中</output>
+  <script type="module">
+    import { scheduledWork } from '../../web/features/scheduled-work.js';
+    import { detail } from '../../web/lib/dialogs.js';
+    import * as ui from '../../web/lib/ui.js';
+
+    const day = '2026-11-24';
+    const template = {
+      id:'meal', title:'晚餐模板', kind:'meal', time:'17:30', weekdays:[1, 2, 3, 4, 5, 6, 7], enabled:true,
+      scope:{kind:'rooms',roomIds:['room2']}, startDate:day, endDate:'', mealKind:'晚餐', menu:['小米粥','鸡蛋'],
+    };
+    const data = {
+      today: day, canManage:true, allowAll:true,
+      rules:[template], runs:[{id:'run-1',scheduleId:'meal', title:'晚餐模板', day, time:'17:30', count:1, status:'released',
+        releasedAt:day+'T17:31:00+08:00'}],
+      menus:[{day,scheduleId:'meal',menu:['米饭','蒸南瓜']}],
+      campuses:[{id:'home',name:'本院'},{id:'west',name:'西院'}],
+      rooms:[{id:'room1',label:'主楼 · 101 房',campusId:'home',campusName:'本院'},
+        {id:'room2',label:'二号楼 · 201 房',campusId:'west',campusName:'西院'}],
+      roster:[{id:'elder1',name:'长者甲',roomNumber:'101',bedLabel:'101-01',campusId:'home'},
+        {id:'elder2',name:'长者乙',roomNumber:'201',bedLabel:'201-01',campusId:'west'}],
+      staff:[{id:'staff1',label:'员工甲',role:'护工'}], roles:['护工','护士'],
+      builtins:[
+        {id:'patrol',title:'内置巡查',kind:'work',nextAt:day+'T21:30:00', route:'settings',tab:'rounds',status:'运行中',description:'夜间巡查',count:2},
+        {id:'backup',title:'加密快照',kind:'maintenance',route:'settings',tab:'backups',status:'已启用',description:'本地快照'},
+      ],
+    };
+    const commands = [];
+    const links = [];
+    const root = document.querySelector('#work');
+    const ctx = {
+      ui, detail, state:{today: day, tasks:[]},
+      async get(path) { if (path !== '/api/scheduled-work') throw new Error('未识别接口'); return data; },
+      async command(action, payload, review) { commands.push({action,payload,review}); return true; },
+      available:() => true, go:(...args) => links.push(args),
+    };
+    const dialog = () => document.querySelector('dialog[open]');
+    const field = label => [...dialog().querySelectorAll('.field')].find(x => x.firstElementChild.textContent === label)?.lastElementChild;
+    function choose(label, value) {
+      const input = field(label);
+      check(input, '缺少选项 ' + label);
+      input.value = value;
+      input.dispatchEvent(new Event('change'));
+    }
+    function check(ok, reason) { if (!ok) throw new Error(reason); }
+    function click(text, scope = document) {
+      const button = [...scope.querySelectorAll('button')].find(b => b.textContent === text);
+      check(button, '缺少入口 ' + text);
+      button.click();
+    }
+    async function wait(test, reason) {
+      for (let i = 0; i < 40; i += 1) {
+        if (test()) return;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      check(test(), reason);
+    }
+    try {
+      root.append(scheduledWork(ctx));
+      await wait(() => root.textContent.includes('内置巡查'), '等待排程读取');
+      check(root.textContent.includes('其他自动维护') && root.textContent.includes('加密快照'), '还原系统既有流程且维护区独立');
+      check(root.textContent.includes(day + ' 21:30'), '上海本地的无偏移时间不被重复转换');
+      click('进入相关页面');
+      check(links[0].join('/') === 'settings/rounds', '可进入已有设置');
+      click('每日午餐');
+      choose('派发对象','residents');
+      const search = dialog().querySelector('input[type=search]');
+      search.value = '201';
+      search.dispatchEvent(new Event('input'));
+      check(dialog().querySelector('.scheduled-residents').textContent.includes('长者乙') &&
+        !dialog().querySelector('.scheduled-residents').textContent.includes('长者甲'), '按房号定位长者');
+      dialog().querySelector('.scheduled-residents input').click();
+      choose('重复方式','weekly');
+      dialog().querySelectorAll('.scheduled-days input').forEach((input, index) => { input.checked = index === 1; });
+      choose('分配方式','person');
+      choose('执行员工','staff1');
+      field('每行一道菜品，也可用顿号分隔').value = '米饭、鸡蛋羹';
+      click('核对计划', dialog());
+      await wait(() => commands.length === 1 && !dialog(), '保存定时工单');
+      const saved = commands[0];
+      check(saved.action === 'care.saveSchedule' && saved.payload.weekdays.join() === '2' &&
+        saved.payload.menu.join() === '米饭,鸡蛋羹' && saved.payload.assigneeId === 'staff1' &&
+        saved.payload.scope.residentIds.join() === 'elder2', '精确周次、人群、员工和菜品');
+      click('编辑');
+      check(field('派发对象').value === 'rooms' &&
+        dialog().querySelector('.scheduled-residents input:checked').closest('label').textContent.includes('201'), '编辑时保留原房间');
+      dialog().close();
+      click('当天餐单');
+      check(field('当餐菜品').value === '米饭\n蒸南瓜', '重新打开保留日期覆盖菜单');
+      field('当餐菜品').value = '馒头、胡萝卜';
+      click('核对当天餐单', dialog());
+      await wait(() => commands.length === 2 && !dialog(), '保存指定日期餐单');
+      check(commands[1].action === 'care.scheduleMenu' && commands[1].payload.menu[0] === '馒头', '提交日期菜单');
+      click('暂停');
+      await wait(() => commands.length === 3, '暂停模板');
+      check(commands[2].action === 'care.setScheduleEnabled' && !commands[2].payload.enabled, '只暂停后续批次');
+      document.documentElement.dataset.result = 'pass';
+      document.querySelector('output').textContent = 'PASS';
+    } catch (error) {
+      document.documentElement.dataset.result = 'fail';
+      document.querySelector('output').textContent = error.stack;
+    }
+  </script>
+</body>
+</html>

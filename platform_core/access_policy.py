@@ -5,6 +5,7 @@ PERMISSIONS = {
     "intake": "意向客户、接待、入住和床位管理",
     "care": "评估、照护和工单执行",
     "care.groupConfirm": "核对集体活动参加名单并签认",
+    "care.schedule": "配置授权区域的定时工单和菜单",
     "health.overview": "查阅授权区域的健康汇总人数与异常项数",
     "clinical": "体征、异常、医嘱和用药复核",
     "clinical.rules": "维护经专业核准的用药核查规则",
@@ -29,6 +30,7 @@ PERMISSIONS = {
 PRESETS = {
     "院长": [
         "health.overview",
+        "care.schedule",
         "residents",
         "intake",
         "care",
@@ -57,7 +59,7 @@ PRESETS = {
     "财务": ["finance", "reports"],
     "自定义": [],
 }
-PRESETS["护士长"] = [*PRESETS["护士"], "care.groupConfirm"]
+PRESETS["护士长"] = [*PRESETS["护士"], "care.groupConfirm", "care.schedule"]
 # Empty grants is still a valid employee account.
 ROUTE_GRANTS = {
     "overview": (),
@@ -67,7 +69,7 @@ ROUTE_GRANTS = {
     "leads": ("intake",),
     "residents": ("residents", "intake", "care", "clinical"),
     "assessments": ("care",),
-    "care": ("care", "clinical", "care.groupConfirm"),
+    "care": ("care", "clinical", "care.groupConfirm", "care.schedule"),
     "medications": ("clinical",),
     "beds": ("intake", "care", "clinical", "residents"),
     "rooms": ("intake", "care", "clinical", "residents"),
@@ -115,6 +117,10 @@ ACTION_GRANTS = {
     "care.addTask": "care",
     "care.timelineSettings": "care",
     "care.completeTask": "care",
+    "care.confirmScheduledMeal": "care",
+    "care.saveSchedule": "care.schedule",
+    "care.setScheduleEnabled": "care.schedule",
+    "care.scheduleMenu": "care.schedule",
     "care.quality": "care",
     "care.handover": "care",
     "care.proposeGroupActivity": "care",

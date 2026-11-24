@@ -329,10 +329,10 @@ function buildChat(getContext, actor, area, region, label) {
       }
       body.append(group);
     }
-    if (!mine && !item.webSearched && ['notice', 'workOrder', 'medicationRound'].includes(item.action?.kind)) {
+    if (!mine && !item.webSearched && ['notice', 'workOrder', 'medicationRound', 'scheduledMeal'].includes(item.action?.kind)) {
       const action = item.action;
       const trigger = control(
-        action.kind === 'medicationRound' ? '逐人核对服药' : action.kind === 'notice' ? '核对通知' : '核对工单',
+        action.kind === 'scheduledMeal' ? '核对伙食工单' : action.kind === 'medicationRound' ? '逐人核对服药' : action.kind === 'notice' ? '核对通知' : '核对工单',
         'file',
         'assistant-action',
         () => perform(action),

@@ -12,7 +12,7 @@ from .operations import expense_import
 from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, staff_employment, storage_assets
 from . import lead_contacts, lead_intake, medical_visits, people_labels, visit_schedule
-from . import daily_life, med_rounds, medication_reports, resident_health
+from . import daily_life, med_rounds, medication_reports, resident_health, scheduled_work
 from .bootstrap import empty_workspace
 from .care import trial_expiry, trial_followups
 from . import backups, history, rounds
@@ -113,6 +113,7 @@ class Store:
             medication_reports.init(db)
             resident_health.init(db)
             daily_life.init(db)
+            scheduled_work.init(db)
             archive_retention.init(db)
             rounds_family.init(db)
             gateways.init(db)
@@ -854,6 +855,12 @@ class Store:
                     summary = "已更新院区并行接待席位"
                 elif domain == "leads":
                     summary = lead_contacts.command(db, data, user, action, payload, now)
+                elif action in scheduled_work.ACTIONS:
+                    summary = scheduled_work.command(db, data, user, action, payload, now)
+                elif action == "care.confirmScheduledMeal":
+                    from . import scheduled_meals
+
+                    summary = scheduled_meals.confirm(db, data, user, payload, now)
                 elif action == "care.confirmMedRound":
                     summary = med_rounds.command(db, data, user, action, payload, now)
                 elif action in ("portal.reportMedication", "care.reportMedication"):

@@ -1,3 +1,5 @@
+import { openScheduledMeal } from './scheduled-meals.js';
+import { scheduledWork } from './scheduled-work.js';
 import { medicationRoundDesk } from './med-rounds.js';
 import { residentAnchor, staffLabel } from './people-labels.js';
 import { careTimeline } from './care-timeline.js';
@@ -308,6 +310,7 @@ export function taskForm(ctx, proposal = null) {
 }
 
 export function completeTask(ctx, row) {
+  if (row.occurrenceId && row.mealKind) return openScheduledMeal(ctx, { taskId: row.id });
   const person = ctx.state.residents.find((r) => r.id === row.residentId);
   runForm(ctx, {
     title: '登记任务执行',
@@ -405,7 +408,7 @@ function taskHistory(ctx) {
       personCol(ctx),
       { label: '计划时间', view: (r) => named(r.time, r.date) },
       { label: '责任人', view: (r) => staffLabel(ctx, r.assignee, r.assigneeId) },
-      { label: '状态', view: (r) => badge(ctx, r.status) },
+      { label: '状态', view: (r) => r.cancellationReason ? named(r.status, r.cancellationReason) : badge(ctx, r.status) },
       {
         label: '操作',
         align: 'end',
@@ -526,6 +529,8 @@ export function care(ctx) {
         ['tasks', '照护工单', () => taskHistory(ctx)],
         ['completed', '已完成服务', () => careTimeline(ctx, 'work', '', (id) => serviceProof(ctx, id))],
       ] : []),
+      ...(ctx.permitted('care') || ctx.permitted('clinical') || ctx.permitted('care.schedule')
+        ? [['scheduledWork', '定时工单', () => scheduledWork(ctx)]] : []),
       ...(canAct(ctx, 'care.confirmMedRound') ? [['medRounds', '服药核对', () => medicationRoundDesk(ctx)]] : []),
       ...(canAct(ctx, 'care.vital') ? [['vitals', '健康体征', () => vitals(ctx)]] : []),
       ...(canAct(ctx, 'care.proposeGroupActivity') || canAct(ctx, 'care.confirmGroupActivity')
