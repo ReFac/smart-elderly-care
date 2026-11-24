@@ -2,7 +2,8 @@
 
 from decimal import Decimal
 
-from .billing import apply_deposit, credit, get_account
+from . import payment_terms
+from .billing import apply_deposit, get_account, post_receipt
 from .records import currency_amount, lookup, new_id, parse_day, text_field
 
 CHANNELS = ("微信支付", "支付宝")
@@ -21,7 +22,19 @@ def create_order(state, p, today):
     if p.get("channel") not in CHANNELS:
         raise ValueError("请选择有效支付渠道")
     amount = currency_amount(p.get("amount"), "订单金额", zero=False)
-    if amount > Decimal(str(bill["balance"])):
+    previous_balance = bill["balance"]
+    account = next(
+        (r for r in state["deposits"] if r["residentId"] == bill["residentId"]), None
+    )
+    if account and account["amount"] > 0:
+        apply_deposit(state, account, today)
+        if bill["balance"] != previous_balance:
+            return (
+                f"已优先冲抵预缴金，本单剩余待缴 ¥{bill['balance']:.2f}，请按新余额核对"
+            )
+    if not bill["balance"] or (
+        amount > Decimal(str(bill["balance"])) and p.get("carrySurplus") is not True
+    ):
         raise ValueError("订单金额超过待缴余额")
     orders = state.setdefault("paymentOrders", [])
     prior = next(
@@ -32,6 +45,10 @@ def create_order(state, p, today):
             and r["channel"] == p["channel"]
             and r["status"] == "待支付"
             and Decimal(str(r["amount"])) == amount
+            and (
+                amount <= Decimal(str(bill["balance"]))
+                or r.get("balanceAtIssue") == bill["balance"]
+            )
         ),
         None,
     )
@@ -46,6 +63,8 @@ def create_order(state, p, today):
             residentId=bill["residentId"],
             amount=float(amount),
             channel=p["channel"],
+            balanceAtIssue=bill["balance"],
+            feeRateBps=payment_terms.rate_for(state, p["channel"]),
             date=today,
             status="待支付",
         ),
@@ -77,6 +96,13 @@ def settle(state, p, today, *, verification):
             raise ValueError("找不到已登记的商户订单")
         bill_id = p.get("billId")
     bill = lookup(state, "bills", bill_id, "账单")
+    if any(
+        r.get("channel") == channel
+        and not r.get("originBillId")
+        and (r.get("transactionId") == txn or r.get("merchantOrder") == order_id)
+        for r in state["depositEntries"]
+    ):
+        raise ValueError("此笔交易已单独登记为预缴金，请核对原始凭证")
     receipts = state.setdefault("channelReceipts", [])
     for prior in receipts:
         if prior["channel"] == channel and (
@@ -106,27 +132,22 @@ def settle(state, p, today, *, verification):
         verification=verification,
         source=text_field(p, "source", "对账依据", 160),
     )
-    applied = min(amount, Decimal(str(bill["balance"])))
-    if applied:
-        credit(state, bill, applied, channel, day)
-        state["payments"][0].update(receiptId=receipt["id"], transactionId=txn)
-    surplus = amount - applied
-    if surplus:
-        account = get_account(state, bill["residentId"])
-        account["amount"] = float(Decimal(str(account["amount"])) + surplus)
-        state["depositEntries"].insert(
-            0,
-            dict(
-                id=new_id("receipt"),
-                residentId=bill["residentId"],
-                amount=float(surplus),
-                date=day,
-                receiptId=receipt["id"],
-                method=channel,
-            ),
-        )
-        apply_deposit(state, account, today)
-    receipt.update(billAmount=float(applied), depositAmount=float(surplus))
+    rate = (order or {}).get("feeRateBps", payment_terms.rate_for(state, channel))
+    origin = dict(receiptId=receipt["id"], transactionId=txn, merchantOrder=order_id)
+    if verification == "线下登记核对" and p.get("paymentRef"):
+        origin["paymentRef"] = p["paymentRef"]
+    allocation = post_receipt(
+        state,
+        resident_id=bill["residentId"],
+        bill=bill,
+        amount=amount,
+        method="线下登记" if verification == "线下登记核对" else channel,
+        channel=channel,
+        day=day,
+        rate=rate,
+        origin=origin,
+    )
+    receipt.update(allocation)
     receipts.insert(0, receipt)
     if order:
         order.update(status="已到账", receiptId=receipt["id"])
@@ -175,6 +196,10 @@ def remind(state, p, today):
         raise ValueError("请选择服务期已结束且仍然欠费的账单")
     if p.get("channel") not in ("电话", "当面", "机构消息"):
         raise ValueError("请选择实际跟进方式")
+    note = text_field(p, "note", "跟进结果")
+    apply_deposit(state, get_account(state, bill["residentId"]), today)
+    if not bill["balance"]:
+        return "预缴金已冲清本单，无需催缴"
     bill.setdefault("reminders", []).insert(
         0,
         dict(
@@ -182,7 +207,7 @@ def remind(state, p, today):
             channel=p["channel"],
             date=today,
             balance=bill["balance"],
-            note=text_field(p, "note", "跟进结果"),
+            note=note,
         ),
     )
     return f"登记 {bill['month']} 未结账单的催缴跟进"

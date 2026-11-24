@@ -12,7 +12,7 @@ from .operations import expense_import
 from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, staff_employment, storage_assets
 from . import lead_contacts, lead_intake, medical_visits, people_labels, visit_schedule
-from . import daily_life, resident_health
+from . import daily_life, med_rounds, medication_reports, resident_health
 from .bootstrap import empty_workspace
 from .care import trial_expiry, trial_followups
 from . import backups, history, rounds
@@ -109,6 +109,8 @@ class Store:
                 access.migrate_branding(db)
             dossier.init(db)
             medical_visits.init(db)
+            med_rounds.init(db)
+            medication_reports.init(db)
             resident_health.init(db)
             daily_life.init(db)
             archive_retention.init(db)
@@ -223,6 +225,9 @@ class Store:
                 from .operations.charges import CATEGORIES, UNITS
                 from .operations.billing_cycles import pending_periods
 
+                from .agents import revenue
+
+                data["cashOverview"] = revenue.overview(data, today)
                 data["chargeCatalog"] = {"categories": CATEGORIES, "units": UNITS}
                 data["billingDue"] = pending_periods(data, today)
             if (
@@ -380,12 +385,12 @@ class Store:
             return {"channels": enabled_channels()}
 
     def payment_order_status(self, token, order_id):
-        from .operations.checkout import authorized_order
+        from .operations.checkout import authorized_order, cached_payment_link
 
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
-            _, _, order = authorized_order(self, db, token, order_id)
-            return {"orderId": order["id"], "status": order["status"]}
+            _, data, order = authorized_order(self, db, token, order_id)
+            return {"orderId": order["id"], "status": order["status"], **cached_payment_link(db, data, order, self.now())}
 
     def payment_checkout(self, token, order_id):
         from .operations.checkout import open_code
@@ -847,6 +852,10 @@ class Store:
                     summary = "已更新院区并行接待席位"
                 elif domain == "leads":
                     summary = lead_contacts.command(db, data, user, action, payload, now)
+                elif action == "care.confirmMedRound":
+                    summary = med_rounds.command(db, data, user, action, payload, now)
+                elif action in ("portal.reportMedication", "care.reportMedication"):
+                    summary = medication_reports.record(db, data, user, payload, now)
                 elif action == "dossier.confirmVisit":
                     summary = medical_visits.confirm(db, data, payload, user, now)
                 elif action == "care.proposeGroupActivity":

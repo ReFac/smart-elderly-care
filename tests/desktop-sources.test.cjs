@@ -60,8 +60,7 @@ test('preload forwards only trusted clicks on displayed assistant source links',
   function event(trusted, inSources) {
     return { isTrusted: trusted, button: 0, defaultPrevented: false, preventDefault() {},
       stopImmediatePropagation() {}, target: { closest(selector) {
-        assert.equal(selector, '#assistant-chat:not([hidden]) a.assistant-source-link');
-        return inSources ? link : null;
+        return selector === '#assistant-chat:not([hidden]) a.assistant-source-link' && inSources ? link : null;
       } } };
   }
   await click(event(false, true));
@@ -121,4 +120,94 @@ test('only explicit clicks in visible lead details reach the dial action', async
   view.hash = '#leads';
   await click(true);
   assert.deepEqual(calls, [['leads:call-customer', phone.href]]);
+});
+
+test('desktop medication references open from a visible self-report on trusted activation', async () => {
+  const calls = [];
+  let click;
+  runInNewContext(readFileSync(require.resolve('../clients/desktop/source-preload.cjs'), 'utf8'), {
+    require: () => ({ ipcRenderer: { async invoke(...args) { calls.push(args); return true; } } }),
+    window: { addEventListener(_type, callback) { click = callback; } }, location: { origin }, URL,
+  });
+  function activate(href, trusted = true) {
+    const node = { href, origin: new URL(href).origin, isConnected: true, getClientRects: () => [{}] };
+    return click({ isTrusted: trusted, button: 0, defaultPrevented: false, preventDefault() {}, stopImmediatePropagation() {},
+      target: { closest: selector => selector === '.medication-source-scope a.medication-source-link' ? node : null } });
+  }
+  const sources = ['https://www.wikidata.org/wiki/Q201928',
+    'https://www.nhsa.gov.cn/module/download/downfile.jsp?classid=0&filename=a32f9f2f3fc046afaf08471f87456ce3.pdf#page=39',
+    'https://pharm.ncmi.cn/pharm/fullText/search.do?keyWord=%E9%98%BF%E8%8E%AB'];
+  for (const valid of sources) await activate(valid);
+  await activate(sources[0], false);
+  await activate('https://www.wikidata.org.example.org/wiki/Q201928');
+  await activate('https://pharm.ncmi.cn/elsewhere');
+  assert.deepEqual(calls, sources.map(href => ['assistant:open-public-source', href]));
+});
+
+test('desktop checkout opens only an active institutional order in its signed payment application', async () => {
+  const { registerPaymentLinks } = require('../clients/desktop/payment-links.cjs');
+  const orderId = 'NH-0123456789abcdef';
+  const frame = { origin, url: origin + '/#residents' };
+  const opened = [];
+  const requests = [];
+  const receipt = { orderId, status: '待支付', expiresAt: Date.now() / 1000 + 60 };
+  let invoke, afterResponse;
+  const contents = { mainFrame: frame, isDestroyed: () => false,
+    ipc: { handle(name, cb) { assert.equal(name, 'payments:open-checkout'); invoke = cb; } },
+    session: { async fetch(url, options) { requests.push({url, options}); afterResponse?.();
+      return { ok: true, json: async () => receipt };
+    } },
+  };
+  registerPaymentLinks(contents, origin, (url) => opened.push(url));
+  const click = (id = orderId) => invoke({ senderFrame: frame }, id);
+  const ali = 'https://qr.alipay.com/realistic-order';
+  const wx = 'weixin://wxpay/bizpayurl?pr=realistic-token';
+  for (const [channel, checkoutUrl] of [['支付宝', ali], ['微信支付', wx]]) {
+    Object.assign(receipt, { channel, checkoutUrl });
+    assert.equal(await click(), true);
+    assert.equal(opened.at(-1), checkoutUrl);
+  }
+  assert.equal(requests[0].url, origin + '/api/payments/checkout/orders/' + orderId);
+  assert.equal(requests[0].options.credentials, 'include');
+  assert.equal(requests[0].options.redirect, 'error');
+  assert.equal(await click(ali), false);
+  assert.equal(await invoke({ senderFrame: { ...frame } }, orderId), false);
+  for (const [channel, url] of [
+    ['微信支付', ali], ['支付宝', wx], ['支付宝', 'https://example.org/pay'],
+    ['支付宝', 'http://qr.alipay.com/order'], ['支付宝', 'https://user@qr.alipay.com/order'],
+    ['微信支付', 'weixin://wxpay/other?pr=order'], ['微信支付', 'weixin://wxpay/bizpayurl?pr=one&op=two'],
+    ['微信支付', 'other://wxpay/bizpayurl?pr=token'],
+  ]) {
+    Object.assign(receipt, { channel, checkoutUrl: url });
+    assert.equal(await click(), false);
+  }
+  Object.assign(receipt, { channel: '支付宝', checkoutUrl: ali, status: '已到账' });
+  assert.equal(await click(), false);
+  Object.assign(receipt, { status: '待支付', expiresAt: 100 });
+  assert.equal(await click(), false);
+  Object.assign(receipt, { expiresAt: Date.now() / 1000 + 60 });
+  afterResponse = () => { frame.url = origin + '/public'; };
+  assert.equal(await click(), false);
+  assert.deepEqual(opened, [ali, wx]);
+});
+
+test('checkout preload forwards a visible user-activated order number without trusting its href', async () => {
+  const orderId = 'NH-0123456789abcdef';
+  let click, visible = true, inDialog = true;
+  const calls = [];
+  const dialog = { dataset: { paymentOrder: orderId } };
+  const anchor = { href: 'https://example.org/ignored', isConnected: true,
+    matches: (s) => s === 'a.merchant-checkout-link', getClientRects: () => visible ? [{}] : [],
+    closest: (s) => inDialog && s === 'dialog[open][data-payment-order]' ? dialog : null };
+  runInNewContext(readFileSync(require.resolve('../clients/desktop/source-preload.cjs'), 'utf8'), {
+    require: () => ({ ipcRenderer: { invoke: async (...args) => { calls.push(args); return true; } } }),
+    window: { addEventListener(type, fn) { click = fn; } }, location: { origin, hash: '#billing' },
+  });
+  const event = (trusted) => ({ isTrusted: trusted, button: 0, defaultPrevented: false,
+    target: anchor, preventDefault() {}, stopImmediatePropagation() {} });
+  await click(event(false)); visible = false;
+  await click(event(true)); visible = true; inDialog = false;
+  await click(event(true)); inDialog = true;
+  await click(event(true));
+  assert.deepEqual(calls, [['payments:open-checkout', orderId]]);
 });

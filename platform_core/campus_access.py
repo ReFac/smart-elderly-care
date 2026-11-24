@@ -117,7 +117,7 @@ def projection(db, state, user):
             result[key] = [
                 r for r in rows if r.get("campusId", facility.HOME_CAMPUS) in campuses
             ]
-        elif key in ("drugRules", "suggestions"):
+        elif key in ("drugRules", "suggestions", "paymentFeeSettings"):
             # Suggestions produced by a run are checked against its saved region by Store.
             result[key] = rows
         elif key == "handovers":

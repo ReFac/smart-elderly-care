@@ -638,3 +638,17 @@
     padding-inline-start: 10px;
   }
 }
+
+.op-cash-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.op-cash-item { display: grid; gap: 5px; text-align: left; padding: 8px clamp(10px, 1.6vw, 24px);
+  background: transparent; border: 0; border-left: 1px solid var(--line); color: var(--ink); cursor: pointer; }
+.op-cash-item:first-child { border-left: 0; }
+.op-cash-item:hover { background: var(--soft); }
+.op-cash-item span { font-size: 13px; }
+.op-cash-item strong { font-size: clamp(18px, 1.7vw, 27px); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.op-cash-item:first-child strong { color: #176d58; }
+.op-cash-item small { color: var(--muted); font-size: 12px; }
+@media(max-width:760px) { .op-cash-grid { grid-template-columns: 1fr 1fr; gap: 12px 0; }
+  .op-cash-item:nth-child(3) { border-left: 0; } }
+
+.op-trend-kind { font-size: 1rem; font-weight: 600; }

@@ -1,3 +1,4 @@
+import { openMedicationRound, parseBedCard } from './med-rounds.js';
 import { residentLabel, staffLabel } from './people-labels.js';
 import {
   canAct,
@@ -14,28 +15,8 @@ import {
   section,
   today
 } from './shared.js';
-// Early draft workspaces have an append-only bed ledger without a stored card code.
-// The server uses the same EAN-8 fallback for those existing allocations.
-function legacyCardCode(sequence) {
-  const digits = String(2000000 + sequence);
-  const sum = [...digits].reduce(
-    (total, digit, index) => total + Number(digit) * (index % 2 ? 1 : 3),
-    0
-  );
-  return digits + ((10 - (sum % 10)) % 10);
-}
-
 function assignments(ctx) {
-  const current = new Map();
-  ctx.state.bedMoves.forEach((move, index) => {
-    if (move.bedId)
-      current.set(move.residentId, {
-        bedId: move.bedId,
-        code: move.cardCode || legacyCardCode(index + 1)
-      });
-    else current.delete(move.residentId);
-  });
-  return current;
+  return new Map(Object.entries(ctx.state.currentBedCards || {}));
 }
 
 const leftDigits = [
@@ -87,7 +68,7 @@ function barcode(code) {
   return svg;
 }
 
-function printCard(ctx, card) {
+async function printCard(ctx, card) {
   const sheet = window.open('', '_blank', 'popup,width=540,height=540');
   if (!sheet) {
     ctx.toast('请允许此站点打开床头卡打印窗口。');
@@ -111,7 +92,13 @@ function printCard(ctx, card) {
     once: true
   });
   sheet.focus();
-  sheet.print();
+  try {
+    await Promise.all([...doc.querySelectorAll('img')].map(img => img.decode()));
+    sheet.print();
+  } catch {
+    sheet.close();
+    ctx.toast('二维码尚未加载，请刷新床头卡后打印。');
+  }
 }
 
 export function bedCard(ctx, resident) {
@@ -123,6 +110,10 @@ export function bedCard(ctx, resident) {
     ctx.toast('长者当前没有有效床头卡。');
     return;
   }
+  const qr = node('img');
+  qr.src = '/api/medication-rounds/cards/' + assignment.code + '.png';
+  qr.alt = bed.label + ' 床核验二维码';
+  qr.width = qr.height = 140;
   const card = node('article', 'fx-bedcard', [
     node('header', 'fx-bedcard-head', [
       node('span', '', '床旁身份核验'),
@@ -130,7 +121,7 @@ export function bedCard(ctx, resident) {
     ]),
     node('h3', '', residentLabel(ctx, resident)),
     node('p', '', [bed.label + ' 床', resident.level].filter(Boolean).join(' · ')),
-    node('div', 'fx-card-barcode', [barcode(assignment.code), node('strong', '', assignment.code)])
+    node('div', 'fx-card-barcode', [qr, barcode(assignment.code), node('strong', '', assignment.code)])
   ]);
   ctx.detail(
     '床头卡',
@@ -150,12 +141,11 @@ export function bedside(ctx) {
   if (!canAct(ctx, 'care.completeTask')) return;
   const input = node('input', 'fx-input');
   input.type = 'text';
-  input.inputMode = 'numeric';
-  input.maxLength = 8;
+  input.maxLength = 512;
   input.required = true;
-  input.placeholder = '8 位床头卡编号';
+  input.placeholder = '扫码，或输入 8 位床头卡编号';
   input.autocomplete = 'off';
-  const label = node('label', 'field', [node('span', '', '扫描条码或输入卡号'), input]);
+  const label = node('label', 'field', [node('span', '', '扫描二维码、条码或输入卡号'), input]);
   const submit = node('button', 'btn btn-primary', '核验床头卡');
   submit.type = 'submit';
   const form = node('form', 'fx-profile fx-scan-panel', [
@@ -171,7 +161,8 @@ export function bedside(ctx) {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     result.replaceChildren();
-    const code = input.value.trim();
+    const scan = parseBedCard(input.value);
+    const code = scan.code;
     const entry = [...assignments(ctx)].find(([, entry]) => entry.code === code);
     const person =
       entry &&
@@ -180,7 +171,7 @@ export function bedside(ctx) {
       );
     const bed =
       person && ctx.state.beds.find((b) => b.id === person.bedId && b.residentId === person.id);
-    if (!bed) {
+    if (!bed || (scan.bed && bed.label !== scan.bed)) {
       result.textContent = '未找到有效的在住分配，请核对床头卡。';
       return;
     }
@@ -193,6 +184,9 @@ export function bedside(ctx) {
         ['长者', residentLabel(ctx, person)],
         ['当前床位', `${bed.ward} · ${bed.label}`]
       ]),
+      canAct(ctx, 'care.confirmMedRound')
+        ? btn(ctx, '按此床头卡核对服药', () => openMedicationRound(ctx, {cardCode:code}), 'primary')
+        : null,
       section(
         '今日待执行',
         records(

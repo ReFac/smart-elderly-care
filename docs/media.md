@@ -27,7 +27,7 @@ python3 manage_plan.py --db .local/workspace.sqlite3 status
 
 ## 在任一业务页说话
 
-打开右上角「询问 AI 助理」，按住麦克风说话，松开后将本段录音提交 DeepSeek ASR。首次使用需在浏览器允许麦克风。在未勾选「语音转写后自动发送」时，可先编辑转写再按 Enter 发送；勾选后转写成功即发送。关闭对话会停止收音。语音只负责转写，工单与通知的发布另有业务审核窗。
+打开右上角「健康助理」，按住麦克风说话，松开后将本段录音提交 DeepSeek ASR。首次使用需在浏览器允许麦克风。在未勾选「语音转写后自动发送」时，可先编辑转写再按 Enter 发送；勾选后转写成功即发送。关闭对话会停止收音。语音只负责转写，工单与通知的发布另有业务审核窗。
 
 已获语音权限的在岗员工可以使用 `POST /api/assistant/voice`。请求发送 WAV 或 Ogg Opus，并通过 `X-DeepSeek-Consent: yes` 记录用户本次操作。房间页发起的对话会同时传递所选区域。语音原件、回执和媒体用量沿用加密存储，账号或区域授权变化后须重新核对。原有独立业务语音接口供旧客户端继续使用。ASR 按音频秒数计量，转写文字发给对话后按模型实际 token 单独结算。[DeepSeek 语音转文字](https://api-docs.deepseek.com/guides/asr/)
 
@@ -52,3 +52,7 @@ python3 manage_plan.py --db .local/workspace.sqlite3 status
 python3 manage_plan.py --db .local/workspace.sqlite3 media-unsettled
 python3 manage_plan.py --db .local/workspace.sqlite3 media-reconcile --call CALL_ID --units CONFIRMED_PAGES_OR_SECONDS
 ```
+
+## 健康助理朗读
+
+勾选对话框底部的「朗读」，新答复会按顺序播放。关闭开关可立即停止。机构服务端按当前账号、区域与会话编号读取已保存的答复，分段发给 DeepSeek，浏览器接收 WAV 音频。总管理员在「机构设置 → 平台 AI 套餐」查看已计费和待核对的字符数。[DeepSeek 官方朗读接口](https://api-docs.deepseek.com/guides/tts/)

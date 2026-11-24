@@ -21,6 +21,9 @@ MUTABLE = {
     "rounds_policy": "机构巡查排程设置",
 }
 ORIGINALS = {
+    "legacy_bed_cards": "历史床位补卡凭证",
+    "resident_medication_reports": "体检用药自报及历次更正",
+    "medication_round_receipts": "逐人服药核对签认",
     "resident_health_notes": "长者健康简介和个人谈话记录",
     "daily_life_events": "集体活动登记",
     "daily_life_invitees": "活动候选名单",
@@ -65,6 +68,7 @@ PROTECTED = {
 }
 LABELS = {
     **PROTECTED,
+    "paymentFeeSettings": "收款手续费设置",
     "visitSchedulePolicies": "院区并行接待席位",
     "beds": "床位",
     "residents": "长者",
@@ -126,6 +130,9 @@ def completed(rows):
 
 
 OPTIONAL_TABLES = {
+    "legacy_bed_cards",
+    "resident_medication_reports",
+    "medication_round_receipts",
     "resident_health_notes",
     "daily_life_events",
     "daily_life_invitees",
@@ -285,5 +292,8 @@ def apply(db):
     if any(key not in state for key in RECEPTION_COLLECTIONS):
         raw = json.dumps(with_reception_collections(state), ensure_ascii=False, separators=(",", ":"))
     db.execute("UPDATE workspace SET data=? WHERE id=1", (raw,))
+    from ..care import legacy_bed_cards
+
+    legacy_bed_cards.backfill(db)
     if db.execute("PRAGMA main.foreign_key_check").fetchone():
         raise ValueError("恢复数据与当前授权机构的关联记录不一致")

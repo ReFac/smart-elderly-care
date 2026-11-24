@@ -147,6 +147,21 @@ class Handler(BaseHTTPRequestHandler):
         return {key: values[0] for key, values in params.items()}
 
     def read_resource(self, path):
+        reported = re.fullmatch(r"/api/residents/([A-Za-z0-9_-]{1,100})/(reported-medications|drug-names)", path)
+        if reported:
+            from platform_core import medication_reports
+            if reported[2] == "drug-names":
+                query = self.query_fields({"q", "online"})
+                if "online" in query and query["online"] != "1":
+                    raise ValueError("联网选项无效")
+                return self.send_json(200, medication_reports.lookup(
+                    self.store, self.token(), reported[1], query.get("q", ""), online="online" in query
+                ))
+            return self.send_json(200, medication_reports.read(self.store, self.token(), reported[1]))
+        card = re.fullmatch(r"/api/medication-rounds/cards/([A-Za-z0-9]{8})\.png", path)
+        if card:
+            from platform_core import med_rounds
+            return self.respond(200, med_rounds.qr(self.store, self.token(), card[1], self.public_origin or ("http://" + self.headers["Host"])), "image/png")
         if path == "/api/daily-life/roster":
             params = self.query_fields({"campusId", "roomId", "day"})
             return self.send_json(200, daily_life.roster(
@@ -496,6 +511,13 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 self.store.dossier_summary_draft(self.token(), chart[1], generate=True),
             )
+        if path == "/api/medication-rounds/preview":
+            from platform_core import med_rounds
+            return self.send_json(200, med_rounds.preview(self.store, self.token(), self.read_json(SMALL_BODY)))
+        if path == "/api/assistant/chat/speech":
+            from platform_core.provider import read_aloud
+
+            return self.respond(200, read_aloud.listen(self.store, self.token(), self.read_json(SMALL_BODY)), "audio/wav")
         if path in ("/api/assistant/chat", "/api/assistant/chat/reset"):
             request = self.read_json(SMALL_BODY)
             operation = chat.reset if path.endswith("/reset") else chat.reply

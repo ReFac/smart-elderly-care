@@ -2,7 +2,7 @@ import { groups } from '../lib/navigation.js';
 import { btn, node } from './shared.js';
 
 const grantGroups = [
-  ['入住与照护', ['residents', 'intake', 'care', 'clinical', 'clinical.rules']],
+  ['入住与照护', ['residents', 'intake', 'care', 'clinical', 'clinical.rules', 'health.overview']],
   ['医疗档案与亲属', ['medical', 'medical.write', 'relatives', 'family.share']],
   ['机构运营', ['inventory', 'finance', 'longCare', 'shifts', 'reports']],
   ['智能协作与设备', ['assistants', 'gateway.simulate', 'alerts', 'voice', 'voice.confirm']],
@@ -29,10 +29,12 @@ const commands = {
       handover: '登记交班',
       acceptHandover: '签收本人交班',
       withdrawHandover: '撤回本人交班',
+      confirmMedRound: '逐位签认床旁服药',
       addMedication: '登记医嘱',
       giveMedication: '登记给药',
       reviewMedication: '复核医嘱',
       vital: '录入体征',
+      reportMedication: '登记长者本人自报的用药',
       resolveVital: '复核异常体征',
       archive: '登记健康记录',
       screen: '登记筛查',
@@ -65,6 +67,7 @@ const commands = {
       shift: '登记排班',
       bill: '生成账单',
       deposit: '登记预交',
+      paymentFees: '维护收款手续费',
       pay: '核销账单',
       paymentOrder: '登记商户订单',
       importReceipt: '核销渠道凭证',

@@ -6,7 +6,7 @@ import unicodedata
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from . import access, facility, visit_schedule
+from . import access, facility, lead_directory, visit_schedule
 from .care.records import append_record, text_field
 from .profile_fields import phone_number as _phone
 
@@ -127,7 +127,7 @@ def require_campus(db, user, campus_id):
 
 def require_lead(db, state, user, lead_id, *, open_only=False, callback=False):
     lead = next((r for r in state.get("leadContacts", ()) if r["id"] == lead_id), None)
-    if not lead:
+    if not lead or lead["status"] == "归档到期":
         raise PermissionError("未找到有权办理的意向记录")
     require_campus(db, user, lead["campusId"])
     if open_only and lead["status"] == "已归档":
@@ -163,8 +163,8 @@ def _open(state, campus, phone):
             r
             for r in reversed(state.get("leadContacts", ()))
             if r["campusId"] == campus
-            and r["phone"] == phone
-            and r["status"] != "已归档"
+            and r.get("phone") == phone
+            and r["status"] not in ("已归档", "归档到期")
         ),
         None,
     )
@@ -176,7 +176,7 @@ def _new(state, campus, phone, name, note, source, now):
         (
             r
             for r in reversed(state["leadContacts"])
-            if r["campusId"] == campus and r["phone"] == phone
+            if r["campusId"] == campus and lead_directory.matches_phone(r, phone)
         ),
         {},
     )
@@ -235,7 +235,7 @@ def receive(db, state, payload, now):
             phone in known
             or phone in admitted
             or any(
-                r["campusId"] == campus and r["phone"] == phone
+                r["campusId"] == campus and lead_directory.matches_phone(r, phone)
                 for r in state.get("leadContacts", ())
             )
         ):
@@ -478,7 +478,9 @@ def command(db, state, user, action, payload, now):
         _fields(payload, {"leadId", "feedback"})
         feedback = text_field(payload.get("feedback"), "归档反馈", required=True)
         _close(state, lead, None, "cancelled", now, user)
-        lead.update(status="已归档", archivedAt=_dt(now), archiveFeedback=feedback)
+        directory = lead_directory.links(db, state, {lead["phone"]})
+        lead.update(status="已归档", archivedAt=_dt(now), archiveFeedback=feedback,
+                    directoryAtArchive=directory.get((lead["campusId"], lead["phone"]), []))
         record_event(state, lead, user, now, "归档", feedback=feedback)
         return "归档意向接待与反馈"
     raise ValueError("未登记的意向接待操作")
@@ -486,7 +488,7 @@ def command(db, state, user, action, payload, now):
 
 def reconcile_callbacks(db, state, now):
     """Release confirmed callbacks after a change to a resident or the contact directory."""
-    active = [r for r in state.get("leadContacts", ()) if r["status"] != "已归档"]
+    active = [r for r in state.get("leadContacts", ()) if r["status"] not in ("已归档", "归档到期")]
     if not active:
         return
     scheduled = {
@@ -522,13 +524,15 @@ def project(db, state, user, data):
     campuses = _campuses(db, user)
     data["leadCampuses"] = campuses
     allowed = {r["id"] for r in campuses}
-    visible = [r for r in state.get("leadContacts", ()) if r["campusId"] in allowed]
+    visible = [r for r in state.get("leadContacts", ()) if r["campusId"] in allowed and r["status"] != "归档到期"]
+    directory = lead_directory.links(db, state, {r["phone"] for r in visible}) if visible else {}
     index = _phone_index(db, state) if visible else (set(), set())
     data["leadContacts"] = []
     for row in visible:
         reason = _exempt_reason(row, index)
         data["leadContacts"].append(
-            {**row, "callbackExempt": bool(reason), "callbackExemptReason": reason}
+            {**row, "directoryLinks": row.get("directoryAtArchive", directory.get((row["campusId"], row["phone"]), [])),
+             "callbackExempt": bool(reason), "callbackExemptReason": reason}
         )
     for collection in ("leadEvents", "visitBookings", "visitSchedulePolicies"):
         data[collection] = [

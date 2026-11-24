@@ -643,7 +643,12 @@ def apply(db, state, action, payload, user, facility_policy=None):
 
 
 def project(db, state, user, facility_policy=None):
-    filtered = visible_data(campus_access.projection(db, state, user), user)
+    projected = campus_access.projection(db, state, user)
+    filtered = visible_data(projected, user)
+    if user["kind"] in ("staff", "owner") and (has(user, "care") or has(user, "intake")):
+        from .care.residency import current_cards
+
+        filtered["currentBedCards"] = current_cards(state, projected.get("residents", ()))
     if filtered.get("referrals"):
         # Receipts stay visible. Their historical payload is served only after a current consent check.
         filtered["referrals"] = [

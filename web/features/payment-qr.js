@@ -17,9 +17,9 @@ function bitmap(matrix) {
   return canvas;
 }
 
-async function show(ctx, order) {
+export async function showCheckout(ctx, order, confirmed = false) {
   if (
-    !(await ctx.confirmChange({
+    !confirmed && !(await ctx.confirmChange({
       title: '申请渠道收款码',
       target: order.channel + ' · ' + order.id,
       fields: [['金额', money(order.amount)]],
@@ -34,6 +34,7 @@ async function show(ctx, order) {
   image.style.textAlign = 'center';
   body.append(facts([['商户订单', order.id], ['金额', money(order.amount)]]), image, message);
   const dialog = ctx.detail(order.channel + '收款码', body);
+  dialog.dataset.paymentOrder = order.id;
   dialog.style.maxWidth = '32rem';
   let timer;
   dialog.addEventListener('close', () => clearTimeout(timer), { once: true });
@@ -48,6 +49,15 @@ async function show(ctx, order) {
     await ctx.refreshWorkspace();
     if (!dialog.open) return;
     image.append(bitmap(code.matrix));
+    const destination = new URL(code.checkoutUrl);
+    if ((order.channel === '微信支付' && destination.protocol === 'weixin:' && destination.host === 'wxpay') ||
+        (order.channel === '支付宝' && destination.origin === 'https://qr.alipay.com')) {
+      const open = node('a', 'text-link merchant-checkout-link', '打开' + order.channel + '付款');
+      open.href = destination.href;
+      open.target = '_blank';
+      open.rel = 'noopener noreferrer';
+      image.append(node('p', '', open));
+    }
     message.textContent = '请使用' + order.channel + '扫码并核对收款方和金额，正在等待到账通知。';
     async function check() {
       if (!dialog.open) return;
@@ -82,7 +92,7 @@ export function checkoutAction(ctx, order, channels) {
   const slot = node('span');
   channels.then((available) => {
     if (available.includes(order.channel)) {
-      slot.append(link(ctx, '显示收款码', () => show(ctx, order)));
+      slot.append(link(ctx, '显示收款码', () => showCheckout(ctx, order)));
     }
   });
   return slot;

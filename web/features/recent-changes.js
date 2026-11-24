@@ -15,6 +15,8 @@ const collections = {
   qualityChecks: '服务抽检',
   handovers: '交班',
   medications: '医嘱',
+  resident_medication_reports: '体检用药自报及更正',
+  medication_round_receipts: '床旁服药核对凭证',
   followups: '随访',
   referrals: '转介',
   vitals: '体征',

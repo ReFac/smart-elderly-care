@@ -34,10 +34,7 @@
       audioUploads++;
       return Response.json({text:'护理用具还有多少？'});
     }
-    if (url.endsWith('/reset')) {
-      if (JSON.parse(options.body).generation !== generation) return Response.json({error:'其他页面已开始新对话'},{status:409});
-      messages=[]; generation+='-new'; return Response.json(snapshot());
-    }
+
     if (options.method !== 'POST') return Response.json(snapshot());
     const data = JSON.parse(options.body);
     submitted.push(data);
@@ -133,11 +130,10 @@
     launcher.click();await until(()=>!find('.assistant-input').disabled,'继续对话');
     generation = 'other-window';
     messages=[{role:'user',content:'另一窗口的问题'},{role:'assistant',content:'另一窗口的回复'}];
-    find('.assistant-new').click();
+    launcher.click(); launcher.click();
     await until(()=>find('.assistant-log').innerText.includes('另一窗口的回复') && !find('.assistant-input').disabled,'旧窗口自动载入新会话');
     check(messages.length===2,'旧窗口没有重置新一代对话');
-    find('.assistant-new').click();
-    await until(()=>!document.querySelector('.from-user') && !find('.assistant-input').disabled,'开始新对话');
+    check(!find('.assistant-new') && messages.length===2,'单窗口保留对话');
     state.user={...state.user,id:'fixture-other'};
     checkChatUser(ctx);
     check(!find('#assistant-chat'),'切换账号清除对话和录音');

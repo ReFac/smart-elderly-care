@@ -12,6 +12,7 @@ import {
   canAct,
   money,
 } from './shared.js';
+import { admissionPayment } from './billing.js';
 import { profile } from './residency.js';
 import { trialLength, trialLastDay, trialTermFields } from './trial-terms.js';
 import { confirmStay, endTrial } from './trial-stays.js';
@@ -196,7 +197,7 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
         : []),
     ],
     submitLabel: transfer ? '核对转床' : '核对入住',
-    onSubmit: (values) => {
+    onSubmit: async (values) => {
       const { contractTerm, ...terms } = values;
       const payload = { residentId: person.id, ...terms };
       if (transfer) payload.fromBedId = person.bedId;
@@ -223,12 +224,14 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
               ]
               : [['收费约定', billingSchedule(payload)], ['合同期限', payload.endDate || '无期限']]),
           ];
-      return ctx.command(action, payload, {
+      const done = await ctx.command(action, payload, {
         title: transfer ? '确认将' + residentLabel(ctx, person) + '从原床位转至新床位？' : '确认从档案办理入住',
         target: residentLabel(ctx, person),
         fields,
         confirmLabel: transfer ? '确认转床' : payload.stayType === 'trial' ? '确认试住' : '确认入住',
       });
+      if (done && !transfer) admissionPayment(ctx.current(), person.id);
+      return done;
     },
   });
   if (!transfer) {

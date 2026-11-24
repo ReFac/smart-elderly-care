@@ -96,10 +96,14 @@ def watch(db, action):
     prefixes = PREFIXES.get(action.partition(".")[0], ())
     if action in ("care.proposeGroupActivity", "care.confirmGroupActivity"):
         prefixes = ("daily_life_",)
+    if action == "care.confirmMedRound":
+        prefixes = ("medication_round_receipts",)
     if action in ("care.healthNote", "dossier.signHealthIntro"):
         prefixes = ("resident_health_notes",)
+    if action in ("care.reportMedication", "portal.reportMedication"):
+        prefixes = ("resident_medication_reports",)
     if action in ("backup.apply", "history.undo"):
-        prefixes = (*tuple(k for group in PREFIXES.values() for k in group), "daily_life_", "resident_health_notes")
+        prefixes = (*tuple(k for group in PREFIXES.values() for k in group), "daily_life_", "resident_health_notes", "resident_medication_reports", "medication_round_receipts", "legacy_bed_cards")
     if not prefixes:
         return
     for (table,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'"):
@@ -215,6 +219,9 @@ def collect(db, current, previous):
             people.add(identity)
         if collection == "facility_rooms":
             rooms.add(identity)
+        if collection == "medication_round_receipts" and isinstance(source.get("details"), dict):
+            people.add(source["details"]["residentId"])
+            rooms.add(source["details"]["roomId"])
         if collection == "daily_life_signatures" and source.get("eventId"):
             # Signing may occur after the original registration or after a move.
             # Keep the actual event rooms even if nobody was marked present.

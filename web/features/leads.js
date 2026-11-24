@@ -22,7 +22,11 @@ function occurrenceField(label) {
   return field('occurredAt', label, { type: 'datetime-local', step: 1, value: now });
 }
 
-const leadName = r => r.name || '未留姓名';
+const leadName = r => (r.name || r.directoryLinks?.find(x => x.contact)?.contact || '未留姓名') +
+  (r.directoryLinks?.length ? '' : '（新客）');
+const relationships = row => (row.directoryLinks || []).map(x => x.residentId
+  ? [x.bed && x.bed + '床', x.residentName + '的' + x.relation, x.contact].filter(Boolean).join(' ')
+  : [x.contact, x.relation].filter(Boolean).join('（') + (x.contact && x.relation ? '）' : '')).join('、');
 const exempt = r => r.callbackExempt || r.callbackStopped;
 export function pendingLeadCalls(state) {
   return (state.leadContacts || []).filter(r => r.status === '待回访' && !exempt(r)).length;
@@ -132,7 +136,7 @@ function detail(ctx, row) {
   return ctx.detail('客户联系记录', node('div', 'fx-profile', [
     header,
     facts([
-      ['来源', sources[row.source]], ['首次登记', stamp(row.createdAt)],
+      ['号码关联', relationships(row) || '新客，尚无关联档案'], ['来源', sources[row.source]], ['首次登记', stamp(row.createdAt)],
       ['客户意向', row.note], ['期望到访', stamp(row.preferredAt) || '待商定'],
       ...(exempt(row) ? [['电话回访', callbackNote(row)]] : []),
       ...(row.archiveFeedback ? [['归档反馈', row.archiveFeedback]] : []),
@@ -160,12 +164,13 @@ function registry(ctx, archive) {
   const sourceFilters = Object.entries(sources).map(([id, text]) => ({ text, match: r => r.source === id }));
   const choices = archive ? sourceFilters : [...filters, ...sourceFilters];
   return table(ctx, {
-    title: archive ? '已归档客户' : '跟进中的客户',
+    title: archive ? '近 365 天归档客户' : '跟进中的客户',
     rows, empty: archive ? '尚无归档客户' : '暂无待跟进客户，可手工登记来电或来访。',
-    search: { placeholder: '搜索称呼、电话或分院', value: r => [r.name, r.phone, campusName(ctx, r.campusId)].join(' ') },
+    search: { placeholder: '搜索客户、电话、床号或关联长者', value: r => [leadName(r), r.phone, relationships(r), campusName(ctx, r.campusId)].join(' ') },
     filter: { label: '筛选客户', all: '全部客户', options: choices.map(c => c.text), matches: (r, text) => choices.find(c => c.text === text)?.match(r) },
     cols: [
       { label: '客户', view: r => named(leadName(r), r.phone) },
+      { label: '号码关联', view: r => relationships(r) || '—' },
       { label: '来源 / 分院', view: r => named(sources[r.source], campusName(ctx, r.campusId)) },
       { label: archive ? '归档时间' : '最近跟进', view: r => stamp(archive ? r.archivedAt : r.updatedAt) },
       { label: archive ? '归档说明' : '跟进状态', view: r => archive ? node('span', 'lead-summary', r.archiveFeedback || '—')

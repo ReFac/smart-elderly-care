@@ -8,6 +8,9 @@ from decimal import Decimal
 from ..operations.assistants import cite_records
 
 
+CASH_METHODS = ("线下登记", "线下刷卡登记", "微信支付", "支付宝")
+
+
 def reporting_window(goal, day):
     today = date.fromisoformat(day)
     token_pattern = (
@@ -68,10 +71,7 @@ def receipts(records, goal, day):
                 r
                 for r in records[key]
                 if begin <= r["date"] <= end
-                and (
-                    key == "depositEntries"
-                    or r.get("method") in ("线下登记", "微信支付", "支付宝")
-                )
+                and (key == "depositEntries" or r.get("method") in CASH_METHODS)
             ),
             key=lambda r: r["date"],
             reverse=True,
@@ -103,3 +103,55 @@ def receipts(records, goal, day):
         title = f"开单应收 ¥{billed:.2f} · 实收 ¥{total:.2f}"
         note += "开单应收按账单创建日期统计全单金额，预交款包含在实际现金收入中。"
     return "", title, note + "每类最多列出 10 笔凭证。", evidence
+
+
+def cash_rows(records, people=None):
+    for key in ("depositEntries", "payments"):
+        for row in records.get(key, ()):
+            if people is not None and row.get("residentId") not in people:
+                continue
+            if key == "depositEntries" or row.get("method") in CASH_METHODS:
+                yield key, row
+
+
+def overview(records, today, people=None):
+    """Use the two disjoint allocations of each receipt; credit redemptions are internal."""
+    first = today[:7] + "-01"
+    days = {}
+    first_day = min(first, (date.fromisoformat(today) - timedelta(days=6)).isoformat())
+    unknown_fees = False
+    for key, row in cash_rows(records, people):
+        day = row["date"]
+        if not (first_day <= day <= today):
+            continue
+        bucket = days.setdefault(
+            day, dict(deposits=Decimal(0), direct=Decimal(0), fees=Decimal(0))
+        )
+        bucket["deposits" if key == "depositEntries" else "direct"] += Decimal(
+            str(row["amount"])
+        )
+        if row.get("feeAmount") is not None:
+            bucket["fees"] += Decimal(str(row["feeAmount"]))
+        elif day == today:
+            unknown_fees = True
+    ledger = [
+        b
+        for b in records.get("bills", ())
+        if people is None or b.get("residentId") in people
+    ]
+    current = days.get(today, {})
+    gross = current.get("direct", 0) + current.get("deposits", 0)
+    return {
+        "date": today,
+        "monthGross": float(
+            sum(v["direct"] + v["deposits"] for k, v in days.items() if k >= first)
+        ),
+        "todayGross": float(gross),
+        "todayNet": None if unknown_fees else float(gross - current.get("fees", 0)),
+        "outstanding": float(
+            sum(Decimal(str(b["balance"])) for b in ledger if b["balance"] > 0)
+        ),
+        "daily": {
+            d: {k: float(v) for k, v in bucket.items()} for d, bucket in days.items()
+        },
+    }

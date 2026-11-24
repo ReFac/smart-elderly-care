@@ -222,7 +222,7 @@ class ChatTests(unittest.TestCase):
         links = first["messages"][-1]["pageLinks"]
         self.assertEqual(
             [(p["route"], p.get("tab")) for p in links],
-            [("inventory", "stock"), ("billing", "payments")],
+            [("inventory", "stock"), ("billing", "receipts")],
         )
         self.assertEqual(chat.read(self.store, self.owner), first)
         self.transport.return_value["choices"][0]["message"]["content"] = (

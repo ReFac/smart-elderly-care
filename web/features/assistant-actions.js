@@ -1,3 +1,4 @@
+import { openMedicationRound } from './med-rounds.js';
 import { staffLabel } from './people-labels.js';
 import { badge, canAct, field, memo, node, select, table, today } from './shared.js';
 import { taskForm } from './care.js';
@@ -69,7 +70,7 @@ export function assistantPageLinks(ctx, message) {
 export function assistantCommand(ctx, message) {
   const action = message?.action;
   if (message?.role !== 'assistant' || message.webSearched || !action) return null;
-  if (action.kind !== 'navigate') return ['notice', 'workOrder'].includes(action.kind) ? action : null;
+  if (action.kind !== 'navigate') return ['notice', 'workOrder', 'medicationRound'].includes(action.kind) ? action : null;
   const target = pageDestination(ctx, action);
   if (!target) return null;
   const links = assistantPageLinks(ctx, message).filter((link) => link.destination === target.destination);
@@ -80,6 +81,9 @@ export function assistantCommand(ctx, message) {
 export function openAssistantAction(ctx, action) {
   if (!action || !routes.has(action.route) || !ctx.available(action.route))
     return ctx.toast('当前账号无法打开这个页面');
+  if (action.kind === 'medicationRound') {
+    return openMedicationRound(ctx, {text: action.text, ...(action.region ? {region: action.region} : {})});
+  }
   if (action.kind === 'navigate') {
     const link = pageDestination(ctx, action);
     if (!link) return ctx.toast('当前账号无法打开这个页面');

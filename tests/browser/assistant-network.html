@@ -32,10 +32,7 @@
       if (mode === 'fail') return Response.json({error:'搜索服务暂不可用，请稍后重试。'},{status:503});
       return Response.json({connected:true,model:'deepseek-flash'});
     }
-    if (url === '/api/assistant/chat/reset'){
-      if (payload.generation!==generation) return Response.json({error:'版本变更'},{status:409});
-      generation+='-reset';messages=[];return Response.json(current());
-    }
+
     if (options.method==='POST') {
       check(url==='/api/assistant/chat','仅向机构同源聊天接口发送问题');
       if (backendError) throw new TypeError('网络暂不可用');
@@ -101,11 +98,10 @@
     check(!find('.from-assistant:last-child .assistant-sources'),'普通回答不标为已查网');
     network().click(); await until(pressed,'重新联网');
     generation='another-tab';messages=[{role:'user',content:'新一轮'},{role:'assistant',content:'已更新'}];
-    find('.assistant-new').click();await until(()=>!network().disabled && find('.assistant-log').textContent.includes('已更新'),'旧标签页与新会话同步');
+    launch.click(); launch.click();await until(()=>!network().disabled && find('.assistant-log').textContent.includes('已更新'),'旧标签页与新会话同步');
     check(!pressed() && messages.length===2,'新一代会话不继承联网');
-    network().click();await until(pressed,'再次开启');
-    find('.assistant-new').click(); await until(()=>!network().disabled && !find('.from-assistant'),'重置成功');
-    check(!pressed(),'手动新建对话默认关闭');
+    check(!find('.assistant-new') && !find('.assistant-composer-foot label:nth-child(2) input').checked,
+      '健康助理仅有一个对话窗口，朗读初始关闭');
     network().click();await until(pressed,'区域切换前开启');
     openChat(()=>ctx,{roomId:'fixture-room',label:'演练房间'});await until(()=>!network().disabled,'切换到房间对话');
     check(!pressed(),'房间范围单独启用');

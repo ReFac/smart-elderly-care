@@ -260,6 +260,7 @@ def qr(order, url, expires):
         amount=order["amount"],
         channel=order["channel"],
         expiresAt=expires,
+        checkoutUrl=url,
         matrix=["".join("1" if b else "0" for b in row) for row in code.get_matrix()],
     )
 
@@ -273,6 +274,33 @@ def authorized_order(store, db, token, oid):
     return actor, data, order
 
 
+def payable(order, bill):
+    if order["status"] != "待支付" or bill["balance"] <= 0:
+        return False
+    return (
+        order["amount"] <= bill["balance"]
+        or order.get("balanceAtIssue") == bill["balance"]
+    )
+
+
+def cached_payment_link(db, state, order, now):
+    if not payable(order, lookup(state, "bills", order["billId"], "账单")):
+        return {}
+    if not db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='checkout_codes'"
+    ).fetchone():
+        return {}
+    row = db.execute(
+        "SELECT url,until FROM checkout_codes WHERE id=? AND url<>'' AND until>?",
+        (order["id"], int(now.timestamp())),
+    ).fetchone()
+    if not row or order["channel"] not in enabled_channels():
+        return {}
+    return dict(
+        channel=order["channel"], checkoutUrl=row["url"], expiresAt=row["until"]
+    )
+
+
 def open_code(store, token, oid):
     now = store.now()
     ts = int(now.timestamp())
@@ -283,7 +311,7 @@ def open_code(store, token, oid):
         if order["channel"] not in enabled_channels():
             raise ValueError("本机构尚未启用此渠道的商户收款码")
         bill = lookup(data, "bills", order["billId"], "账单")
-        if order["status"] != "待支付" or order["amount"] > bill["balance"]:
+        if not payable(order, bill):
             raise ValueError("订单已到账或应收余额已变，请核对收费账单")
         db.execute(
             """CREATE TABLE IF NOT EXISTS checkout_codes (id TEXT PRIMARY KEY, lease TEXT NOT NULL, until INTEGER NOT NULL, url TEXT NOT NULL)"""
@@ -305,7 +333,7 @@ def open_code(store, token, oid):
             db.execute("BEGIN IMMEDIATE")
             actor, data, order = authorized_order(store, db, token, oid)
             bill = lookup(data, "bills", order["billId"], "账单")
-            if order["status"] != "待支付" or order["amount"] > bill["balance"]:
+            if not payable(order, bill):
                 raise ValueError("订单状态已更新，请刷新账单")
             if not db.execute(
                 "UPDATE checkout_codes SET url=?,until=? WHERE id=? AND lease=?",

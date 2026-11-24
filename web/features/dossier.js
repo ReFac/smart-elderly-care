@@ -1,6 +1,7 @@
 import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { residentDailyReadOnly, residentInsights } from './resident-insights.js';
 import { healthProfile } from './resident-health.js';
+import { renderMedicationReports } from './medication-reports.js';
 import { dailyTimeline } from './daily-timeline.js';
 import { billDetail } from './billing.js';
 import { editResident } from './profile-editor.js';
@@ -181,6 +182,8 @@ function myFamily(ctx) {
     panels.push(['personalHealth', '我的生活与健康', () => node('div', 'personal-life', [
       residentDailyReadOnly(ctx, resident.id), healthProfile(ctx, resident), dailyTimeline(ctx, resident),
     ])]);
+  if (me.portalSelf && me.portalScopes.includes('medicationReport'))
+    panels.push(['medicationReport', '我的用药自报', () => renderMedicationReports(ctx, resident.id)]);
   if (services) panels.push(['completed', '已完成服务', () => services]);
   if (ctx.state.portalTasks)
     panels.push([
@@ -615,7 +618,7 @@ export function openDossier(ctx, resident) {
   const recentChanges = scopedHistoryButton(ctx, 'resident', resident.id);
   if (recentChanges) actions.append(recentChanges);
   if (!archived && allowed(ctx, 'care')) contents.append(careTimeline(ctx, 'resident', resident.id));
-  if (hasGrant(ctx, 'care', 'clinical', 'medical')) contents.prepend(healthProfile(ctx, resident));
+  if (hasGrant(ctx, 'care', 'clinical', 'medical')) contents.prepend(healthProfile(ctx, resident), renderMedicationReports(ctx, resident.id));
   if (hasGrant(ctx, 'care', 'clinical')) contents.append(dailyTimeline(ctx, resident));
   if (allowed(ctx, 'medical')) contents.append(
     visitHistory(ctx, resident, archived ? null : openVisitEditor), timeline(ctx, resident)

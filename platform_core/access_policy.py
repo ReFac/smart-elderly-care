@@ -5,6 +5,7 @@ PERMISSIONS = {
     "intake": "意向客户、接待、入住和床位管理",
     "care": "评估、照护和工单执行",
     "care.groupConfirm": "核对集体活动参加名单并签认",
+    "health.overview": "查阅授权区域的健康汇总人数与异常项数",
     "clinical": "体征、异常、医嘱和用药复核",
     "clinical.rules": "维护经专业核准的用药核查规则",
     "medical": "查阅医疗文档原件",
@@ -17,16 +18,17 @@ PERMISSIONS = {
     "shifts": "工作排班",
     "notices.publish": "向全体员工发布通知",
     "reports": "报送及经营视图",
-    "assistants": "向 AI 助理询问已授权的业务",
+    "assistants": "向健康助理询问已授权的业务",
     "gateway.simulate": "登记模拟设备事件",
     "alerts": "护士复核预警并记录处置",
-    "voice": "向 AI 助理语音提问、发起语音变更申请",
+    "voice": "向健康助理语音提问、发起语音变更申请",
     "voice.confirm": "确认或退回语音变更",
     "audit": "查阅已授权业务的操作日志",
     "staff.manage": "在本人业务权限内管理员工账号",
 }
 PRESETS = {
     "院长": [
+        "health.overview",
         "residents",
         "intake",
         "care",
@@ -117,6 +119,8 @@ ACTION_GRANTS = {
     "care.handover": "care",
     "care.proposeGroupActivity": "care",
     "care.confirmGroupActivity": "care.groupConfirm",
+    "care.reportMedication": "care",
+    "care.confirmMedRound": "care",
     "care.healthNote": "care",
     "dossier.signHealthIntro": "medical",
     "care.acceptHandover": "care",
@@ -190,6 +194,7 @@ COLLECTION_GRANTS = {
     "depositEntries": "finance",
     "payments": "finance",
     "paymentOrders": "finance",
+    "paymentFeeSettings": "finance",
     "channelReceipts": "finance",
     "expenses": "finance",
     "reports": "reports",
@@ -302,6 +307,14 @@ def authorize(user, action, payload, state):
         if user["kind"] != "family" or user.get("portalSelf"):
             raise PermissionError("仅限亲属本人管理订阅和收件箱")
         return
+    if action == "ops.paymentFees":
+        if user["kind"] != "owner":
+            raise PermissionError("仅总管理员可以设置支付手续费")
+        return
+    if action == "portal.reportMedication":
+        if not (user["kind"] == "family" and user.get("portalSelf") and "medicationReport" in user.get("portalScopes", ())):
+            raise PermissionError("此账号没有本人用药填报授权")
+        return
     if action == "portal.feedback":
         if user["kind"] != "family" or "careSchedule" not in user.get(
             "portalScopes", ()
@@ -391,6 +404,8 @@ def allowed_actions(user):
         )
     elif has(user, "relatives") and has(user, "family.share"):
         actions.append("family.consent")
+    if user.get("portalSelf") and "medicationReport" in user.get("portalScopes", ()):
+        actions.append("portal.reportMedication")
     if user["kind"] == "family" and "careSchedule" in user.get("portalScopes", ()):
         actions.append("portal.feedback")
     if not (has(user, "clinical") and has(user, "medical")):
@@ -416,6 +431,7 @@ def allowed_actions(user):
     if user["kind"] == "owner":
         actions += [
             *FACILITY_COMMANDS,
+            "ops.paymentFees",
             "access.settings",
             "access.mediaSettings",
             "access.trialSettings",

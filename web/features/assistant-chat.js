@@ -1,3 +1,4 @@
+import { replyReader } from './assistant-reader.js';
 import { networkControl, searchSources } from './assistant-network.js';
 import { el, icon } from '../lib/ui.js';
 import { node } from './shared.js';
@@ -58,7 +59,7 @@ function actorSignature(ctx, scoped) {
 }
 
 export function chatLauncher(open) {
-  const launch = control('询问 AI 助理', 'spark', 'assistant-launch', open);
+  const launch = control('健康助理', 'spark', 'assistant-launch', open);
   launch.id = 'assistant-launch';
   launch.setAttribute('aria-haspopup', 'dialog');
   launch.setAttribute('aria-controls', 'assistant-chat');
@@ -102,7 +103,7 @@ function buildChat(getContext, actor, area, region, label) {
   panel.hidden = true;
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-labelledby', 'assistant-name');
-  const name = el('h2', '', 'AI 助理');
+  const name = el('h2', '', '健康助理');
   name.id = 'assistant-name';
   const scope = el('span', 'assistant-scope', label || ctx.state.uiSettings.institutionName);
   const titles = node('div', 'assistant-titles', [name, scope]);
@@ -121,9 +122,8 @@ function buildChat(getContext, actor, area, region, label) {
     true,
   );
   recents.hidden = !(ctx.state.agentRuns?.length || ctx.state.suggestions?.length);
-  const reset = control('新对话', 'plus', 'assistant-new', () => restart());
   const close = control('收起助理', 'close', 'assistant-icon-control', hide, true);
-  const header = node('header', 'assistant-header', [mark(), titles, recents, reset, close]);
+  const header = node('header', 'assistant-header', [mark(), titles, recents, close]);
   const log = el('section', 'assistant-log');
   log.setAttribute('role', 'log');
   log.setAttribute('aria-label', '对话记录');
@@ -142,6 +142,7 @@ function buildChat(getContext, actor, area, region, label) {
   note.setAttribute('role', 'status');
   const error = el('div', 'assistant-error');
   error.setAttribute('role', 'alert');
+  const reader = replyReader((message) => { note.textContent = message; });
   const auto = el('input');
   auto.type = 'checkbox';
   const pref = 'assistant:auto-send:' + ctx.state.user.id;
@@ -235,8 +236,9 @@ function buildChat(getContext, actor, area, region, label) {
     error,
     note,
     network.status,
+    reader.player,
     composeBox,
-    node('div', 'assistant-composer-foot', [autoLabel, network.button]),
+    node('div', 'assistant-composer-foot', [autoLabel, reader.label, network.button]),
   );
   panel.append(header, log, composer);
   document.body.append(panel);
@@ -255,7 +257,6 @@ function buildChat(getContext, actor, area, region, label) {
       !input.value.trim() ||
       input.value.length > input.maxLength ||
       voicePhase !== 'idle';
-    reset.disabled = !loaded || waiting || sending || voicePhase !== 'idle' || !messages.length;
     if (voice) voice.control.disabled = blocked;
     if (visit) visit.disabled = sending || network.probing || voicePhase !== 'idle';
   }
@@ -328,10 +329,10 @@ function buildChat(getContext, actor, area, region, label) {
       }
       body.append(group);
     }
-    if (!mine && !item.webSearched && ['notice', 'workOrder'].includes(item.action?.kind)) {
+    if (!mine && !item.webSearched && ['notice', 'workOrder', 'medicationRound'].includes(item.action?.kind)) {
       const action = item.action;
       const trigger = control(
-        action.kind === 'notice' ? '核对通知' : '核对工单',
+        action.kind === 'medicationRound' ? '逐人核对服药' : action.kind === 'notice' ? '核对通知' : '核对工单',
         'file',
         'assistant-action',
         () => perform(action),
@@ -436,39 +437,8 @@ function buildChat(getContext, actor, area, region, label) {
     await load();
     if (!destroyed && loaded) problem(message);
   }
-  async function restart() {
-    if (reset.disabled) return;
-    waiting = true;
-    error.replaceChildren();
-    draw();
-    request = new AbortController();
-    try {
-      const result = await json(path + '/reset', {
-        method: 'POST',
-        signal: request.signal,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scopeKey, generation, region }),
-      });
-      if (destroyed) return;
-      update(result);
-      network.reset();
-      retry = null;
-      input.value = '';
-      note.textContent = '';
-    } catch (e) {
-      if (destroyed) return;
-      if (e.status === 409) await reloadConflict('此对话已更新，已显示最新消息。');
-      else problem(e.message);
-    } finally {
-      if (!destroyed) {
-        waiting = false;
-        draw(messages.length ? 'preserve' : 'start');
-        adjustInput();
-        input.focus();
-      }
-    }
-  }
-  function hide() {
+  function hide(keepPlayback = false) {
+    if (keepPlayback !== true) reader.stop();
     if (network.probing) network.reset();
     panel.hidden = true;
     voice.cancel();
@@ -486,7 +456,7 @@ function buildChat(getContext, actor, area, region, label) {
     }
     try {
       if (!(await getContext().refreshWorkspace()) || destroyed || panel.hidden) return;
-      hide();
+      hide(true);
       await openAssistantAction(getContext(), action);
     } catch (e) {
       if (!destroyed) getContext().toast(e.message);
@@ -541,6 +511,7 @@ function buildChat(getContext, actor, area, region, label) {
       if (destroyed) return;
       update(result, true);
       received = true;
+      if (!panel.hidden) reader.enqueue(messages.at(-1), {region, scopeKey, generation});
       if (
         messages.at(-2)?.content === text &&
         page === (location.hash.slice(1) || 'overview')
@@ -643,6 +614,7 @@ function buildChat(getContext, actor, area, region, label) {
     },
     destroy() {
       destroyed = true;
+      reader.stop();
       voice.cancel();
       network.reset();
       request?.abort();

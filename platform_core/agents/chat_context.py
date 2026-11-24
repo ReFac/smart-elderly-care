@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from .. import access, access_policy as policy, campus_access, facility, history
-from . import region
+from . import region, revenue, ward_brief
 
 
 ROUTES = {
@@ -184,7 +184,24 @@ def evidence(store, db, actor, state, chosen, hours, topics):
             facts["经销员或供应商绩效资料"] = (
                 "当前没有此类台账，不能据库存推断供应商表现。"
             )
+    today = now.date().isoformat()
+    if policy.has(actor, "health.overview"):
+        residents = campus_access.projection(db, state, actor)["residents"] if actor.get("facilityScope") else state["residents"]
+        current_health = {p["id"] for p in residents if p.get("status") == "在住"}
+        if chosen:
+            current_health &= set(chosen["residentIds"])
+    else:
+        current_health = current
+    health = ward_brief.health(db, actor, state, current_health, chosen, today)
+    if health is not None:
+        facts["今日已登记健康情况"] = health
     if policy.has(actor, "finance"):
+        summary = revenue.overview(data, today, set(chosen["residentIds"]) if chosen else None)
+        facts["到账与欠款（元）"] = {
+            "日期": today, "本月至今流水（含预缴）": summary["monthGross"],
+            "今日新增实收（含预缴）": summary["todayGross"], "今日扣费后净入账": summary["todayNet"] if summary["todayNet"] is not None else "历史凭证手续费待核对",
+            "截至今日待缴余额": summary["outstanding"],
+        }
         bills = [b for b in data["bills"] if b.get("residentId") in current]
         facts["在住账单当前状态（按账单笔数统计）"] = dict(
             Counter(b["status"] for b in bills)

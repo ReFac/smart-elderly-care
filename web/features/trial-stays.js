@@ -1,3 +1,4 @@
+import { admissionPayment } from './billing.js';
 import { residentAnchor, residentLabel, staffLabel } from './people-labels.js';
 import { allocate, billingSchedule, bindContractFields, contractFields, isTrial, monthlyDayField } from './admission.js';
 import { profile } from './residency.js';
@@ -23,16 +24,18 @@ export function confirmStay(ctx, person, targetBed = null) {
       ...contractFields(day, person.endDate || ''),
     ],
     submitLabel: '核对转正',
-    onSubmit: ({ bedId, billingDay, contractTerm, endDate }) => {
+    onSubmit: async ({ bedId, billingDay, contractTerm, endDate }) => {
       const payload = { residentId: person.id, billingDay: Number(billingDay), endDate: contractTerm === 'fixed' ? endDate : '' };
       if (selectBed) payload.bedId = bedId;
-      return ctx.command('care.confirmStay', payload, {
+      const done = await ctx.command('care.confirmStay', payload, {
         title: '确认试住转正式入住', target: residentLabel(ctx, person),
         fields: [
           ['床位', bedName(ctx, bedId || person.bedId)], ['月费起算日', starts], ['收费安排', billingSchedule(payload)],
           ['合同期限', payload.endDate || '无期限'],
         ], confirmLabel: '确认转正',
       });
+      if (done) admissionPayment(ctx.current(), person.id);
+      return done;
     },
   });
   bindContractFields(dialog);

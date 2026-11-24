@@ -207,7 +207,15 @@ class MerchantCheckout(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.store.payment_channels(staff)
         self.assertEqual(self.mock.calls, [])
+        self.assertNotIn(
+            "checkoutUrl", self.store.payment_order_status(self.user, order["id"])
+        )
         a = self.store.payment_checkout(self.user, order["id"])
+        current = self.store.payment_order_status(self.user, order["id"])
+        self.assertEqual(
+            (current["checkoutUrl"], current["channel"], current["expiresAt"]),
+            (a["checkoutUrl"], "支付宝", a["expiresAt"]),
+        )
         self.assertEqual(self.store.payment_checkout(self.user, order["id"]), a)
         self.assertEqual(len(self.mock.calls), 1)
         self.assertTrue(all(len(row) == len(a["matrix"]) for row in a["matrix"]))
@@ -227,6 +235,9 @@ class MerchantCheckout(unittest.TestCase):
         )
         self.assertEqual(
             self.store.payment_order_status(self.user, order["id"])["status"], "已到账"
+        )
+        self.assertNotIn(
+            "checkoutUrl", self.store.payment_order_status(self.user, order["id"])
         )
         with self.assertRaises(ValueError):
             self.store.payment_checkout(self.user, order["id"])

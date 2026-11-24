@@ -16,8 +16,8 @@
   const person = { id: 'test-res', name: '测试档案', status: '未入住', level: '自理' };
   const commands = [];
   const ctx = {
-    today: '2026-01-31', ui, dialog: formDialog, detail, toast(message) { throw Error(message); },
-    state: { beds: [{ id: 'test-bed', label: '01-A', ward: '东区', status: '空闲' }], trialSettings: { days: 3, fee: null } },
+    today: '2026-01-31', current: () => ctx, ui, dialog: formDialog, detail, toast(message) { throw Error(message); },
+    state: { allowedActions: ['care.admit', 'care.confirmStay'], beds: [{ id: 'test-bed', label: '01-A', ward: '东区', status: '空闲' }], trialSettings: { days: 3, fee: null } },
     command(action, payload, review) { commands.push({ action, payload, review }); return true; },
   };
   const change = (control, value) => { control.value = value; control.dispatchEvent(new Event('change')); };

@@ -35,6 +35,7 @@ OPERATIONS_COLLECTIONS = (
     "depositEntries",
     "payments",
     "paymentOrders",
+    "paymentFeeSettings",
     "channelReceipts",
     "expenses",
     "shifts",

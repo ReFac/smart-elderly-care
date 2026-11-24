@@ -7,15 +7,12 @@ import {
   kpis,
   field,
   select,
-  options,
-  residentField,
   residentName,
   choose,
   btn,
   link,
   named,
   badge,
-  runForm,
   facts,
   section,
   records,
@@ -23,14 +20,16 @@ import {
   money,
 } from './shared.js';
 
+import { cashierActions, feeSettings, receiptDescription, recordCash } from './cashier.js';
+import { receiptFacts, receiptLedger, receiptRows } from './receipt-ledger.js';
 import { chargesEditor, feeLedger, lineDescription } from './charge-lines.js';
 import { channelOrders, expensePanel, reminders } from './settlements.js';
 
-function generate(ctx, selected) {
+function generate(ctx, selected, onIssued) {
   if (!ctx.state.allowedActions.includes('ops.bill')) return ctx.toast('当前账号无权核算账单');
   const due = new Map((ctx.state.billingDue || []).map((r) => [r.residentId, r]));
   const people = ctx.state.residents.filter((r) =>
-    r.admittedAt && r.stayType !== 'trial' && (!r.billingDay || due.has(r.id)));
+    (!onIssued || r.id === selected.residentId) && r.admittedAt && r.stayType !== 'trial' && (!r.billingDay || due.has(r.id)));
   if (!people.length) return ctx.toast('当前没有可核算的月付账期');
   const resident = select(
     'residentId',
@@ -58,9 +57,11 @@ function generate(ctx, selected) {
       const response=await fetch('/api/billing/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payload,revision:ctx.state.revision})});
       const quote=await response.json();
       if (!response.ok) throw new Error(quote.error||'无法核算');
-      return ctx.command('ops.bill',payload,{title:'确认账单明细',target:residentName(ctx,payload.residentId)+' · '+quote.month,
+      const done = await ctx.command('ops.bill',payload,{title:'确认账单明细',target:residentName(ctx,payload.residentId)+' · '+quote.month,
         fields:[['账单日期',quote.billingDate || quote.month], ['计费区间',quote.startDate + ' 至 ' + quote.endDate],
           ...quote.lineItems.map(l=>[l.label,lineDescription(l)]),['应收合计',money(quote.amount)]]});
+      if (done && onIssued) onIssued(ctx.current(), payload.residentId);
+      return done;
     },
     description:
       '按长者约定的账期核算。日费率和请假天数留空时，使用相应床位、照护等级及请假记录。',
@@ -113,45 +114,24 @@ function generate(ctx, selected) {
   sync();
 }
 
-function deposit(ctx) {
-  runForm(ctx, {
-    title: '登记预交金',
-    action: 'ops.deposit',
-    description: '到账后按顺序冲抵该长者的待缴费用，剩余金额计入预交余额。',
-    fields: [
-      residentField(ctx),
-      field('amount', '到账金额（元）', {
-        type: 'number',
-        min: '0.01',
-        step: '0.01',
-      }),
-    ],
-    submitLabel: '登记到账',
-  });
-}
-
-function pay(ctx, bill) {
-  runForm(ctx, {
-    title: '登记线下收款',
-    action: 'ops.pay',
-    description:
-      residentName(ctx, bill.residentId) + ' · ' + bill.month + ' 待缴 ' + money(bill.balance),
-    fields: [
-      field('amount', '实收金额（元）', {
-        type: 'number',
-        min: '0.01',
-        max: bill.balance,
-        step: '0.01',
-        value: bill.balance,
-      }),
-      select('method', '登记方式', options(['线下登记'])),
-    ],
-    map: (v) => ({
-      ...v,
-      billId: bill.id,
-    }),
-    submitLabel: '确认核销',
-  });
+export function admissionPayment(ctx, residentId) {
+  if (!ctx.state.allowedActions.includes('ops.pay')) return;
+  const person = ctx.state.residents.find((r) => r.id === residentId);
+  if (!person) return;
+  const bills = ctx.state.bills.filter((b) => b.residentId === residentId);
+  const due = ctx.state.billingDue?.find((r) => r.residentId === residentId);
+  const account = ctx.state.deposits.find((a) => a.residentId === residentId);
+  const body = node('div', 'fx-profile', [
+    facts([['长者', residentName(ctx, residentId)], ['可用预缴金', money(account?.amount)]]),
+    ...bills.map((bill) => section((bill.kind === 'trial' ? '一次性试住费' : '月费') + ' · ' + (bill.billingDate || bill.month),
+      node('div', '', [
+        facts([['应缴', money(bill.amount)], ['已核销', money(bill.paid)], ['待缴', money(bill.balance)]]),
+        bill.balance > 0 ? cashierActions(ctx, bill, true) : badge(ctx, '已结清'),
+      ]))),
+    due && btn(ctx, '核算入住首期账单并收款', () => generate(ctx, due, admissionPayment), 'primary'),
+    btn(ctx, '登记已收预缴金', () => recordCash(ctx, { residentId })),
+  ]);
+  ctx.detail('入住交费', body);
 }
 
 export function billDetail(ctx, bill) {
@@ -172,7 +152,7 @@ export function billDetail(ctx, bill) {
         ['请假天数', String(bill.leaveDays)],
       ] : []),
       ['应收总额', money(bill.amount)],
-      ['已收总额', money(bill.paid)],
+      ['已核销总额', money(bill.paid)],
       ['待缴余额', money(bill.balance)],
     ]),
     section('全部收费明细',feeLedger(bill)),
@@ -212,11 +192,13 @@ export function billDetail(ctx, bill) {
       '核销流水',
       records(
         ctx.state.payments.filter((p) => p.billId === bill.id),
-        (p) => named(p.method + ' · ' + money(p.amount), p.date)
+        (p) => named(p.method + ' · ' + money(p.amount), receiptDescription(p))
       )
     ),
   ]);
-  if (bill.balance > 0) content.append(btn(ctx, '登记收款', () => pay(ctx, bill), 'primary'));
+  const vouchers = receiptRows(ctx.state).filter((r) => r.billId === bill.id);
+  if (vouchers.length) content.append(section('原始收款凭证', records(vouchers, receiptFacts)));
+  if (bill.balance > 0) content.append(cashierActions(ctx, bill));
   ctx.detail('账单明细', content);
 }
 
@@ -227,7 +209,8 @@ export function billing(ctx) {
     '财务管理',
     '按项核算房间床位、饮食、护理及约定费用，核对欠费和预交金。',
     choose(
-      btn(ctx, '登记预交金', () => deposit(ctx)),
+      ctx.state.allowedActions.includes('ops.paymentFees') && btn(ctx, '收款手续费设置', () => feeSettings(ctx)),
+      btn(ctx, '登记预缴金', () => recordCash(ctx)),
       btn(ctx, '核算账单', () => generate(ctx), 'primary')
     ),
     kpis([
@@ -328,7 +311,7 @@ export function billing(ctx) {
                       '预交金到账记录',
                       records(
                         ctx.state.depositEntries.filter((e) => e.residentId === r.residentId),
-                        (e) => named(money(e.amount), e.date)
+                        (e) => named(money(e.amount), receiptDescription(e))
                       )
                     )
                   ),
@@ -336,9 +319,10 @@ export function billing(ctx) {
             ],
           }),
       ],
+      ['receipts', '实收流水', () => receiptLedger(ctx)],
       [
         'payments',
-        '收款流水',
+        '账单核销记录',
         () =>
           table(ctx, {
             title: '账单核销记录',
@@ -366,11 +350,16 @@ export function billing(ctx) {
               },
               {
                 label: '核销方式',
-                view: (r) => r.method,
+                view: (r) => [r.method, r.channel !== r.method && r.channel].filter(Boolean).join(' · '),
               },
               {
-                label: '金额',
+                label: '核销金额',
                 view: (r) => money(r.amount),
+              },
+              { label: '机构手续费', view: (r) => r.feeAmount == null ? '—' : money(r.feeAmount) },
+              {
+                label: '净入账',
+                view: (r) => r.netAmount == null ? '—' : money(r.netAmount),
               },
             ],
           }),

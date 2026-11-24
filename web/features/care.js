@@ -1,5 +1,7 @@
+import { medicationRoundDesk } from './med-rounds.js';
 import { residentAnchor, staffLabel } from './people-labels.js';
 import { careTimeline } from './care-timeline.js';
+import { openExamMedications } from './medication-reports.js';
 import {
   canAct,
   hasGrant,
@@ -458,7 +460,8 @@ function vitals(ctx) {
     rows: byRecent(ctx.state.vitals),
     search: personSearch(ctx, (r) => r.metric),
     filter: statusFilter,
-    action: btn(ctx, '录入体征', () => vitalForm(ctx)),
+    action: node('div', 'fx-actions', [btn(ctx, '录入体征', () => vitalForm(ctx)),
+      btn(ctx, '体检用药自报', () => openExamMedications(ctx))]),
     cols: [
       personCol(ctx),
       {
@@ -523,6 +526,7 @@ export function care(ctx) {
         ['tasks', '照护工单', () => taskHistory(ctx)],
         ['completed', '已完成服务', () => careTimeline(ctx, 'work', '', (id) => serviceProof(ctx, id))],
       ] : []),
+      ...(canAct(ctx, 'care.confirmMedRound') ? [['medRounds', '服药核对', () => medicationRoundDesk(ctx)]] : []),
       ...(canAct(ctx, 'care.vital') ? [['vitals', '健康体征', () => vitals(ctx)]] : []),
       ...(canAct(ctx, 'care.proposeGroupActivity') || canAct(ctx, 'care.confirmGroupActivity')
         ? [['groupLife', '集体活动', () => groupActivities(ctx)]] : []),

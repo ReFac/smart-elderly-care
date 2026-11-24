@@ -293,6 +293,10 @@ class Reader:
         name = c["collection"]
         if name.startswith("daily_life_"):
             return policy.has(self.user, "care") or policy.has(self.user, "care.groupConfirm")
+        if name == "medication_round_receipts":
+            return policy.has(self.user, "care")
+        if name == "resident_medication_reports":
+            return any(policy.has(self.user, p) for p in ("care", "medical", "clinical"))
         if name == "resident_health_notes":
             return policy.has(self.user, "care") or policy.has(self.user, "medical")
         if name in ("leadContacts", "leadEvents", "visitBookings", "visitSchedulePolicies"):

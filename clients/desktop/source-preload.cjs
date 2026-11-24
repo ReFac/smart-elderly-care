@@ -1,8 +1,34 @@
 const { ipcRenderer } = require('electron');
 
+function medicineReference(href) {
+  let url;
+  try { url = new URL(href); } catch { return false; }
+  if (url.username || url.password) return false;
+  if (url.origin === 'https://www.wikidata.org')
+    return /^\/wiki\/Q[1-9]\d*$/.test(url.pathname) && !url.search && !url.hash;
+  if (url.origin === 'https://www.nhsa.gov.cn')
+    return url.pathname === '/module/download/downfile.jsp' && /^#page=[1-9]\d{0,3}$/.test(url.hash) &&
+      /^\?classid=0&filename=[a-f0-9]{32}\.pdf$/.test(url.search);
+  return url.origin === 'https://pharm.ncmi.cn' && url.pathname === '/pharm/fullText/search.do' &&
+    !url.hash && url.searchParams.size === 1 && Boolean(url.searchParams.get('keyWord'));
+}
+
 // Keep the IPC capability in the isolated world. Keyboard activation also emits a trusted click.
 window.addEventListener('click', async (event) => {
   if (!event.isTrusted || event.button !== 0 || event.defaultPrevented) return;
+  if (event.target.matches?.('a.merchant-checkout-link')) {
+    const link = event.target;
+    const dialog = link.closest('dialog[open][data-payment-order]');
+    if (!dialog || !link.isConnected || !link.getClientRects().length) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    try {
+      if (await ipcRenderer.invoke('payments:open-checkout', dialog.dataset.paymentOrder)) return;
+    } catch { /* The institution window or the payment application may have been closed. */ }
+    const message = dialog.querySelector('[role="status"]');
+    if (message) message.textContent = '暂时无法打开支付应用，请核对订单状态或直接扫码。';
+    return;
+  }
   if (location.hash === '#leads') {
     const phone = event.target.closest?.('dialog[open] .lead-detail-head a.lead-phone');
     if (phone?.isConnected && phone.getClientRects().length && phone.protocol === 'tel:') {
@@ -21,14 +47,21 @@ window.addEventListener('click', async (event) => {
       return;
     }
   }
-  const link = event.target.closest?.('#assistant-chat:not([hidden]) a.assistant-source-link');
+  let link = event.target.closest?.('#assistant-chat:not([hidden]) a.assistant-source-link');
+  let medicine = false;
+  if (!link) {
+    link = event.target.closest?.('.medication-source-scope a.medication-source-link');
+    if (!link) return;
+    if (!medicineReference(link.href)) return;
+    medicine = true;
+  }
   if (!link || !link.isConnected || !link.getClientRects().length || link.origin === location.origin) return;
   event.preventDefault();
   event.stopImmediatePropagation();
   try {
     if (await ipcRenderer.invoke('assistant:open-public-source', link.href)) return;
   } catch { /* The institution window may have been closed during the lookup. */ }
-  const status = link.closest('li');
+  const status = medicine ? link.parentElement : link.closest('li');
   if (status?.isConnected && !status.querySelector('[role="status"]')) {
     const hint = document.createElement('small');
     hint.setAttribute('role', 'status');

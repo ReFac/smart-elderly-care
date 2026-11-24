@@ -5,6 +5,7 @@ from .care.records import append_record, text_field
 SCOPES = {
     "careSchedule": "查阅照护工单进度",
     "medication": "查阅已复核医嘱及给药记录",
+    "medicationReport": "本人填写及更正体检用药自报",
     "personalHealth": "查看本人的生活简报、时间线与健康简介",
 }
 
@@ -19,6 +20,8 @@ def scopes(payload, kind, previous=(), *, portal_self=False):
         or not all(isinstance(v, str) and v in SCOPES for v in value)
     ):
         raise ValueError("请选择绑定长者账号可查阅的服务范围")
+    if "medicationReport" in value and not portal_self:
+        raise ValueError("体检用药自报仅可授予已核验的长者本人账号")
     if "personalHealth" in value and not portal_self:
         raise ValueError("个人生活与健康档案仅可授予已核验的长者本人账号")
     return sorted(set(value))

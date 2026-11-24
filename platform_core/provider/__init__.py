@@ -234,6 +234,9 @@ def status(db, user, now=None):
             tokensUsed=used,
             tokensReserved=held,
             media=media_overview(db),
+            readAloud=dict(db.execute("""SELECT COALESCE(sum(charged),0) AS characters,
+                COALESCE(sum(CASE WHEN state IN ('pending','uncertain') THEN reserved ELSE 0 END),0) AS held
+                FROM media_usage WHERE plan=? AND kind='tts'""", (plan["id"] if plan else 0,)).fetchone()),
             webSearch=search_usage.overview(db, plan["id"] if plan else None),
         )
     return result

@@ -23,7 +23,7 @@ from .records import (
 
 AGENT = {
     "id": "rounds-agent",
-    "displayName": "AI 助理定时巡查",
+    "displayName": "健康助理定时巡查",
     "username": "rounds-agent",
 }
 LOG = logging.getLogger(__name__)

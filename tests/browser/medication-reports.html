@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>体检用药自报回归</title>
+<link rel="stylesheet" href="../../web/style.css"><body><main></main><output>运行中</output>
+<script type="module">
+import { renderMedicationReports } from '../../web/features/medication-reports.js';
+import * as ui from '../../web/lib/ui.js';
+import { detail } from '../../web/lib/dialogs.js';
+const output = document.querySelector('output');
+const match = { name: '阿莫西林', match: '相似写法', page: 39, url: 'https://www.nhsa.gov.cn/', reference: 'test-ref' };
+const data = { revision: 3, canWrite: true, reports: [] };
+const queries = [], saved = [], reviews = [];
+let respondToOldQuery;
+const held = new Promise(resolve => { respondToOldQuery = resolve; });
+const ctx = { state: { user: { id: 'test-self', kind: 'family' }, residents: [{ id: 'r001', name: '测试长者', status: '未入住' }], today: '2026-11-24' },
+  ui, detail, toast() {}, async get(path) {
+    if (path.endsWith('/reported-medications')) return data;
+    queries.push(path);
+    if (decodeURIComponent(path).endsWith('q=阿莫西&online=1')) return held;
+    if (path.includes('online=1')) return { status: 'live', source: '开放药名资料', matches: [{...match, page: 0, match: 'ATC J01CA04'}], publicUrl: 'https://pharm.ncmi.cn/' };
+    return { status: 'online', source: '目录来源', matches: [match] };
+  }, async confirmChange(review) { reviews.push(review); return { comment: '' }; } };
+window.fetch = async (url, options) => {
+  const cmd = JSON.parse(options.body); saved.push(cmd);
+  data.reports.push({ ...cmd.payload, ...match, source: '目录来源', actorName: '本人', bySelf: true,
+    at: '2026-11-24T11:45:00', version: 1, history: [] });
+  return { ok: true, json: async () => ({}) };
+};
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const check = (ok, message) => { if (!ok) throw new Error(message); };
+try {
+  const panel = renderMedicationReports(ctx, 'r001'); document.querySelector('main').append(panel); await delay(10);
+  panel.querySelector('button').click(); const form = document.querySelector('dialog form');
+  const input = form.elements.rawName; input.value = '阿莫西淋'; input.dispatchEvent(new Event('input'));
+  await delay(400); check(queries.length === 1 && decodeURIComponent(queries[0]).endsWith('q=阿莫西淋'), '按原名查询');
+  check(form.textContent.includes('阿莫西林 · 相似写法'), '目录提供纠错');
+  [...form.querySelectorAll('button')].find(b => b.textContent.includes('联网查此药名')).click(); await delay(15);
+  check(queries[1].endsWith('online=1') && form.textContent.includes('到药学数据中心搜索'), '明确逐词联网查询');
+  const automatic = form.elements.automaticDrugSearch;
+  check(!automatic.checked && form.textContent.includes('阿莫西林 · 相似写法'), '默认逐词联网未开，手动查询保留医保来源');
+  const type = text => { input.value = text; input.dispatchEvent(new Event('input')); };
+  automatic.click(); type('阿莫'); type('阿莫西'); await delay(610);
+  check(queries.filter(path => path.includes('online=1')).length === 2 && decodeURIComponent(queries.at(-1)).endsWith('q=阿莫西&online=1'), '输入停顿后仅检索最后一词');
+  type('阿莫西淋'); await delay(620);
+  respondToOldQuery({ status: 'live', source: '开放药名资料', matches: [{ ...match, name: '已过期的候选' }] });
+  await delay(15);
+  check(form.textContent.includes('阿莫西林 · 相似写法') && form.textContent.includes('阿莫西林 · ATC') && !form.textContent.includes('已过期的候选'), '权威目录和实时来源并存，忽略迟到答复');
+  automatic.click(); type('阿莫西'); const count = queries.filter(path => path.includes('online=1')).length;
+  await delay(610); check(queries.filter(path => path.includes('online=1')).length === count, '关闭后停止自动联网');
+  automatic.click(); type('阿莫西淋'); await delay(610);
+  const option = [...form.querySelectorAll('button')].find(b => b.textContent.includes('阿莫西林 · ATC'));
+  check(option && saved.length === 0, '搜索不应写入档案'); option.click();
+  check(input.value === '阿莫西淋' && saved.length === 0, '选择保留原文并待确认');
+  form.requestSubmit(); await delay(20);
+  check(reviews.length === 1 && saved.length === 1, '确认后才可提交');
+  const [cmd] = saved;
+  check(cmd.action === 'portal.reportMedication' && cmd.payload.rawName === '阿莫西淋' && cmd.payload.reference === 'test-ref', '本人提交与原文');
+  check(!document.querySelector('dialog[open]') && panel.textContent.includes('本人填报「阿莫西淋」'), '保存后返回本人的更新记录');
+  panel.querySelector('button').click();
+  check(document.querySelector('dialog form').elements.automaticDrugSearch.checked, '同一标签页记住本人选择');
+  document.querySelector('dialog').close(); output.textContent = 'PASS';
+} catch (error) { output.textContent = 'FAIL ' + error.stack; }
+</script></body></html>

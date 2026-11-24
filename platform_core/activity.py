@@ -52,6 +52,7 @@ RELATED = {
     "ops.review": ("id", "suggestions"),
 }
 PERSON_ACTIONS = {
+    "care.confirmMedRound",
     "care.healthNote",
     "dossier.signHealthIntro",
     "care.fileArchive",

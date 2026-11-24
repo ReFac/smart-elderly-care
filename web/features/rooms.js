@@ -1,3 +1,4 @@
+import { openMedicationRound } from './med-rounds.js';
 import { residentLabel, residentAnchor } from './people-labels.js';
 import { roomTasks } from './agent-runs.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
@@ -302,6 +303,9 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
             'secondary',
             'calendar'
           )
+        : null,
+      canAct(ctx, 'care.confirmMedRound')
+        ? ctx.ui.button('核对本房服药', () => openMedicationRound(ctx, {roomId:room.id}), 'secondary', 'pill')
         : null,
       scopedHistoryButton(ctx, 'room', room.id),
       ctx.available('tour')

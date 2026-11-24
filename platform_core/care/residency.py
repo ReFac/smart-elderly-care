@@ -25,7 +25,11 @@ def vacant_bed(state, bed_id):
 
 def make_card_code(sequence):
     """EAN-8 本地卡号。编号对应一次床位分配，不复用已注销卡。"""
-    digits = str(2000000 + sequence)
+    return ean8(2000000 + sequence)
+
+
+def ean8(number):
+    digits = str(number)
     if len(digits) != 7:
         raise ValueError("本地床头卡编号已用尽。")
     checksum = sum(
@@ -40,8 +44,38 @@ def active_card(state, resident):
         if move["residentId"] == resident["id"]:
             if move["bedId"] and move["bedId"] == resident["bedId"]:
                 return move.get("cardCode") or make_card_code(index + 1)
-            break
+            return ""
+    historical = resident.get("legacyBedCard") or {}
+    if historical.get("bedId") == resident.get("bedId"):
+        return historical.get("code", "")
     return ""
+
+
+def current_cards(state, residents):
+    """Resolve the latest verified card using the original, unfiltered ledger positions."""
+    people = {
+        p["id"]: p for p in residents if p.get("status") == "在住" and p.get("bedId")
+    }
+    occupied = {b["id"]: b.get("residentId") for b in state["beds"]}
+    result = {
+        rid: p["legacyBedCard"] for rid, p in people.items() if p.get("legacyBedCard")
+    }
+    for index, move in enumerate(state.get("bedMoves", ()), 1):
+        rid = move["residentId"]
+        if rid not in people:
+            continue
+        if move.get("bedId"):
+            result[rid] = {
+                "bedId": move["bedId"],
+                "code": move.get("cardCode") or make_card_code(index),
+            }
+        else:
+            result.pop(rid, None)
+    return {
+        rid: card
+        for rid, card in result.items()
+        if card["bedId"] == people[rid]["bedId"] and occupied.get(card["bedId"]) == rid
+    }
 
 
 def move(state, resident, today, kind, old_bed=None, new_bed=None):

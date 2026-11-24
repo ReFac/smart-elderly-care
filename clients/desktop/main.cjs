@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, session, shell } = require('electron');
 const path = require('node:path');
 const { registerLeadCalls } = require('./lead-calls.cjs');
+const { registerPaymentLinks } = require('./payment-links.cjs');
 const { registerSourceLinks } = require('./public-source.cjs');
 
 function workspaceUrl() {
@@ -34,6 +35,7 @@ async function showWorkspace(target) {
     autoHideMenuBar: true,
     webPreferences: { ...webPreferences, preload: path.join(__dirname, 'source-preload.cjs') },
   });
+  registerPaymentLinks(win.webContents, target.origin, url => shell.openExternal(url));
   registerLeadCalls(win.webContents, target.origin, url => shell.openExternal(url));
   registerSourceLinks(win.webContents, target.origin, url => shell.openExternal(url));
   try {

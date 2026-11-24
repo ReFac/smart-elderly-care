@@ -210,7 +210,7 @@ export function residentInsights(ctx, residentId) {
             'small',
             'fx-muted',
             report
-              ? (report.source === 'deepseek' ? 'AI 助理' : '历史巡查记录') + ' · ' + localStamp(report.generatedAt)
+              ? (report.source === 'deepseek' ? '健康助理' : '历史巡查记录') + ' · ' + localStamp(report.generatedAt)
               : '尚未生成巡查简报',
           ),
         ]),

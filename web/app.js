@@ -1,3 +1,4 @@
+import { openLinkedBedCard } from './features/med-rounds.js';
 import { chatLauncher, openChat, toggleChat, clearChat, checkChatUser } from './features/assistant-chat.js';
 import { hasNewNotice, quickDestinations, staffNotices, supplyOrders } from './features/assistant-actions.js';
 import { loginScreen } from './features/access.js';
@@ -754,6 +755,7 @@ function render() {
   shade.addEventListener('click', closeMenu);
   root.replaceChildren(masthead(), sidebar(), shade, wrap);
   openLinkedResident();
+  openLinkedBedCard(context());
 }
 
 function openLinkedResident() {

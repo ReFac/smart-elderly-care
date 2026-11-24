@@ -1,9 +1,11 @@
 import { residentLabel, residentAnchor, staffLabel } from './features/people-labels.js';
 import { inquiryForm } from './features/residency.js';
+import { openReceipts } from './features/receipt-ledger.js';
 import { completeTask } from './features/care.js';
 import { badge, button, el, empty, icon } from './lib/ui.js';
 
 const number = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 });
+const yuan = new Intl.NumberFormat('zh-CN', {style: 'currency', currency: 'CNY'});
 const dateFormat = new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric',
   month: 'long',
@@ -86,7 +88,7 @@ function getMetrics(ctx, tasks) {
       '待缴账单',
       due.length,
       '笔',
-      '待缴 ¥' + number.format(due.reduce((sum, b) => sum + b.balance, 0)),
+      '待缴 ' + yuan.format(s.cashOverview?.outstanding ?? due.reduce((sum, b) => sum + b.balance, 0)),
       'wallet',
       'billing',
       'bills'
@@ -160,13 +162,8 @@ function daySeries(ctx, period, mode) {
       return { date, a: tasks.length, b: tasks.filter((t) => t.status === '已完成').length };
     }
     if (mode === 'billing') {
-      return {
-        date,
-        a: s.depositEntries.filter((p) => p.date === date).reduce((n, p) => n + p.amount, 0),
-        b: s.payments
-          .filter((p) => p.date === date && ['线下登记', '微信支付', '支付宝'].includes(p.method))
-          .reduce((n, p) => n + p.amount, 0),
-      };
+      const point = s.cashOverview?.daily?.[date];
+      return {date, a: point?.deposits || 0, b: point?.direct || 0};
     }
     const moves = s.transactions.filter((t) => t.date === date);
     return {
@@ -261,41 +258,37 @@ function chart(points, labels, unit, width) {
   return root;
 }
 
-function trend(ctx, mode) {
+function trend(ctx, modes) {
   const specs = {
     care: ['照护执行趋势', '计划工单', '已完成', '项'],
-    billing: ['入款趋势', '预交到账', '账单实收', '元'],
+    billing: ['收款趋势', '转入预缴金', '直接核销账单', '元'],
     inventory: ['物资流转趋势', '入库单据', '出库单据', '笔'],
   };
-  const [title, first, second, unit] = specs[mode];
+  const kind = el('select', 'op-range op-trend-kind');
+  kind.setAttribute('aria-label', '查看运营趋势');
+  for (const mode of modes) kind.add(new Option(specs[mode][0], mode));
   const picker = el('select', 'op-range');
   picker.setAttribute('aria-label', '趋势日期范围');
   picker.add(new Option('近 7 天', '7'));
   picker.add(new Option('近 3 天', '3'));
   const legend = (label, cls) => group('span', 'op-legend', el('i', cls), el('span', '', label));
-  const legends = group(
-    'div',
-    'op-chart-legend',
-    legend(first, 'op-key-plan'),
-    legend(second, 'op-key-done'),
-    el('span', 'op-chart-unit', '单位：' + unit)
-  );
+  const legends = el('div', 'op-chart-legend');
   const holder = el('div', 'op-chart-holder');
-  const render = () =>
-    holder.replaceChildren(
-      chart(
-        daySeries(ctx, Number(picker.value), mode),
-        [first, second],
-        unit,
-        Math.max(280, Math.min(1000, holder.clientWidth || 450))
-      )
-    );
+  const render = () => {
+    const mode = kind.value;
+    const [, first, second, unit] = specs[mode];
+    legends.replaceChildren(legend(first, 'op-key-plan'), legend(second, 'op-key-done'),
+      el('span', 'op-chart-unit', '单位：' + unit));
+    holder.replaceChildren(chart(daySeries(ctx, Number(picker.value), mode), [first, second], unit,
+      Math.max(280, Math.min(1000, holder.clientWidth || 450))));
+  };
+  kind.addEventListener('change', render);
   picker.addEventListener('change', render);
   render();
   const panel = group(
     'section',
     'op-trend',
-    group('div', 'op-panel-heading', el('h2', '', title), picker),
+    group('div', 'op-panel-heading', modes.length > 1 ? kind : el('h2', '', specs[modes[0]][0]), picker),
     legends,
     holder
   );
@@ -318,14 +311,8 @@ function trend(ctx, mode) {
 function board(ctx, tasks) {
   const metrics = getMetrics(ctx, tasks);
   if (!metrics.length) return null;
-  const mode =
-    ctx.available('care') && ctx.permitted('care')
-      ? 'care'
-      : ctx.available('billing') && ctx.permitted('finance')
-        ? 'billing'
-        : ctx.available('inventory') && ctx.permitted('inventory')
-          ? 'inventory'
-          : '';
+  const modes = [['billing', 'finance'], ['care', 'care'], ['inventory', 'inventory']]
+    .filter(([route, grant]) => ctx.available(route) && ctx.permitted(grant)).map(([route]) => route);
   const summary = group(
     'section',
     'op-summary',
@@ -334,9 +321,9 @@ function board(ctx, tasks) {
   );
   return group(
     'div',
-    'op-board' + (mode ? '' : ' op-board-simple'),
+    'op-board' + (modes.length ? '' : ' op-board-simple'),
     summary,
-    mode ? trend(ctx, mode) : null
+    modes.length ? trend(ctx, modes) : null
   );
 }
 
@@ -561,9 +548,27 @@ function shortcuts(ctx) {
   return group('section', 'op-white-card', heading('岗位入口'), grid);
 }
 
+function receiptsPanel(ctx) {
+  const cash = ctx.state.cashOverview;
+  if (!cash || !ctx.permitted('finance') || !ctx.available('billing')) return null;
+  const columns = [
+    ['今日新增实收', cash.todayGross, '含预缴到账', 'today'],
+    ['本月累计流水', cash.monthGross, '按实际到账日累计', 'month'],
+    ['今日净入账', cash.todayNet, cash.todayNet === null ? '部分历史凭证未记手续费' : '已扣机构承担的手续费', 'today'],
+    ['截至今日待缴', cash.outstanding, '各期账单尚欠的余额', 'bills'],
+  ];
+  return group('section', 'op-white-card op-cash-panel',
+    heading('收款与欠款', action('查看实收流水', () => openReceipts(ctx), 'op-text-action')),
+    group('div', 'op-cash-grid', ...columns.map(([label, amount, note, tab]) => {
+      const item = action('', () => tab === 'bills' ? ctx.go('billing', tab) : openReceipts(ctx, tab), 'op-cash-item');
+      item.append(el('span', '', label), el('strong', '', amount === null ? '手续费待核对' : yuan.format(amount)), el('small', '', note));
+      return item;
+    })));
+}
+
 export function dashboard(ctx) {
   const tasks = ctx.state.tasks.filter((t) => t.date === ctx.state.today && t.status !== '已取消');
-  const main = group('div', 'op-page', header(ctx), board(ctx, tasks));
+  const main = group('div', 'op-page', header(ctx), board(ctx, tasks), receiptsPanel(ctx));
   const first = [ctx.available('beds') ? beds(ctx) : null, workQueue(ctx)].filter(Boolean);
   if (first.length) main.append(group('div', 'op-pair', ...first));
   const last = [

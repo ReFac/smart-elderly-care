@@ -10,6 +10,9 @@ import {
   table,
   today,
 } from './shared.js';
+import { isDirectReceipt } from './receipt-ledger.js';
+const receiptCount = (rows) => new Set(rows.map((row) => row.receiptId || row.id)).size;
+
 function sumMoney(rows, key) {
   return rows.reduce((total, row) => total + Math.round(row[key] * 100), 0) / 100;
 }
@@ -31,7 +34,7 @@ export function monthlyPanel(ctx) {
     const bills = state.bills.filter((b) => b.month === month);
     const deposits = state.depositEntries.filter(inMonth);
     const payments = state.payments.filter(inMonth);
-    const cash = payments.filter((p) => ['线下登记', '微信支付', '支付宝'].includes(p.method));
+    const cash = payments.filter(isDirectReceipt);
     const expenses = (state.expenses || []).filter(inMonth);
     const offsets = payments.filter((p) => p.method === '预交金冲抵');
     const tasks = state.tasks.filter((t) => inMonth(t) && t.status !== '已取消');
@@ -306,12 +309,12 @@ function compareMonths(ctx, month) {
   if (hasGrant(ctx, 'finance')) {
     const cash = [
       ...state.depositEntries,
-      ...state.payments.filter((p) => ['线下登记', '微信支付', '支付宝'].includes(p.method)),
+      ...state.payments.filter(isDirectReceipt),
     ];
     const describe = (r) => r.date + ' · ' + (r.voucher || r.id) + ' · ' + money(r.amount);
     metric('实际入款', cash, (r) => sumMoney(r, 'amount'), money, describe, (cur, prev, delta) => {
       if (!cur.length && !prev.length) return '两期均无入款凭证';
-      const receipts = cur.length + ' 笔到账，上期 ' + prev.length + ' 笔';
+      const receipts = receiptCount(cur) + ' 笔到账，上期 ' + receiptCount(prev) + ' 笔';
       return delta < 0 ? receipts + '。可按账期核对待缴明细' : receipts;
     });
     metric('机构支出', state.expenses || [], (r) => sumMoney(r, 'amount'), money, describe, (cur) => {

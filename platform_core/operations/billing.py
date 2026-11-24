@@ -3,7 +3,7 @@
 from datetime import date
 from decimal import Decimal
 
-from . import billing_cycles
+from . import billing_cycles, payment_terms
 from .charges import invoice_lines, line
 from .records import (
     currency_amount,
@@ -11,6 +11,7 @@ from .records import (
     lookup,
     new_id,
     parse_day,
+    text_field,
     whole_number,
 )
 
@@ -32,17 +33,16 @@ def credit(state, bill, amount, method, today):
     bill["balance"] = float(balance)
     bill["paid"] = float(Decimal(str(bill["amount"])) - balance)
     bill["status"] = "已结清" if not balance else "部分缴费"
-    state["payments"].insert(
-        0,
-        dict(
-            id=new_id("pay"),
-            billId=bill["id"],
-            residentId=bill["residentId"],
-            amount=float(amount),
-            method=method,
-            date=today,
-        ),
+    row = dict(
+        id=new_id("pay"),
+        billId=bill["id"],
+        residentId=bill["residentId"],
+        amount=float(amount),
+        method=method,
+        date=today,
     )
+    state["payments"].insert(0, row)
+    return row
 
 
 def apply_deposit(state, account, today):
@@ -67,33 +67,136 @@ def apply_deposit(state, account, today):
     account["amount"] = float(available)
 
 
+def post_receipt(
+    state, *, resident_id, bill, amount, method, channel, day, rate, origin
+):
+    """Allocate one tender and its fee exactly once across bill and advance ledgers."""
+    account = get_account(state, resident_id)
+    apply_deposit(state, account, day)
+    applied = min(amount, Decimal(str(bill["balance"]))) if bill else Decimal(0)
+    surplus = amount - applied
+    total_fee = payment_terms.fee(amount, rate)
+    applied_fee = payment_terms.fee(applied, rate)
+    common = dict(
+        **origin,
+        channel=channel,
+        grossAmount=float(amount),
+        originBillId=bill["id"] if bill else "",
+    )
+    if applied:
+        payment = credit(state, bill, applied, method, day)
+        payment.update(common, **payment_terms.accounting(applied, applied_fee, rate))
+    if surplus:
+        account["amount"] = float(Decimal(str(account["amount"])) + surplus)
+        state["depositEntries"].insert(
+            0,
+            dict(
+                id=new_id("receipt"),
+                residentId=resident_id,
+                amount=float(surplus),
+                date=day,
+                method=method,
+                **common,
+                **payment_terms.accounting(surplus, total_fee - applied_fee, rate),
+            ),
+        )
+        apply_deposit(state, account, day)
+    return dict(
+        billAmount=float(applied),
+        depositAmount=float(surplus),
+        **payment_terms.accounting(amount, total_fee, rate),
+    )
+
+
+def manual_receipt(state, payload, today, bill, resident_id):
+    amount = currency_amount(payload.get("amount"), "实收金额", zero=False)
+    method, channel = payment_terms.offline(payload)
+    ref, duplicate = payment_terms.manual_reference(
+        state,
+        payload,
+        bill_id=bill["id"] if bill else "",
+        resident_id=resident_id,
+        amount=amount,
+        method=method,
+        channel=channel,
+    )
+    if duplicate:
+        return "已登记同一笔实收凭证"
+    origin = dict(paymentRef=ref or new_id("manual"), receiptId=new_id("cash"))
+    day = today
+    if channel in ("微信支付", "支付宝"):
+        from . import settlements
+
+        day = settlements.paid_day(payload.get("paidDate"), today)
+        txn = text_field(payload, "transactionId", "渠道交易号", 100)
+        merchant = text_field(payload, "merchantOrder", "商户订单号", 100)
+        if bill:
+            receipt, added = settlements.settle(
+                state,
+                {**payload, "source": "线下核对商户成功交易", "paidDate": day},
+                today,
+                verification="线下登记核对",
+            )
+            return (
+                "登记" if added else "已核对同一笔"
+            ) + f"{channel}实收 ¥{receipt['amount']:.2f}"
+        for entry in state["depositEntries"]:
+            if entry.get("channel") == channel and (
+                entry.get("transactionId") == txn
+                or entry.get("merchantOrder") == merchant
+            ):
+                if (
+                    not entry.get("originBillId")
+                    and entry["residentId"] == resident_id
+                    and entry.get("transactionId") == txn
+                    and entry.get("merchantOrder") == merchant
+                    and entry["amount"] == float(amount)
+                    and entry["date"] == day
+                ):
+                    return "已登记同一笔预缴凭证"
+                raise ValueError("此笔交易已有凭证，请核对所关联账单")
+        if any(
+            order["id"] == merchant for order in state.get("paymentOrders", ())
+        ) or any(
+            r["channel"] == channel
+            and (r["transactionId"] == txn or r["merchantOrder"] == merchant)
+            for r in state.get("channelReceipts", ())
+        ):
+            raise ValueError("此订单已关联账单，请在原账单核对到账")
+        origin.update(transactionId=txn, merchantOrder=merchant)
+    if bill and (
+        not bill["balance"]
+        or (
+            amount > Decimal(str(bill["balance"]))
+            and payload.get("carrySurplus") is not True
+        )
+    ):
+        raise ValueError("请核对本单余额并确认将超额款转入预缴金")
+    allocation = post_receipt(
+        state,
+        resident_id=resident_id,
+        bill=bill,
+        amount=amount,
+        method=method,
+        channel=channel,
+        day=day,
+        rate=payment_terms.rate_for(state, channel),
+        origin=origin,
+    )
+    return (
+        f"{method}（{channel}）实收 ¥{amount:.2f}，机构承担手续费 ¥{allocation['feeAmount']:.2f}，"
+        f"净入账 ¥{allocation['netAmount']:.2f}，转入预缴 ¥{allocation['depositAmount']:.2f}"
+    )
+
+
 def deposit(state, payload, today):
     resident = get_resident(state, payload)
-    amount = currency_amount(payload.get("amount"), "预交金额", zero=False)
-    account = get_account(state, resident["id"])
-    account["amount"] = float(Decimal(str(account["amount"])) + amount)
-    state["depositEntries"].insert(
-        0,
-        dict(
-            id=new_id("receipt"),
-            residentId=resident["id"],
-            amount=float(amount),
-            date=today,
-        ),
-    )
-    apply_deposit(state, account, today)
-    return f"登记{resident['name']}预交金 ¥{amount:.2f}，已核对欠款"
+    return manual_receipt(state, payload, today, None, resident["id"])
 
 
 def pay(state, payload, today):
     bill = lookup(state, "bills", payload.get("billId"), "账单")
-    amount = currency_amount(payload.get("amount"), "核销金额", zero=False)
-    if payload.get("method", "线下登记") != "线下登记":
-        raise ValueError("本地账单只支持已核实的线下收款登记")
-    if amount > Decimal(str(bill["balance"])):
-        raise ValueError("核销金额超过本单待缴余额")
-    credit(state, bill, amount, "线下登记", today)
-    return f"为 {bill['month']} 账单登记线下核销 ¥{amount:.2f}"
+    return manual_receipt(state, payload, today, bill, bill["residentId"])
 
 
 def leave_dates(state, resident_id, begin, end):

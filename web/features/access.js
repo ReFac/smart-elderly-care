@@ -249,6 +249,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
     const scopeRows = [
       ['careSchedule', '查看照护工单与执行进度'],
       ['medication', '查看已复核医嘱和给药时间'],
+      ['medicationReport', '本人填写、查看及更正体检用药自报'],
       ['personalHealth', '查看本人的生活简报、时间线与健康简介'],
     ].map(([key, label]) => {
       const control = node('input');
@@ -259,11 +260,13 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       return node('label', 'access-check', [control, node('span', '', label)]);
     });
     const showPersonalHealth = () => {
-      const control = scopeControls.get('personalHealth');
       const self = target ? target.portalSelf : portalIdentity.value === 'self';
-      control.disabled = !self;
-      control.closest('label').hidden = !self;
-      if (!self) control.checked = false;
+      for (const key of ['personalHealth', 'medicationReport']) {
+        const control = scopeControls.get(key);
+        control.disabled = !self;
+        control.closest('label').hidden = !self;
+        if (!self) control.checked = false;
+      }
     };
     portalIdentity?.addEventListener('change', showPersonalHealth);
     showPersonalHealth();
@@ -437,6 +440,7 @@ function accounts(ctx) {
             ],
             ['已完成照护服务', account.familyServices ? '可查阅近期服务日期和项目' : '未开通查阅'],
             ['照护工单', account.portalScopes.includes('careSchedule') ? '可查阅' : '未开通查阅'],
+            ...(account.portalSelf ? [['体检用药自报', account.portalScopes.includes('medicationReport') ? '可填写及更正' : '未开通']] : []),
             ['医嘱与给药', account.portalScopes.includes('medication') ? '可查阅' : '未开通查阅'],
             ...(account.portalSelf ? [['本人生活与健康档案', account.portalScopes.includes('personalHealth') ? '可查阅' : '未开通查阅']] : []),
           ])
@@ -602,6 +606,7 @@ function settings(ctx) {
       ['服务模型', config.model || 'deepseek-flash'],
       ['本期额度', String(config.tokenLimit || 0) + ' tokens'],
       ['已用 / 预留', String(config.tokensUsed || 0) + ' / ' + String(config.tokensReserved || 0)],
+      ['助理朗读', `已计费 ${config.readAloud?.characters || 0} 字符，待核对 ${config.readAloud?.held || 0} 字符`],
       ['公开搜索', `已计费 ${config.webSearch?.calls || 0} 次，待核对 ${config.webSearch?.pending || 0} 次`],
       ['有效期至', config.expiresOn || '—'],
     ]),

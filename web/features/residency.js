@@ -1,3 +1,4 @@
+import { openMedicationRound } from './med-rounds.js';
 import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import {
   allocate, billingSchedule, bindContractFields, contractFields, historicInquiries,
@@ -7,6 +8,7 @@ import { displayAmount } from './profile-controls.js';
 import { roomsPage } from './rooms.js';
 import { residentInsights } from './resident-insights.js';
 import { healthProfile } from './resident-health.js';
+import { renderMedicationReports } from './medication-reports.js';
 import { dailyTimeline } from './daily-timeline.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import {
@@ -202,7 +204,7 @@ export function profile(ctx, row) {
   }
   if (row.status === '在住' && hasGrant(ctx, 'care', 'clinical'))
     summary.append(residentInsights(ctx, row.id));
-  if (hasGrant(ctx, 'care', 'clinical', 'medical')) summary.append(healthProfile(ctx, row));
+  if (hasGrant(ctx, 'care', 'clinical', 'medical')) summary.append(healthProfile(ctx, row), renderMedicationReports(ctx, row.id));
   if (hasGrant(ctx, 'care', 'clinical')) summary.append(dailyTimeline(ctx, row));
   add(
     summary,
@@ -260,6 +262,8 @@ export function profile(ctx, row) {
     const actions = choose();
     if (hasGrant(ctx, 'intake', 'care'))
       actions.append(btn(ctx, '床头卡', () => bedCard(ctx, row)));
+    if (canAct(ctx, 'care.confirmMedRound'))
+      actions.append(btn(ctx, '服药核对', () => openMedicationRound(ctx, {residentId: row.id})));
     if (canAct(ctx, 'care.archive')) actions.append(btn(ctx, '复核摘要', () => archive(ctx, row)));
     if (canAct(ctx, 'care.leave')) actions.append(btn(ctx, '登记请假', () => leave(ctx, row)));
     if (!isTrial(row) && row.endDate && canAct(ctx, 'care.renew')) actions.append(btn(ctx, '续住', () => renew(ctx, row)));

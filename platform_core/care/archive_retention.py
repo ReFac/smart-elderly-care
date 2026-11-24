@@ -94,7 +94,7 @@ def maintain(store):
     day = now.date().isoformat()
     if getattr(store, "_archive_checked", None) == day:
         return
-    from .. import activity
+    from .. import activity, lead_directory
 
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
@@ -119,7 +119,12 @@ def maintain(store):
                 {"residentId": rid},
                 {},
             )
-        if expired:
+        closed = lead_directory.expire(state, day)
+        if closed:
+            revision += 1
+            activity.write(db, revision, now.isoformat(), "leads.expire", f"{closed} 条意向客户归档满 365 天",
+                           {"id":"archive-service", "displayName":"档案保管服务", "username":"archive-service"}, {}, {})
+        if expired or closed:
             db.execute(
                 "UPDATE workspace SET revision=?,data=? WHERE id=1",
                 (
@@ -143,7 +148,9 @@ def after_restore(db, now):
     overdue = trial_expiry.due(state, day)
     for person in overdue:
         trial_expiry.release(state, person)
-    if clear_due(db, state, day) or overdue:
+    from .. import lead_directory
+    expired_leads = lead_directory.expire(state, day)
+    if clear_due(db, state, day) or overdue or expired_leads:
         db.execute(
             "UPDATE workspace SET data=? WHERE id=1",
             (json.dumps(state, ensure_ascii=False, separators=(",", ":")),),
