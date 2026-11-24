@@ -74,6 +74,7 @@ const titles = {
   'facility.addCampus': '新增分院',
   'facility.addFloor': '新增楼层',
   'facility.addRoom': '新增房间',
+  'facility.updateRoom': '修改房型',
   'facility.renameBuilding': '更名楼栋',
   'facility.setLayout': '保存平面图',
   'facility.setScene': '发布环境视点',

@@ -222,6 +222,27 @@ button.room-bed-row:hover,
   position: absolute;
   inset: 9px;
 }
+.room-vector {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.room-vector rect {
+  fill: #fff;
+  stroke: #a2b4cb;
+  stroke-width: 2px;
+}
+.room-vector rect.occupied { fill: #e9f1fc; stroke: #7f9fca; }
+.room-vector text { fill: #2e496b; font-size: 4px; font-weight: 650; }
+.room-layout-preview {
+  position: relative;
+  height: 230px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #f1f5fa;
+}
 .room-plan-tile {
   position: absolute;
   min-width: 0;
@@ -232,8 +253,8 @@ button.room-bed-row:hover,
   justify-content: center;
   text-align: center;
   color: #52647f;
-  background: #fff;
-  border: 2px solid #a2b4cb;
+  background: transparent;
+  border: 2px solid transparent;
   border-radius: 2px;
   line-height: 1.25;
   padding: 0 2px;
@@ -241,10 +262,10 @@ button.room-bed-row:hover,
   font-variant-numeric: tabular-nums;
 }
 .room-plan-tile[data-occupied='true'] {
-  border-color: #7f9fca;
-  background: #e9f1fc;
   color: #234771;
 }
+.room-plan-type { font-size: 11px; }
+.room-plan-large .room-plan-type { display: none; }
 .room-plan-tile strong {
   max-width: 100%;
   overflow: hidden;
@@ -356,6 +377,7 @@ button.room-bed-row:hover,
 }
 .room-detail-meta {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 10px 15px;
@@ -364,6 +386,14 @@ button.room-bed-row:hover,
 }
 .room-detail-meta span {
   color: var(--muted);
+}
+.room-type-actions { display: flex; align-items: center; gap: 9px; }
+.room-edit-link {
+  padding: 2px 4px;
+  color: var(--accent);
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .room-bed-list h3 {
   padding: 13px 15px 5px;
@@ -377,6 +407,10 @@ button.room-bed-row:hover,
 }
 .room-room-actions:empty {
   display: none;
+}
+.room-card-head > .room-room-actions {
+  padding: 0;
+  border: 0;
 }
 .room-admin,
 .room-layout-editor,
@@ -576,6 +610,7 @@ button.room-bed-row:hover,
   position: relative;
   max-width: 100%;
 }
+.survey-loaded .room-vector { opacity: .55; }
 .survey-loaded .room-plan-tile {
   background: rgba(255, 255, 255, 0.68);
 }

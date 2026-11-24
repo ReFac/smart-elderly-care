@@ -17,6 +17,8 @@ python3 server.py
 
 加密数据库默认保存在 `.local/workspace.sqlite3`。升级明文旧库、独立保管恢复密钥和演练恢复的步骤见[加密存储与恢复](docs/storage.md)。业务日期使用上海时区。机构工作台和 API 共用一个本地回环端口。带权限的业务日志位于「系统管理 → 操作日志」，可按房间和操作者组合筛选。
 
+Owner 可在「机构设置 → 平台更新」检查并下载已签名版本。在托管启动方式下可以自动安装，切换前会创建完整加密快照。[签名发布、托管启动与更新前保护点](docs/updates.md)
+
 ```bash
 # 单独开一个空白的演示库，首次打开时生成独立样本
 python3 server.py --port 8766 --db .local/walkthrough.sqlite3

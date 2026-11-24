@@ -68,3 +68,11 @@
 .medical-visit-supplement > div { margin-top: 12px; }
 .medical-visit-history .fx-timeline-head > .medical-visit-actions { margin-inline-start: auto; }
 .medical-visit-history .fx-timeline-head > .medical-visit-actions .btn { margin-inline-start: 0; }
+.medical-visit-history .fx-table-tools[hidden] { display: none; }
+.medical-visit-history .fx-table-tools { padding: 0 4px 9px; }
+.medical-visit-history .fx-named > strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}

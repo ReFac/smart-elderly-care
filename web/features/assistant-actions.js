@@ -8,6 +8,8 @@ import { routes } from '../lib/navigation.js';
 // These destinations are also indexed by the keyboard quick finder.
 export const quickDestinations = [
   { label: '区域设置', words: '护理区域 子区域 护工职责 楼栋分区', route: 'beds', tab: 'zones' },
+  { label: '房型设置', words: '单人间 双人间 三人间 编辑房间', route: 'beds', tab: 'all', grant: 'facility.updateRoom' },
+  { label: '平台更新', words: '版本检查 自动更新 升级前备份 软件更新', route: 'settings', tab: 'platformUpdates' },
   { label: '健康工作台', words: '健康管理 智慧照护 异常上报', route: 'care', tab: 'healthDesk' },
   { label: '等级判定', words: '评估结果 护理等级', route: 'assessments', tab: 'grading' },
   { label: '用药安全筛查', words: '用药冲突 过敏核对 重复用药', route: 'medications', tab: 'safety' },
@@ -46,6 +48,16 @@ function pageDestination(ctx, entry) {
   if (tab != null && (typeof tab !== 'string' || !/^[a-z][a-zA-Z0-9]{0,39}$/.test(tab)))
     return null;
   const dest = route === 'intake' ? 'residents' : route === 'rooms' ? 'beds' : route;
+  const params = {};
+  if (dest === 'beds' && entry.params && typeof entry.params === 'object') {
+    for (const key of ['campus', 'building', 'floor', 'room']) {
+      if (/^[A-Za-z0-9_-]{1,100}$/.test(entry.params[key] || '')) params[key] = entry.params[key];
+    }
+    if (/^(?:[1-9]|1[0-2])$/.test(entry.params.capacity)) params.capacity = entry.params.capacity;
+    if (/^(?:[1-9]|[12]\d|30)$/.test(entry.params.limit)) params.limit = entry.params.limit;
+    if (['layout', 'room'].includes(entry.params.edit) && canAct(ctx, entry.params.edit === 'layout' ? 'facility.setLayout' : 'facility.updateRoom'))
+      params.edit = entry.params.edit;
+  }
   return {
     route,
     destination: dest,
@@ -54,6 +66,7 @@ function pageDestination(ctx, entry) {
       ? entry.title.trim()
       : routes.get(dest).label,
     icon: routes.get(dest).icon,
+    ...(Object.keys(params).length ? { params } : {}),
   };
 }
 
@@ -97,9 +110,9 @@ export function openAssistantAction(ctx, action) {
   if (action.kind === 'navigate') {
     const link = pageDestination(ctx, action);
     if (!link) return ctx.toast('当前账号无法打开这个页面');
-    return ctx.go(link.destination, link.tab, () =>
-      document.getElementById('content')?.focus({ preventScroll: true }),
-    );
+    const arrival = () => document.getElementById('content')?.focus({ preventScroll: true });
+    return link.params ? ctx.go(link.destination, link.tab, arrival, link.params) :
+      ctx.go(link.destination, link.tab, arrival);
   }
   if (!action.id) return ctx.toast('无法识别这项建议，请重新提问');
   if (action.kind === 'workOrder' && action.route === 'care') {

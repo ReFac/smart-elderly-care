@@ -10,6 +10,7 @@ import { routes } from '../lib/navigation.js';
 import { capabilitySummary, draftPreview, grantPicker } from './access-grants.js';
 import { trialSettings } from './trial-stays.js';
 import { providerUsage } from './provider-usage.js';
+import { platformUpdates } from './platform-updates.js';
 
 function inputField(label, name, value = '', options = {}) {
   const control = node('input');
@@ -638,7 +639,7 @@ function settings(ctx) {
   const result = page(
     ctx,
     '机构设置',
-    '管理界面、AI 套餐和机构数据备份。',
+    '管理界面、AI 套餐、机构数据备份和版本更新。',
     null,
     tabs('settings', [
       ['general', '界面与 AI 套餐', () => node('div', 'access-settings-grid', [appearance, deep])],
@@ -646,6 +647,7 @@ function settings(ctx) {
       ['trials', '试住约定', () => trialSettings(ctx)],
       ['rounds', '定时巡查', () => roundsSettings(ctx)],
       ['backups', '备份与恢复', () => backupPanel(ctx)],
+      ['platformUpdates', '平台更新', () => platformUpdates(ctx)],
     ]),
   );
   result.classList.add('access-management');

@@ -46,13 +46,16 @@ def synthesize(key, text):
 
 def listen(store, token, payload, *, transport=None):
     from ..agents import chat
+    from ..agents import chat_progress
 
-    if set(payload) != {"region", "scopeKey", "generation", "requestId", "part"}:
+    piece_key = "sentence" if "sentence" in payload else "part"
+    if set(payload) != {"region", "scopeKey", "generation", "requestId", piece_key}:
         raise ValueError("请选择当前对话中的一条答复")
-    part, request = payload["part"], payload["requestId"]
+    part, request = payload[piece_key], payload["requestId"]
+    progressive = piece_key == "sentence"
     if (
         type(part) is not int
-        or not 0 <= part < 20
+        or not 0 <= part < (chat_progress.MAX_SENTENCES if progressive else 20)
         or not isinstance(request, str)
         or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", request)
     ):
@@ -68,15 +71,24 @@ def listen(store, token, payload, *, transport=None):
             "SELECT answer FROM assistant_turns WHERE actor=? AND scope=? AND generation=? AND request=?",
             (actor["id"], scope, thread["generation"], request),
         ).fetchone()
-        if not row:
-            raise PermissionError("此账号无法朗读该答复")
-        return actor["id"], row[0]
+        uid = actor["id"]
+        if row:
+            if not progressive:
+                return uid, row[0][part * CHUNK : (part + 1) * CHUNK]
+            pieces = chat_progress.sentences(row[0], final=True)
+            if part < len(pieces):
+                return uid, pieces[part]
+            raise ValueError("已到答复结尾")
+        if progressive and thread["pending"] == request:
+            piece = chat_progress.pending(store, uid, scope, thread["generation"], request, part)
+            if piece:
+                return uid, piece
+        raise PermissionError("此账号无法朗读该答复")
 
     now = store.now()
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
-        uid, answer = authorized(db)
-        piece = answer[part * CHUNK : (part + 1) * CHUNK]
+        uid, piece = authorized(db)
         if not piece:
             raise ValueError("已到答复结尾")
         plan = latest(db)
@@ -92,9 +104,10 @@ def listen(store, token, payload, *, transport=None):
             key = read_key()
         except (OSError, ValueError):
             raise chat.Unavailable("机构尚未配置 DeepSeek 朗读服务") from None
-        fingerprint = sha256(
-            json.dumps([uid, request, part, piece]).encode()
-        ).hexdigest()
+        signature = [uid, request, part, piece]
+        if progressive:
+            signature.append(piece_key)
+        fingerprint = sha256(json.dumps(signature).encode()).hexdigest()
         if db.execute(
             "SELECT 1 FROM media_usage WHERE kind='tts' AND fingerprint=? AND state<>'rejected'",
             (fingerprint,),

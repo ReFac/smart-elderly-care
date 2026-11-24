@@ -96,6 +96,16 @@ def for_person(data, resident_id):
 
 
 def locate(db, data, action, payload, actor):
+    if action in ("facility.updateRoom", "facility.setLayout"):
+        from .facility import floor, room
+
+        if action == "facility.updateRoom":
+            place = room(db, data, actor, payload.get("roomId"))
+            label = " / ".join((place["campusName"], place["buildingName"], place["floorLabel"], place["number"]))
+            return {"room": label, "roomId": place["id"], "campusId": place["campusId"]}
+        place = floor(db, data, actor, payload.get("floorId"))
+        label = " / ".join((place["campusName"], place["buildingName"], place["label"]))
+        return {"room": label, "roomIds": [r["id"] for r in place["rooms"]], "campusId": place["campusId"]}
     if action.startswith("care.area") and isinstance(payload.get("buildingId"), str):
         building = db.execute(
             "SELECT name,campusId FROM facility_building_directory WHERE id=?", (payload["buildingId"],)

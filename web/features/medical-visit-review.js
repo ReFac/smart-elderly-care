@@ -220,6 +220,14 @@ function showVisit(ctx, person, record, openEditor) {
 export function visitHistory(ctx, person, openEditor) {
   const panel = node('section', 'medical-visit-history');
   panel.dataset.visitHistory = person.id;
+  const search = node('input', 'fx-input');
+  search.type = 'search';
+  search.placeholder = '搜索就诊日期、医院、科室或诊断';
+  search.setAttribute('aria-label', search.placeholder);
+  const searchBar = node('div', 'fx-table-tools');
+  searchBar.append(node('label', 'fx-table-search', [ctx.ui.icon('search', 15), search]));
+  const list = node('div', 'medical-visit-rows');
+  let renderRows;
   const draw = () => {
     const live = ctx.current?.() || ctx;
     if (!live.state || !live.state.residents?.some(row => row.id === person.id)) {
@@ -231,24 +239,41 @@ export function visitHistory(ctx, person, openEditor) {
       btn(live, '手动录入病例', () => openEditor(live, person, 'manual')),
       btn(live, '上传就诊资料', () => openEditor(live, person, 'ai'), 'primary'),
     ]) : null;
+    const count = node('span', 'fx-count');
+    count.setAttribute('aria-live', 'polite');
     const header = node('header', 'fx-timeline-head', [
       node('h3', '', [live.ui.icon('folder', 18), '就诊病例与过往记录']),
-      node('span', 'fx-count', rows.length + ' 次'), actions,
+      count, actions,
     ]);
-    const items = rows.map(row => {
-      const files = row.attachments.length + row.supplements.reduce((n, item) => n + item.attachments.length, 0);
-      return node('article', 'fx-time-row', [
-        node('time', '', row.fields.eventDate),
-        node('div', 'fx-named', [
-          node('strong', '', row.fields.diagnosis || row.fields.reason || '就诊记录'),
-          node('small', '', [row.fields.facility, row.fields.department, files + ' 份原件',
-            row.supplements.length ? row.supplements.length + ' 次补充' : ''].filter(Boolean).join(' · ')),
-        ]),
-        btn(live, '查看病例', () => showVisit(live, person, row, openEditor), 'ghost'),
-      ]);
-    });
-    panel.replaceChildren(header, ...(items.length ? items : [node('p', 'fx-muted', '尚无已核对的就诊病例。')]));
+    renderRows = () => {
+      const query = search.value.trim().toLocaleLowerCase();
+      const filtered = rows.filter(row =>
+        [row, ...row.supplements].some(({fields}) =>
+          [fields.eventDate, fields.facility, fields.department, fields.diagnosis, fields.reason]
+            .filter(Boolean).join(' ').toLocaleLowerCase().includes(query))
+      );
+      count.textContent = filtered.length + ' 次';
+      const items = filtered.map(row => {
+        const files = row.attachments.length + row.supplements.reduce((n, item) => n + item.attachments.length, 0);
+        return node('article', 'fx-time-row', [
+          node('time', '', row.fields.eventDate),
+          node('div', 'fx-named', [
+            node('strong', '', row.fields.diagnosis || row.fields.reason || '就诊记录'),
+            node('small', '', [row.fields.facility, row.fields.department, files + ' 份原件',
+              row.supplements.length ? row.supplements.length + ' 次补充' : ''].filter(Boolean).join(' · ')),
+          ]),
+          btn(live, '查看病例', () => showVisit(live, person, row, openEditor), 'ghost'),
+        ]);
+      });
+      list.replaceChildren(...(items.length ? items : [node('p', 'fx-muted',
+        rows.length ? '没有匹配的就诊记录。' : '尚无已核对的就诊病例。')]));
+    };
+    if (!rows.length) search.value = '';
+    searchBar.hidden = !rows.length;
+    panel.replaceChildren(header, searchBar, list);
+    renderRows();
   };
+  search.addEventListener('input', () => renderRows?.());
   panel.addEventListener('visit-saved', draw);
   draw();
   return panel;

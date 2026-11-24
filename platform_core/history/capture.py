@@ -31,6 +31,7 @@ PREFIXES = {
     ),
     "gw": ("gateway_",),
     "backup": ("backup_",),
+    "update": ("update_policy",),
     "platform": ("api_", "media_"),
     "media": ("media_usage",),
     "document": ("protected_documents",),

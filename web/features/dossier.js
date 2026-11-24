@@ -507,10 +507,10 @@ function showDocument(ctx, doc) {
   ctx.detail('文书概括', view);
 }
 
-function timeline(ctx, resident) {
+function timeline(ctx, resident, actions) {
   const rows = (ctx.state.medicalDocuments || []).filter((d) => d.residentId === resident.id);
   const panel = node('section', 'fx-timeline');
-  const title = node('h3', '', [ctx.ui.icon('calendar', 18), '医疗记录时间线']);
+  const title = node('h3', '', [ctx.ui.icon('file', 18), '既往医疗文书']);
   const count = node('span', 'fx-count');
   const year = node('select', 'fx-input');
   year.setAttribute('aria-label', '选择文书年份');
@@ -567,7 +567,7 @@ function timeline(ctx, resident) {
     year,
     category
   ]);
-  panel.append(node('header', 'fx-timeline-head', [title, count]), tools, items);
+  panel.append(node('header', 'fx-timeline-head', [title, count, actions]), tools, items);
   refresh();
   return panel;
 }
@@ -602,35 +602,15 @@ function showKin(ctx, resident, readOnly=false) {
   return disclosure('亲属登记', list, profiles.length);
 }
 
-export function openDossier(ctx, resident, lifeEvent) {
-  const profile = (ctx.state.dossierProfiles || []).find((p) => p.residentId === resident.id) || {};
-  const archived = ['已退住','归档','已归档','已出院'].includes(resident.status);
+function registrationDetails(ctx, resident, profile, archived, stay) {
+  const content = node('div', 'fx-profile');
   const actions = choose();
-  const side = node('div', 'fx-dossier-demographic fx-profile');
-  const contents = node('div', 'fx-dossier-main fx-profile');
-  const grid = node('div', 'fx-dossier-grid', [side, contents]);
-  const body = node('div', 'fx-profile fx-dossier', [
-    node('header', 'fx-dossier-head', [recordIdentity(ctx, resident, resident.level), actions]),
-    grid
-  ]);
-  if (!archived && allowed(ctx, 'intake'))
-    actions.append(btn(ctx, '编辑登记资料', () => editResident(ctx, resident, profile)));
-  if (!archived && allowed(ctx, 'medical.write'))
-    actions.append(btn(ctx, '存档医疗文书', () => newDocument(ctx, resident), 'primary'));
-  if (resident.status==='在住' && ctx.state.allowedActions.includes('dossier.signSummary'))
-    actions.append(btn(ctx, '核对动态档案摘要', () => previewSummary(ctx, resident, showDocument)));
-  const recentChanges = scopedHistoryButton(ctx, 'resident', resident.id);
-  if (recentChanges) actions.append(recentChanges);
-  const stay = residencyDetails(ctx, resident);
-  if (!archived && allowed(ctx, 'care')) contents.append(careTimeline(ctx, 'resident', resident.id));
-  if (hasGrant(ctx, 'care', 'clinical', 'medical')) contents.prepend(healthProfile(ctx, resident), renderMedicationReports(ctx, resident.id));
-  if (hasGrant(ctx, 'care', 'clinical', 'care.groupConfirm') || lifeEvent && hasGrant(ctx, 'residents', 'medical'))
-    contents.append(dailyTimeline(ctx, resident, lifeEvent));
-  if (allowed(ctx, 'medical')) contents.append(
-    visitHistory(ctx, resident, archived ? null : openVisitEditor), timeline(ctx, resident)
-  );
+  if (!archived && allowed(ctx, 'intake')) {
+    actions.append(btn(ctx, '编辑登记资料', () => editResident(ctx, resident, profile), 'primary'));
+    content.append(node('div', 'resident-dossier-actions', actions));
+  }
   if (allowed(ctx, 'residents') || allowed(ctx, 'intake'))
-    side.append(
+    content.append(
       section(
         '基本资料',
         facts([
@@ -641,9 +621,10 @@ export function openDossier(ctx, resident, lifeEvent) {
         ])
       )
     );
-  add(side, stay.enrollment);
+  add(content, stay.enrollment);
   if (allowed(ctx, 'relatives'))
-    side.append(
+    content.append(
+      contactBook(ctx, resident, profile, archived),
       disclosure('家庭情况', facts(displayed(householdFields, profile))),
       disclosure('费用来源', facts([['费用来源', profile.fundingSources?.join('、')], ...(profile.incomeSource ? [['旧版登记原文',profile.incomeSource]] : [])])),
       disclosure('长者养老金收入', facts([['每月收入',displayAmount(profile.pensionBand,profile.pensionAmount)]])),
@@ -651,11 +632,36 @@ export function openDossier(ctx, resident, lifeEvent) {
     );
   if (allowed(ctx,'finance')) {
     const bills=(ctx.state.bills||[]).filter(b=>b.residentId===resident.id).sort((a,b)=>b.month.localeCompare(a.month));
-    side.append(disclosure('收费', node('div','fx-profile',[records(bills,b=>node('div','fx-profile',[named(b.month+' · '+b.status,'应收 '+b.amount+' 元 · 已收 '+b.paid+' 元 · 待缴 '+b.balance+' 元'),btn(ctx,'查看本期收费明细',()=>billDetail(ctx,b),'ghost')]),'暂无已出账单')]), bills.length));
+    content.append(disclosure('收费', records(bills, bill => node('div', 'resident-dossier-invoice', [
+      named(
+        [bill.billingDate || bill.month, {monthly: '月费', security: '入住押金', trial: '试住费'}[bill.kind], bill.status].filter(Boolean).join(' · '),
+        '应收 ' + bill.amount + ' 元 · 已收 ' + bill.paid + ' 元 · 待缴 ' + bill.balance + ' 元'
+      ),
+      btn(ctx, '查看本期收费明细', () => billDetail(ctx, bill), 'ghost'),
+    ]), '暂无已出账单'), bills.length));
+  }
+  if (!archived && ctx.state.familyRoundRecipients) add(content, familyRecipients(ctx, resident));
+  return content;
+}
+
+function medicalDetails(ctx, resident, archived, stay) {
+  const content = node('div', 'fx-profile');
+  const actions = choose();
+  if (!archived && allowed(ctx, 'medical.write'))
+    actions.append(btn(ctx, '存档医疗文书', () => newDocument(ctx, resident)));
+  if (resident.status === '在住' && ctx.state.allowedActions.includes('dossier.signSummary'))
+    actions.append(btn(ctx, '核对动态档案摘要', () => previewSummary(ctx, resident, showDocument)));
+  if (allowed(ctx, 'medical')) {
+    content.append(
+      visitHistory(ctx, resident, archived ? null : openVisitEditor),
+      timeline(ctx, resident, actions.childElementCount ? actions : null)
+    );
+  } else if (actions.childElementCount) {
+    content.append(actions);
   }
   if (allowed(ctx, 'clinical') || allowed(ctx, 'medical')) {
     if (resident.summary)
-      contents.prepend(section('当前档案摘要', node('p', '', resident.summary)));
+      content.append(section('当前档案摘要', node('p', '', resident.summary)));
     if (resident.allergies || resident.risk) {
       const values = [
         ['已登记过敏史', resident.allergies],
@@ -664,13 +670,13 @@ export function openDossier(ctx, resident, lifeEvent) {
       const rows = node('div', 'fx-profile');
       for (const [label, value] of values.filter((entry) => entry[1]))
         rows.append(node('div', '', [badge(ctx, label, 'amber'), ' ' + value]));
-      contents.prepend(section('过敏与高危提示', rows));
+      content.append(section('过敏与高危提示', rows));
     }
     const updates = (ctx.state.archives || [])
       .filter((r) => r.residentId === resident.id)
       .reverse();
     if (updates.length)
-      contents.append(
+      content.append(
         disclosure(
           '护理复核与历史摘要',
           records(updates, (r) =>
@@ -694,13 +700,101 @@ export function openDossier(ctx, resident, lifeEvent) {
         )
       );
   }
-  if (allowed(ctx, 'relatives')) contents.append(contactBook(ctx, resident, profile, archived));
-  if (!archived && ctx.state.familyRoundRecipients) contents.append(familyRecipients(ctx, resident));
-  add(contents, stay.history, stay.clinical);
-  if (resident.status==='在住' && (allowed(ctx, 'care') || allowed(ctx, 'clinical'))) contents.prepend(residentInsights(ctx, resident.id));
-  if (!side.childElementCount) side.remove();
-  if (!contents.childElementCount) contents.remove();
-  return ctx.detail('长者详细档案', body);
+  if (resident.status !== '归档到期' && hasGrant(ctx, 'care', 'clinical', 'medical'))
+    content.append(healthProfile(ctx, resident), renderMedicationReports(ctx, resident.id));
+  add(content, stay.clinical);
+  return content;
+}
+
+function wellnessTimeline(ctx, resident, archived, stay, lifeEvent) {
+  const content = node('div', 'fx-profile');
+  if (resident.status !== '归档到期' && hasGrant(ctx, 'care', 'clinical', 'care.groupConfirm', 'residents', 'medical'))
+    content.append(dailyTimeline(ctx, resident, lifeEvent));
+  if (resident.status === '在住' && hasGrant(ctx, 'care', 'clinical'))
+    content.append(residentInsights(ctx, resident.id));
+  if (!archived && allowed(ctx, 'care'))
+    content.append(careTimeline(ctx, 'resident', resident.id));
+  add(content, stay.history);
+  return content;
+}
+
+let nextDossierPanel = 0;
+
+function dossierViews(ctx, views, requested) {
+  const key = 'resident-dossier-' + ++nextDossierPanel;
+  const nav = node('div', 'resident-dossier-nav');
+  nav.setAttribute('role', 'tablist');
+  nav.setAttribute('aria-label', '长者详细档案栏目');
+  nav.setAttribute('aria-orientation', 'vertical');
+  const contents = node('div', 'resident-dossier-content');
+  const entries = views.map(([id, title, icon, render]) => {
+    const button = node('button', '', [ctx.ui.icon(icon, 18), node('span', '', title)]);
+    button.type = 'button';
+    button.id = key + '-tab-' + id;
+    button.dataset.dossierTab = id;
+    const panel = node('div', 'resident-dossier-panel');
+    panel.id = key + '-panel-' + id;
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-controls', panel.id);
+    panel.setAttribute('role', 'tabpanel');
+    panel.setAttribute('aria-labelledby', button.id);
+    panel.tabIndex = 0;
+    nav.append(button);
+    contents.append(panel);
+    return { id, button, panel, render };
+  });
+  function show(selected) {
+    for (const entry of entries) {
+      const active = entry === selected;
+      entry.button.tabIndex = active ? 0 : -1;
+      entry.button.setAttribute('aria-selected', String(active));
+      entry.panel.hidden = !active;
+    }
+    if (!selected.panel.firstElementChild) selected.panel.append(selected.render());
+    selected.panel.scrollTop = 0;
+    contents.closest('dialog')?.scrollTo({top: 0});
+  }
+  for (const [index, entry] of entries.entries()) {
+    entry.button.addEventListener('click', () => show(entry));
+    entry.button.addEventListener('keydown', event => {
+      const target = {
+        ArrowUp: (index - 1 + entries.length) % entries.length,
+        ArrowDown: (index + 1) % entries.length,
+        Home: 0,
+        End: entries.length - 1,
+      }[event.key];
+      if (target == null) return;
+      event.preventDefault();
+      show(entries[target]);
+      entries[target].button.focus();
+    });
+  }
+  show(entries.find(entry => entry.id === requested) || entries[0]);
+  return node('div', 'resident-dossier-grid', [nav, contents]);
+}
+
+export function openDossier(ctx, resident, lifeEvent, initialSection) {
+  const profile = (ctx.state.dossierProfiles || []).find((p) => p.residentId === resident.id) || {};
+  const archived = ['已退住', '归档', '已归档', '已出院', '归档到期'].includes(resident.status);
+  const stay = residencyDetails(ctx, resident);
+  const views = [];
+  if (stay.enrollment || hasGrant(ctx, 'residents', 'intake', 'relatives', 'finance') || ctx.state.familyRoundRecipients)
+    views.push(['registration', '登记资料', 'file', () => registrationDetails(ctx, resident, profile, archived, stay)]);
+  if (hasGrant(ctx, 'care', 'clinical', 'medical') || !archived && allowed(ctx, 'medical.write'))
+    views.push(['medical', '医疗资料', 'heart', () => medicalDetails(ctx, resident, archived, stay)]);
+  if (stay.history || resident.status !== '归档到期' && hasGrant(ctx, 'care', 'clinical', 'care.groupConfirm', 'residents', 'medical'))
+    views.push(['timeline', '疗养院时间线', 'calendar', () => wellnessTimeline(ctx, resident, archived, stay, lifeEvent)]);
+  const recentChanges = scopedHistoryButton(ctx, 'resident', resident.id);
+  const body = node('div', 'fx-profile fx-dossier', [
+    node('header', 'fx-dossier-head', [recordIdentity(ctx, resident, resident.level), recentChanges]),
+    views.length
+      ? dossierViews(ctx, views, lifeEvent ? 'timeline' : initialSection)
+      : node('p', 'fx-muted', '当前岗位没有可查阅的详细资料。'),
+  ]);
+  const dialog = ctx.detail('长者详细档案', body);
+  dialog.classList.add('resident-dossier-dialog');
+  dialog.dataset.roundsResidentId = resident.id;
+  return dialog;
 }
 
 export function renderDossier(route, ctx) {
@@ -732,7 +826,7 @@ export function renderDossier(route, ctx) {
         },
         {
           label: '操作',
-          view: (r) => link(ctx, '打开详细档案', () => openDossier(ctx, r))
+          view: (r) => link(ctx, '打开详细档案', () => openDossier(ctx, r, undefined, 'medical'))
         }
       ]
     })

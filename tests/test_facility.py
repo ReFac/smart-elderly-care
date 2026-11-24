@@ -7,7 +7,7 @@ import sqlite3
 import unittest
 from unittest.mock import patch
 
-from platform_core import care, facility
+from platform_core import access_policy, care, facility
 
 
 DAY = "2026-11-24"
@@ -194,6 +194,59 @@ class FacilityTests(unittest.TestCase):
             h=15,
         )
         self.assertEqual(self.view()["roomCount"], 5)
+
+    def test_room_resize_retains_bed_identity_and_only_removes_vacant_capacity(self):
+        full = self.first("101")
+        untouched = deepcopy(self.s)
+        with self.assertRaisesRegex(ValueError, "仍在使用"):
+            self.command("updateRoom", roomId=full, bedCount=1)
+        self.assertEqual(self.s, untouched)
+        self.command("updateRoom", roomId=full, bedCount=3)
+        room = facility.room(self.db, self.s, NURSE, full)
+        self.assertEqual((room["roomType"], room["occupiedCount"]), ("三人间", 2))
+        extra = room["beds"][-1]["id"]
+        self.command("updateRoom", roomId=full, bedCount=2)
+        former = next(b for b in self.s["beds"] if b["id"] == extra)
+        self.assertEqual(former["status"], facility.INACTIVE_BED)
+        self.assertTrue(self.db.execute("SELECT 1 FROM facility_beds WHERE bedId=?", (extra,)).fetchone())
+        self.assertNotIn(extra, {b["id"] for b in access_policy.visible_data(self.s, OWNER)["beds"]})
+        self.assertEqual(facility.room(self.db, self.s, NURSE, full)["roomType"], "双人间")
+        old_rate = former["dailyRate"]
+        self.command("updateRoom", roomId=full, bedCount=3, dailyRate="76.50")
+        self.assertEqual((former["status"], former["dailyRate"]), ("空闲", old_rate))
+        self.assertEqual(facility.room(self.db, self.s, NURSE, full)["beds"][-1]["id"], extra)
+        self.assertEqual(facility.rooms(self.db, self.s, NURSE, "3", "3")["total"], 1)
+
+    def test_capacity_and_vector_administration_keep_their_own_access_boundaries(self):
+        first = self.first()
+        manager = {"id": "manager", "kind": "staff", "permissions": ["facility.manage"],
+                   "facilityScope": {"roomIds": [first]}}
+        self.assertIn("facility.updateRoom", access_policy.allowed_actions(manager))
+        self.assertNotIn("facility.updateRoom", access_policy.allowed_actions(NURSE))
+        place = facility.room(self.db, self.s, manager, first)
+        self.assertTrue(place["canEdit"])
+        self.assertTrue(all(not b["residentName"] and not b["residentId"] for b in place["beds"]))
+        listing = facility.rooms(self.db, self.s, manager)
+        self.assertEqual([r["id"] for r in listing["rooms"]], [first])
+        self.assertEqual(self.search("沈", manager), [])
+        self.assertFalse(self.view(user=manager)["vector"]["editable"])
+        with self.assertRaises(FileNotFoundError):
+            facility.apply(self.db, self.s, "facility.updateRoom",
+                           {"roomId": self.first("201"), "bedCount": 3}, manager, DAY)
+        with self.assertRaises(PermissionError):
+            facility.apply(self.db, self.s, "facility.setLayout",
+                           {"floorId": "floor-1", "rooms": []}, manager, DAY)
+        floor_manager = {**manager, "facilityScope": {"floorIds": ["floor-1"]}}
+        vector = self.view(user=floor_manager)["vector"]
+        self.assertEqual(vector["viewBox"], [0, 0, 100, 100])
+        self.assertTrue(vector["editable"])
+        rectangles = [{**r, "x": i * 24, "y": 10, "w": 20, "h": 30}
+                      for i, r in enumerate(vector["rooms"])]
+        with self.db:
+            facility.apply(self.db, self.s, "facility.setLayout",
+                           {"floorId": "floor-1", "rooms": rectangles}, floor_manager, DAY)
+        self.assertEqual(self.view()["vector"]["rooms"], rectangles)
+        self.assertFalse(self.view()["vector"]["editable"])
 
     def test_tour_filter_sort_replace_withdraw_and_allowed_media_origins(self):
         rid = self.first()

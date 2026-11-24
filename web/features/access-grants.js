@@ -2,7 +2,7 @@ import { groups } from '../lib/navigation.js';
 import { btn, node } from './shared.js';
 
 const grantGroups = [
-  ['入住与照护', ['residents', 'intake', 'care', 'care.schedule', 'care.areas', 'clinical', 'clinical.rules', 'health.overview']],
+  ['入住与照护', ['residents', 'intake', 'care', 'care.schedule', 'care.areas', 'facility.manage', 'clinical', 'clinical.rules', 'health.overview']],
   ['医疗档案与亲属', ['medical', 'medical.write', 'relatives', 'family.share']],
   ['机构运营', ['inventory', 'finance', 'longCare', 'shifts', 'reports']],
   ['智能协作与设备', ['assistants', 'gateway.simulate', 'alerts', 'voice', 'voice.confirm']],
@@ -105,6 +105,7 @@ const commands = {
       addBuilding: '新增楼栋',
       addFloor: '新增楼层',
       addRoom: '新增房间',
+      updateRoom: '修改房型与床位',
       addBeds: '新增床位',
       linkBed: '关联床位',
       setLayout: '登记平面图',

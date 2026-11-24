@@ -9,6 +9,7 @@
 <output role="status">运行中</output>
 <script type="module">
   import { chatLauncher, toggleChat, clearChat } from '../../web/features/assistant-chat.js';
+  import { assistantPageLinks, openAssistantAction } from '../../web/features/assistant-actions.js';
   import { renderFeature } from '../../web/features/index.js';
   import { selectTab } from '../../web/features/shared.js';
   import * as ui from '../../web/lib/ui.js';
@@ -49,7 +50,8 @@
     toast() {},
   };
   window.fetch = async (url, options = {}) => {
-    check(url === '/api/assistant/chat', '页面入口只应读取工作台，无需提交院务命令');
+    check(url === (options.method === 'POST' ? '/api/assistant/chat/stream' : '/api/assistant/chat'),
+      '页面入口只应读取工作台，无需提交院务命令');
     if (options.method === 'POST') {
       const payload = JSON.parse(options.body);
       requests.push(payload);
@@ -113,6 +115,18 @@
     const lastTurn = find('.from-assistant:last-child');
     check(lastTurn.querySelector('.assistant-source-link') && !lastTurn.querySelector('.assistant-page-link'), '外部资料只展示公开来源');
     check(!document.querySelector('.from-user .assistant-page-link') && !find('dialog[open]'), '点击入口无需执行业务操作');
+    const roomEntry = {
+      route: 'beds', tab: 'all', title: '查看单人间',
+      params: {capacity: '1', limit: '3', floor: 'floor-2', room: '../outside', edit: 'room'},
+    };
+    const roomLink = assistantPageLinks(ctx, {role: 'assistant', pageLinks: [roomEntry]})[0];
+    const expectedParams = JSON.stringify({floor: 'floor-2', capacity: '1', limit: '3'});
+    check(JSON.stringify(roomLink.params) === expectedParams, '房型入口保留查阅筛选并清理越界参数与无权编辑项');
+    let arrival;
+    openAssistantAction({...ctx, go: (route, tab, _focus, params) => { arrival = [route, tab, params]; }},
+      {...roomEntry, kind: 'navigate'});
+    check(arrival?.[0] === 'beds' && arrival[1] === 'all' &&
+      JSON.stringify(arrival[2]) === expectedParams, '点击房型入口带着楼层、房型和数量进入床位列表');
     clearChat();
     document.documentElement.dataset.result = 'pass';
     find('output').textContent = 'PASS';

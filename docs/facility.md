@@ -29,6 +29,7 @@
 | --- | --- |
 | `GET /api/facility` | 分院名录及地址，楼栋所属分院，楼层编号、授权范围内房间数及管理能力。总管理员还可查看待定位的旧床位。 |
 | `GET /api/facility/floors/{id}` | 一层的房号、房间编号、矩形坐标、床位数和在住数。平面示意只包含当前账号可查看的房间。 |
+| `GET /api/facility/rooms?bedCount=1&limit=3` | 查询最多三间单人间，返回当前授权范围内的房型、位置和占用数。可叠加现有院区、楼栋、楼层或房间范围。 |
 | `GET /api/facility/rooms/{id}` | 单间床号、状态、当前在住长者姓名及档案编号。 |
 | `GET /api/facility/search?q=兰&campusId=…&buildingId=…&floorId=…&roomId=…&limit=12` | 区域参数可省略或叠加。优先返回精确匹配；单字、子串和房号均在机构服务端匹配，无模型调用。结果只含匹配名及定位字段。 |
 | `GET /api/facility/tour?campusId=…&buildingId=…&floorId=…&roomId=…` | 楼栋公共区、楼层公共区与房间级环境视点，包含照片或全景媒体地址、标题、位置、展示次序。可遍历整院或选定范围。收到 `awaiting_media` 表示当前范围内暂无已发布的影像。 |
@@ -47,10 +48,13 @@
 | `facility.addFloor` | 提供 `buildingId` 和整数 `number`。每栋按实际楼层编号独立管理。 |
 | `facility.addRoom` | 提供 `floorId`、`number`、`ward`；可带 `bedCount`（0–12）、`dailyRate`（元）。已登记几何的楼层，新增房间须提供图内坐标。 |
 | `facility.addBeds` | 为现有房间提交 `roomId`、`count`、`dailyRate`。新旧床位属于同一房间；不同楼栋相同房号的床单可通过楼栋及楼层区分。 |
+| `facility.updateRoom` | 提交 `roomId` 及目标 `bedCount`（0–12）。通过「房间详情 → 编辑房型」办理。减配停用空床并保留原编号和历史，增配先恢复可用的旧床。新建床位日价由有财务权限的经办人设置。 |
 | `facility.linkBed` | 旧库中门牌无法明确定位时，根据现场核对结果将 `bedId` 绑定到同护理区的 `roomId`，保留其原编号和入住关联。已定位床位拒绝再次绑定。 |
 | `facility.setLayout` | 提交 `floorId` 与完整的 `rooms` 数组，每项含 `roomId,x,y,w,h`。坐标原点为左上角，单位为图幅的百分比。整体核对同层归属、范围、遗漏和重叠，通过后一次发布。可附加经核准的环境平面底图地址 `planMediaUrl`；仅获单间授权的账号看到所授权房间的图形。 |
 | `facility.setScene` | 选择 `buildingId`、`floorId` 或 `roomId`，填写 `title`、`kind`、`mediaUrl`、`sortOrder`。同一目标可以有多个命名视点。重发同名视点会更新媒体。 |
 | `facility.withdrawScene` | 按 `sceneId` 撤下视点，之后的环境导览列表同步更新。 |
+
+楼层接口的 `vector` 返回可缩放矩形和图幅。未登记实际坐标时由系统生成示意。保存经核对的布局后，平面图使用登记坐标。管理员可以把「维护授权房间的房型和楼层矢量平面图」授予指定员工。只授权单间时，可修改这个房间的房型。保存全层矢量布局需要该楼层的完整权限。健康助理可以打开相同入口，最终改动由经办人确认。
 
 经过机构授权的现场照片、全景图及平面图，通过 `python3 manage_storage.py --db .local/workspace.sqlite3 import-tour lobby.jpg /path/to/lobby.jpg` 导入加密数据库，再登记同源地址 `/tour-media/lobby.jpg`。服务端按当前登录人和视点或楼层权限读取。导入的原件随数据库快照保存。外部托管可通过 `NH_TOUR_MEDIA_ORIGINS` 指定获准的 HTTPS 源；快照保存外部 URL，外部图像由托管方备份并控制访问。[加密与备份](storage.md)
 

@@ -33,6 +33,7 @@ def generate(
     attributed_actor=None,
     output_tokens=640,
     shared_once=False,
+    on_delta=None,
 ):
     """Reserve before sending, persist confirmed billing even if the returned JSON is unusable."""
     from . import late_usage, latest, model_name, read_key, usage
@@ -54,6 +55,8 @@ def generate(
         "max_tokens": output_tokens,
         "stream": False,
     }
+    if on_delta:
+        body.pop("response_format")
     digest = fingerprint(body)
     size = len(json.dumps(messages, ensure_ascii=False).encode()) + 128 + output_tokens
     request = "generation/" + fingerprint(request_id)
@@ -126,7 +129,7 @@ def generate(
     status, reason, tokens, result = "uncertain", "provider_unavailable", 0, None
     remote_receipt = None
     try:
-        raw = deepseek.send(key, body, timeout=40)
+        raw = deepseek.stream(key, body, on_delta, timeout=40) if on_delta else deepseek.send(key, body, timeout=40)
         remote_receipt = token_receipt.read(raw, size)
         if remote_receipt is None:
             raise ValueError("缺少有效用量")
@@ -134,7 +137,8 @@ def generate(
         choice = raw["choices"][0]
         if choice.get("finish_reason") != "stop":
             raise ValueError("回复未完成")
-        result = validate(json.loads(choice["message"]["content"]))
+        content = choice["message"]["content"]
+        result = validate({"text": content} if on_delta else json.loads(content))
         status, reason = "ok", "ready"
     except HTTPError as error:
         error.close()

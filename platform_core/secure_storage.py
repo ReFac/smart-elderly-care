@@ -269,7 +269,7 @@ def create_snapshot(store, destination):
         return {**info, "size": packet.stat().st_size, "sourceBytes":source_bytes, "sha256": digest.hexdigest()}
 
 
-def restore_snapshot(source, target_db, recovery_key_file):
+def restore_snapshot(source, target_db, recovery_key_file, *, same_host=False):
     """Verify into an encrypted staging database and publish only a complete, fresh recovery."""
     source, target_db = Path(source), Path(target_db)
     if (
@@ -339,14 +339,17 @@ def restore_snapshot(source, target_db, recovery_key_file):
                 for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
             with db:
+                if same_host:
+                    local_tables = ()
                 if "identity_contacts" in existing:
                     # An earlier snapshot may name a mailbox or SIM that was later replaced.
                     # Preserve encrypted history but require fresh verification on this host.
-                    db.execute("UPDATE identity_contacts SET verified=-1")
-                if "storage_bootstrap" in existing:
+                    if not same_host:
+                        db.execute("UPDATE identity_contacts SET verified=-1")
+                if not same_host and "storage_bootstrap" in existing:
                     db.execute("PRAGMA secure_delete=ON")
                     db.execute("DROP TABLE storage_bootstrap")
-                if "family_round_preferences" in existing:
+                if not same_host and "family_round_preferences" in existing:
                     # A disaster-recovery host cannot know which party withdrew consent
                     # after this point. Keep the encrypted evidence and old receipts;
                     # require both parties to opt in again before exposing new reports.

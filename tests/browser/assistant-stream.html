@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>助理流式答复和朗读回归</title>
+<link rel="stylesheet" href="../../web/style.css">
+<link rel="stylesheet" href="../../web/agents.css">
+<body>
+<output role="status">运行中</output>
+<script type="module">
+  import { chatLauncher, openChat, clearChat } from '../../web/features/assistant-chat.js';
+
+  const container = '/api/assistant/chat';
+  const region = { roomId: 'fixture-room' };
+  const scopeKey = 'fixture-room-scope';
+  const generation = 'fixture-thread';
+  const state = {
+    user: { id: 'stream-fixture', kind: 'staff', permissions: ['assistants'], routes: ['overview'] },
+    uiSettings: { institutionName: '演示机构', hiddenRoutes: [] },
+  };
+  const ctx = { state, available: () => true, async refreshWorkspace() { return true; } };
+  const find = selector => document.querySelector(selector);
+  const first = '这是可以立即显示并朗读的第一句。';
+  const last = '这是推迟到结束前才返回的收尾。';
+  const encoder = new TextEncoder();
+  const turns = [];
+  const calls = [];
+  const messages = [];
+
+  function check(condition, message) {
+    if (!condition) throw new Error(message);
+  }
+  async function until(test, message) {
+    const deadline = performance.now() + 5000;
+    while (!test() && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 12));
+    check(test(), message);
+  }
+  function wave() {
+    const bytes = new ArrayBuffer(8044);
+    const view = new DataView(bytes);
+    const words = {0: 'RIFF', 8: 'WAVE', 12: 'fmt ', 36: 'data'};
+    for (const [offset, label] of Object.entries(words))
+      [...label].forEach((letter, i) => view.setUint8(Number(offset) + i, letter.charCodeAt(0)));
+    const counters = {4: 8036, 16: 16, 24: 8000, 28: 16000, 40: 8000};
+    for (const [offset, value] of Object.entries(counters)) view.setUint32(Number(offset), value, true);
+    for (const [offset, value] of [[20, 1], [22, 1], [32, 2], [34, 16]]) view.setUint16(offset, value, true);
+    return new Response(bytes, {headers: {'Content-Type': 'audio/wav'}});
+  }
+  function abortable(signal, action) {
+    return new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), {once: true});
+      action(resolve);
+    });
+  }
+  function frame(turn, event, splitAt = 0) {
+    const bytes = encoder.encode(JSON.stringify(event) + '\n');
+    if (splitAt) {
+      turn.controller.enqueue(bytes.slice(0, splitAt));
+      turn.controller.enqueue(bytes.slice(splitAt));
+    } else turn.controller.enqueue(bytes);
+  }
+  function finalize(turn) {
+    turn.done = true;
+    messages.push({role: 'user', content: turn.payload.text},
+      {role: 'assistant', content: first + last, requestId: turn.payload.requestId});
+    return {scopeKey, generation, messages: [...messages]};
+  }
+  function finish(turn) {
+    frame(turn, {type: 'text', text: last});
+    frame(turn, {type: 'done', result: finalize(turn)});
+    turn.controller.close();
+  }
+  window.fetch = async (path, options = {}) => {
+    if (path === container + '?roomId=fixture-room') {
+      return Response.json({scopeKey, generation, messages: [...messages]});
+    }
+    if (path === container + '/stream') {
+      const payload = JSON.parse(options.body);
+      check(options.headers.Accept === 'application/x-ndjson', '使用流式答复接口');
+      check(payload.readAloud === true, '发送时仅传朗读开关');
+      const turn = {payload, signal: options.signal, done: false};
+      turns.push(turn);
+      if (payload.text === '兼容完整答复') return Response.json(finalize(turn));
+      const stream = new ReadableStream({
+        start(controller) {
+          turn.controller = controller;
+          frame(turn, {type: 'begin', scopeKey, generation, requestId: payload.requestId});
+          options.signal.addEventListener('abort', () => {
+            if (!turn.done) controller.error(options.signal.reason);
+          }, {once: true});
+        },
+      });
+      return new Response(stream, {headers: {'Content-Type': 'application/x-ndjson; charset=utf-8'}});
+    }
+    check(path === container + '/speech', '朗读仅使用机构同源接口');
+    const payload = JSON.parse(options.body);
+    const turn = turns.find(item => item.payload.requestId === payload.requestId);
+    const key = Object.hasOwn(payload, 'sentence') ? 'sentence' : 'part';
+    check(turn && Object.keys(payload).sort().join(',') ===
+      ['region', 'scopeKey', 'generation', 'requestId', key].sort().join(','), '朗读请求只有会话定位字段');
+    check(payload.scopeKey === scopeKey && payload.generation === generation &&
+      payload.region.roomId === region.roomId && payload[key] === 0, '朗读定位到已授权房间对话的首段');
+    const call = {turn, payload, beforeDone: !turn.done, signal: options.signal};
+    calls.push(call);
+    return abortable(options.signal, resolve => { call.deliver = () => resolve(wave()); });
+  };
+  const open = () => openChat(() => ctx, {...region, label: '演示房间'});
+  const launch = chatLauncher(open);
+  document.body.append(launch);
+  const log = () => find('.assistant-log');
+  const input = () => find('.assistant-input');
+  const panel = () => find('#assistant-chat');
+  function ping(question) {
+    input().value = question;
+    input().dispatchEvent(new Event('input'));
+    input().form.requestSubmit();
+    return turns.at(-1);
+  }
+  function beginSpeech(turn) {
+    frame(turn, {type: 'text', text: first}, 24);
+    frame(turn, {type: 'speech', sentence: 0});
+  }
+  async function run() {
+    launch.click();
+    await until(() => input() && !input().disabled, '打开健康助理');
+    const checkSpeech = find('.assistant-composer-foot label:nth-child(2) input');
+    check(!checkSpeech.checked, '朗读默认关闭');
+    checkSpeech.click();
+    const streaming = ping('分段返回');
+    beginSpeech(streaming);
+    await until(() => calls.length === 1, '回复仍在生成时已请求朗读');
+    await until(() => log().innerText.includes(first), '回复仍在生成时已展示首段文字');
+    check(calls[0].beforeDone && log().querySelector('.assistant-current') &&
+      !log().innerText.includes(last), '首段文字展示，整条答复尚未结束');
+    calls[0].deliver();
+    await until(() => Boolean(find('audio').getAttribute('src')) && !find('audio').hidden, '首段音频并行就绪');
+    check(!streaming.done, '播放区显示时未收到完整答复');
+    finish(streaming);
+    await until(() => !input().readOnly && log().innerText.includes(last), '写回完整答复');
+    check(!log().querySelector('.assistant-current') && calls.length === 1, '完整答复不会重复发起朗读');
+
+    const folded = ping('在收起前开始朗读');
+    beginSpeech(folded);
+    await until(() => calls.length === 2, '第二轮开始朗读');
+    find('button[aria-label=收起助理]').click();
+    await until(() => calls[1].signal.aborted && panel().hidden, '收起停止正在请求的音频');
+    check(find('audio').hidden && !find('audio').getAttribute('src'), '收起清除播放器');
+    frame(folded, {type: 'speech', sentence: 1});
+    finish(folded);
+    await until(() => !input().readOnly, '收起后完整答复仍写回');
+    check(calls.length === 2, '收起后不再请求后续片段');
+
+    launch.click();
+    await until(() => !input().disabled, '重开同一对话');
+    ping('兼容完整答复');
+    await until(() => calls.length === 3 && !input().readOnly, '完整 JSON 答复可使用兼容朗读');
+    check(calls[2].payload.part === 0 && !calls[2].beforeDone, '完整 JSON 回复仍从已保存文本读取');
+    checkSpeech.click();
+    await until(() => calls[2].signal.aborted, '取消勾选停止音频');
+    checkSpeech.click();
+
+    const discarded = ping('销毁期间的对话');
+    beginSpeech(discarded);
+    await until(() => calls.length === 4, '等待一段可中止的朗读');
+    clearChat();
+    check(!panel() && discarded.signal.aborted && calls[3].signal.aborted, '销毁助理时中止接收及朗读');
+    document.documentElement.dataset.result = 'pass';
+    find('output').textContent = 'PASS';
+  }
+  run().catch(error => {
+    document.documentElement.dataset.result = 'fail';
+    find('output').textContent = error.stack || error.message;
+  });
+</script>
+</body></html>

@@ -6,6 +6,7 @@ PERMISSIONS = {
     "care": "评估、照护和工单执行",
     "care.groupConfirm": "核对集体活动参加名单并签认",
     "care.areas": "管理授权楼栋的照护区域和人员职责",
+    "facility.manage": "维护授权房间的房型和楼层矢量平面图",
     "care.schedule": "配置授权区域的定时工单和菜单",
     "health.overview": "查阅授权区域的健康汇总人数与异常项数",
     "clinical": "体征、异常、医嘱和用药复核",
@@ -72,8 +73,8 @@ ROUTE_GRANTS = {
     "assessments": ("care",),
     "care": ("care", "clinical", "care.groupConfirm", "care.schedule"),
     "medications": ("clinical",),
-    "beds": ("intake", "care", "clinical", "residents", "care.areas"),
-    "rooms": ("intake", "care", "clinical", "residents"),
+    "beds": ("intake", "care", "clinical", "residents", "care.areas", "facility.manage"),
+    "rooms": ("intake", "care", "clinical", "residents", "facility.manage"),
     "tour": (),
     "inventory": ("inventory",),
     "billing": ("finance",),
@@ -94,6 +95,8 @@ ROUTE_GRANTS = {
     "integrations": ("gateway.simulate", "alerts", "voice", "voice.confirm"),
 }
 ACTION_GRANTS = {
+    "facility.updateRoom": "facility.manage",
+    "facility.setLayout": "facility.manage",
     "leads.register": "intake",
     "leads.call": "intake",
     "leads.feedback": "intake",
@@ -223,7 +226,6 @@ FACILITY_COMMANDS = (
     "facility.addRoom",
     "facility.addBeds",
     "facility.linkBed",
-    "facility.setLayout",
     "facility.setScene",
     "facility.withdrawScene",
 )
@@ -494,8 +496,11 @@ def select_fields(row, names):
 def visible_data(state, user):
     # Unknown module keys are never copied automatically to a restricted account.
     # Downstream dossier/gateway projectors append their own authorized read models.
+    from .facility import operational_bed
+
+    operational = [b for b in state.get("beds", ()) if operational_bed(b)]
     if user["kind"] == "owner":
-        return dict(state)
+        return {**state, "beds": operational}
     data = {
         key: []
         for key in (
@@ -587,7 +592,9 @@ def visible_data(state, user):
         bed_fields = ["id", "label", "ward", "status", "residentId"]
         if any_grant("finance", "intake"):
             bed_fields.append("dailyRate")
-        data["beds"] = [select_fields(b, bed_fields) for b in state["beds"]]
+        data["beds"] = [select_fields(b, bed_fields) for b in operational]
+    elif has(user, "facility.manage"):
+        data["beds"] = [select_fields(b, ("id", "label", "ward", "status")) for b in operational]
     if any_grant("intake", "care"):
         data["bedMoves"] = state.get("bedMoves", [])
     if any_grant("clinical", "medical"):

@@ -1,5 +1,6 @@
-import { node, field, select, runForm } from './shared.js';
+import { node, field, select, runForm, canAct } from './shared.js';
 import { button, statusText, pathName } from './room-elements.js';
+import { roomVector, drawRooms } from './room-vector.js';
 
 function editCampus(ctx, campus) {
   runForm(ctx, {
@@ -85,43 +86,42 @@ function addRoom(ctx, building, floor) {
   });
 }
 
-function addBeds(ctx, room) {
+export function editRoom(ctx, room) {
+  const types = Array.from({ length: 13 }, (_, count) => ({
+    value: String(count),
+    label: ['不设床位', '单人间', '双人间', '三人间'][count] || count + ' 人间',
+  }));
   runForm(ctx, {
-    title: '扩充房间床位',
-    action: 'facility.addBeds',
-    description:
-      pathName(room.buildingName, room.floorLabel, room.number + ' 房') +
-      ' · 已有 ' +
-      room.bedCount +
-      ' 张床',
+    title: '编辑房型',
+    action: 'facility.updateRoom',
+    description: pathName(room.campusName, room.buildingName, room.floorLabel, room.number + ' 房') +
+      ' · 已入住 ' + room.occupiedCount + ' 人。减配仅停用空床，历史记录保留。',
     fields: [
-      field('count', '新增床位数', {
-        type: 'number',
-        min: 1,
-        max: 12 - room.bedCount,
-        step: 1,
-        value: 1
-      }),
-      field('dailyRate', '新增床位日价（元）', {
-        type: 'number',
-        min: 0,
-        max: 99999,
-        step: '0.01',
-        value: 60
-      })
+      select('bedCount', '房间类型', types, { value: String(room.bedCount) }),
+      ...(room.canSetBedRate ? [field('dailyRate', '新增床位日价（元）', {
+        value: room.defaultBedDailyRate ?? 60, type: 'number', min: 0, max: 99999,
+        required: false, step: '0.01',
+      })] : []),
     ],
-    map: (values) => ({
-      roomId: room.id,
-      count: Number(values.count),
-      dailyRate: Number(values.dailyRate)
-    }),
-    submitLabel: '保存新增床位'
+    map: (values) => {
+      const bedCount = Number(values.bedCount);
+      return {
+        roomId: room.id, bedCount,
+        ...(bedCount > room.bedCount && 'dailyRate' in values ? { dailyRate: Number(values.dailyRate) } : {}),
+      };
+    },
+    submitLabel: '保存房型',
   });
 }
 
-function editLayout(ctx, floor) {
+export function editLayout(ctx, floor) {
+  if (!canAct(ctx, 'facility.setLayout') || !floor.vector?.editable) {
+    ctx.toast('当前账号没有整层平面图维护权限');
+    return;
+  }
   const form = node('form', 'room-layout-editor');
   const rows = [];
+  const preview = roomVector(floor.vector.viewBox);
   const image = node('input', 'fx-input');
   image.type = 'text';
   image.name = 'planMediaUrl';
@@ -156,7 +156,7 @@ function editLayout(ctx, floor) {
       controls[key] = input;
       row.append(node('td', '', input));
     }
-    rows.push({ roomId: room.id, controls });
+    rows.push({ room, controls });
     body.append(row);
   }
   grid.append(body);
@@ -166,20 +166,29 @@ function editLayout(ctx, floor) {
   save.type = 'submit';
   form.append(
     node('p', 'room-context', '以平面图左上角为原点，各项使用 0–100 的百分比。'),
+    node('div', 'room-layout-preview', preview),
     planField,
     node('div', 'room-layout-wrap', grid),
     err,
     save
   );
+  function coordinates() {
+    return rows.map(({ room, controls }) => ({
+      roomId: room.id,
+      ...Object.fromEntries(
+        Object.entries(controls).map(([key, input]) => [key, input.valueAsNumber]),
+      ),
+    }));
+  }
+  function renderPreview() {
+    drawRooms(preview, coordinates().map((rect, index) => ({...rows[index].room, ...rect})), {labels: true});
+  }
+  form.addEventListener('input', renderPreview);
+  renderPreview();
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (save.disabled) return;
-    const rooms = rows.map(({ roomId, controls }) => ({
-      roomId,
-      ...Object.fromEntries(
-        Object.entries(controls).map(([key, input]) => [key, Number(input.value)])
-      )
-    }));
+    const rooms = coordinates();
     save.disabled = true;
     try {
       if (
@@ -196,7 +205,7 @@ function editLayout(ctx, floor) {
       save.disabled = false;
     }
   });
-  ctx.detail('登记' + floor.label + '实际房间位置', form);
+  ctx.detail('编辑' + floor.label + '矢量平面图', form);
 }
 
 function addScene(ctx, scope) {
@@ -218,7 +227,7 @@ function addScene(ctx, scope) {
   });
 }
 
-export function chooseAdmin(ctx, building, floor, room, campus) {
+export function chooseAdmin(ctx, building, floor, room, campus, canManage) {
   const group = (label, actions) =>
     node('section', 'room-admin-group', [node('h3', '', label), ...actions]);
   let dialog;
@@ -245,21 +254,20 @@ export function chooseAdmin(ctx, building, floor, room, campus) {
     '空间管理',
     node('div', 'room-admin', [
       group(campus.name + ' · 空间管理', [
-        item('新增分院', 'location', () => editCampus(ctx)),
-        item('编辑分院资料', 'location', () => editCampus(ctx, campus)),
-        item('新增楼栋', 'building', () => addBuilding(ctx, campus)),
-        building && item('修改楼栋名称', 'building', () => renameBuilding(ctx, building)),
-        building &&
+        canManage && item('新增分院', 'location', () => editCampus(ctx)),
+        canManage && item('编辑分院资料', 'location', () => editCampus(ctx, campus)),
+        canManage && item('新增楼栋', 'building', () => addBuilding(ctx, campus)),
+        canManage && building && item('修改楼栋名称', 'building', () => renameBuilding(ctx, building)),
+        canManage && building &&
           item('在' + building.name + '新增楼层', 'layers', () => addFloor(ctx, building)),
-        floor &&
+        canManage && floor &&
           item('在' + floor.label + '新增房间与床位', 'bed', () => addRoom(ctx, building, floor)),
-        room &&
-          room.bedCount < 12 &&
-          item('为' + room.number + '房扩充床位', 'bed', () => addBeds(ctx, room)),
-        floor?.rooms?.length > 0 &&
-          item('登记' + floor.label + '实际房间位置', 'layers', () => editLayout(ctx, floor))
+        canAct(ctx, 'facility.updateRoom') && room?.canEdit &&
+          item('编辑' + room.number + '房房型', 'bed', () => editRoom(ctx, room)),
+        canAct(ctx, 'facility.setLayout') && floor?.vector?.editable && floor.rooms.length > 0 &&
+          item('编辑' + floor.label + '矢量平面图', 'layers', () => editLayout(ctx, floor))
       ]),
-      places.length > 0 &&
+      canManage && places.length > 0 &&
         group(
           '登记环境导览视点',
           places.map((place) => item(place.label, 'location', () => addScene(ctx, place)))

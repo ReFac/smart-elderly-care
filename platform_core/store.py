@@ -134,6 +134,9 @@ class Store:
             facility.init(db, data)
             care_areas.init(db)
             backups.init(db)
+            from . import updates
+
+            updates.init(db)
             rounds.init(db, self.now())
             history.prune(db, self.now())
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
@@ -637,6 +640,8 @@ class Store:
                 return facility.floor(db, state, user, key)
             if resource == "room":
                 return facility.room(db, state, user, key)
+            if resource == "rooms":
+                return facility.rooms(db, state, user, **filters)
             if resource == "search":
                 return facility.search(db, state, user, **filters)
             if resource == "tour":
@@ -664,6 +669,22 @@ class Store:
             result["voiceInput"] = speech.agent_capability(db, self.now())
         if "rooms" in user["routes"]:
             result["facilityTools"] = [
+                {
+                    "id": "rooms.list",
+                    "method": "GET",
+                    "path": "/api/facility/rooms",
+                    "arguments": ["bedCount", "limit", "campusId", "buildingId", "floorId", "roomId"],
+                    "navigation": "#beds?tab=all&capacity={bedCount}&limit={limit}",
+                    "cloudTokens": 0,
+                },
+                {
+                    "id": "rooms.floor",
+                    "method": "GET",
+                    "path": "/api/facility/floors/{floorId}",
+                    "arguments": ["floorId"],
+                    "navigation": "#beds?tab=plan&floor={floorId}",
+                    "cloudTokens": 0,
+                },
                 {
                     "id": "rooms.search",
                     "method": "GET",
@@ -693,6 +714,23 @@ class Store:
                     "cloudTokens": 0,
                 },
             ]
+            if access.has(user, "facility.manage"):
+                result["facilityTools"].extend((
+                    {
+                        "id": "rooms.edit",
+                        "navigation": "#beds?tab=plan&edit=room&room={roomId}",
+                        "arguments": ["roomId"],
+                        "action": "facility.updateRoom",
+                        "effect": "awaiting_human_confirmation",
+                    },
+                    {
+                        "id": "rooms.editLayout",
+                        "navigation": "#beds?tab=plan&edit=layout&floor={floorId}",
+                        "arguments": ["floorId"],
+                        "action": "facility.setLayout",
+                        "effect": "awaiting_human_confirmation",
+                    },
+                ))
             if "gw.propose" in access.allowed_actions(user):
                 result["facilityTools"].append(
                     {

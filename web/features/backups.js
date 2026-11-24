@@ -187,6 +187,7 @@ class BackupPanel extends HTMLElement {
           manual: '管理员创建',
           import: '文件导入',
           protection: '恢复前保护点',
+          upgrade: '更新前保护点',
         }[p.kind] || '管理员创建',
         p.revision === null ? '—' : 'v' + p.revision,
         p.error || states[p.state],

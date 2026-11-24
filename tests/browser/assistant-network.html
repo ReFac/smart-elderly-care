@@ -34,7 +34,7 @@
     }
 
     if (options.method==='POST') {
-      check(url==='/api/assistant/chat','仅向机构同源聊天接口发送问题');
+      check(url==='/api/assistant/chat/stream','仅向机构同源聊天接口发送问题');
       if (backendError) throw new TypeError('网络暂不可用');
       if (!generation) generation='first';
       messages.push({role:'user',content:payload.text,at:new Date().toISOString()});
@@ -55,7 +55,7 @@
   document.body.append(launch);
   const network=()=>find('.assistant-network');
   const pressed=()=>network()?.getAttribute('aria-pressed')==='true';
-  const chats=()=>calls.filter(row=>row.url==='/api/assistant/chat' && row.method==='POST');
+  const chats=()=>calls.filter(row=>row.url==='/api/assistant/chat/stream' && row.method==='POST');
   async function send(question){
     const input=find('.assistant-input');
     input.value=question;

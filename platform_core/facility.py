@@ -17,6 +17,9 @@ MAIN = "building-main"
 HOME_CAMPUS = "campus-main"
 INITIAL_FLOORS = (1, 2, 3, 5, 6, 7)
 READ_GRANTS = ("intake", "care", "clinical", "residents")
+MANAGE_GRANT = "facility.manage"
+INACTIVE_BED = "停用"
+ROOM_TYPES = {0: "未配置床位", 1: "单人间", 2: "双人间", 3: "三人间"}
 ROOM_FIELDS = "r.id,r.number,r.ward,r.floorId,r.x,r.y,r.w,r.h,f.buildingId,f.label AS floorLabel,b.name AS buildingName,b.campusId,b.campusName"
 ROOM_TABLE = "facility_rooms r JOIN facility_floors f ON f.id=r.floorId JOIN facility_building_directory b ON b.id=f.buildingId"
 SCHEMA = (
@@ -187,7 +190,7 @@ def _access(db, user, *, environment=False):
     if not user or not (
         user["kind"] == "owner"
         or (environment and user["kind"] in ("staff", "family"))
-        or (user["kind"] == "staff" and any(has(user, k) for k in READ_GRANTS))
+        or (user["kind"] == "staff" and any(has(user, k) for k in (*READ_GRANTS, MANAGE_GRANT)))
     ):
         raise PermissionError("当前账号未获准访问此区域")
     site = db.execute("SELECT id FROM facility_site WHERE singleton=1").fetchone()[0]
@@ -307,16 +310,36 @@ def _directory(db, state, user, acl):
         "campuses": campuses,
         "buildings": list(by_id.values()),
         "canManage": can_manage,
-        "canReadResidents": True,
+        "canReadResidents": _can_read_residents(user),
     }
     if can_manage:
         linked = {r[0] for r in db.execute("SELECT bedId FROM facility_beds")}
         result["unmappedBeds"] = [
             {k: b[k] for k in ("id", "label", "ward")}
             for b in state["beds"]
-            if b["id"] not in linked
+            if b["id"] not in linked and operational_bed(b)
         ]
     return result
+
+
+def operational_bed(bed):
+    return bed.get("status") != INACTIVE_BED
+
+
+def _can_read_residents(user):
+    return user["kind"] == "owner" or any(has(user, grant) for grant in READ_GRANTS)
+
+
+def room_type(count):
+    return ROOM_TYPES.get(count, f"{count} 人间")
+
+
+def _capacity(entries):
+    return {
+        "bedCount": len(entries),
+        "roomType": room_type(len(entries)),
+        "occupiedCount": sum(bool(b["residentId"]) or b["status"] == "已入住" for b in entries),
+    }
 
 
 def _used_beds(db, rooms, state):
@@ -327,7 +350,7 @@ def _used_beds(db, rooms, state):
     occupants = {p["id"]: p for p in state["residents"] if p["status"] == "在住"}
     result = {r: [] for r in rooms}
     for b in state["beds"]:
-        if b["id"] not in mapping:
+        if b["id"] not in mapping or not operational_bed(b):
             continue
         p = occupants.get(b["residentId"])
         if p and p.get("bedId") != b["id"]:
@@ -366,11 +389,7 @@ def floor(db, state, user, floorId):
     for index, r in enumerate(rooms):
         if rows[0]["layoutSource"] == "schematic":
             r.update(_diagram(index, len(rooms)))
-        entries = beds[r["id"]]
-        r.update(
-            bedCount=len(entries),
-            occupiedCount=sum(bool(b["residentId"]) for b in entries),
-        )
+        r.update(_capacity(beds[r["id"]]))
     plan = ""
     if acl.rooms is None:
         saved = db.execute(
@@ -381,7 +400,19 @@ def floor(db, state, user, floorId):
                 plan = _media_url(saved[0])
             except ValueError:
                 pass  # The site may have revoked this media origin.
-    return {**rows[0], "rooms": rooms, "planMediaUrl": plan}
+    return {
+        **rows[0],
+        "rooms": rooms,
+        "planMediaUrl": plan,
+        "vector": {
+            "viewBox": [0, 0, 100, 100],
+            "editable": has(user, MANAGE_GRANT) and acl.rooms is None,
+            "rooms": [
+                {**{key: r[key] for key in ("x", "y", "w", "h")}, "roomId": r["id"]}
+                for r in rooms
+            ],
+        },
+    }
 
 
 def room(db, state, user, roomId):
@@ -390,12 +421,38 @@ def room(db, state, user, roomId):
         raise FileNotFoundError("没有可查看的房间")
     r = rows[0]
     beds = _used_beds(db, {roomId}, state)[roomId]
-    return {
+    result = {
         **r,
-        "beds": beds,
-        "bedCount": len(beds),
-        "occupiedCount": sum(bool(b["residentId"]) for b in beds),
+        "beds": beds if _can_read_residents(user) else [
+            {**b, "residentId": "", "residentName": ""} for b in beds
+        ],
+        **_capacity(beds),
+        "canEdit": has(user, MANAGE_GRANT),
     }
+    if result["canEdit"] and has(user, "finance"):
+        existing = _room_beds(db, state, roomId)
+        current = next((b for b in existing if operational_bed(b)), existing[0] if existing else {})
+        result["defaultBedDailyRate"] = current.get("dailyRate", 60)
+        result["canSetBedRate"] = True
+    return result
+
+
+def rooms(
+    db, state, user, bedCount=None, limit=12, buildingId="", floorId="", roomId="", campusId=""
+):
+    acl = _access(db, user)
+    if bedCount is not None:
+        bedCount = _integer(bedCount, "房型床位数", 0, 12)
+    limit = _integer(limit, "查询条数", 1, 30)
+    places = _meta(db, acl, buildingId, floorId, roomId, campusId)
+    beds = _used_beds(db, {r["id"] for r in places}, state)
+    keys = ("id", "number", "campusId", "campusName", "buildingId", "buildingName", "floorId", "floorLabel")
+    matching = [
+        {**{key: r[key] for key in keys}, **_capacity(beds[r["id"]])}
+        for r in places
+        if bedCount is None or len(beds[r["id"]]) == bedCount
+    ]
+    return {"rooms": matching[:limit], "total": len(matching), "hasMore": len(matching) > limit}
 
 
 def scope(
@@ -461,7 +518,10 @@ def scope(
         "roomIds": sorted(beds),
         "label": " · ".join(location),
         "bedIds": sorted(b["id"] for b in allbeds),
-        "residentIds": sorted(b["residentId"] for b in allbeds if b["residentId"]),
+        "residentIds": sorted(
+            b["residentId"] for b in allbeds
+            if b["residentId"] and (_can_read_residents(user) or finance_branch)
+        ),
     }
 
 
@@ -485,7 +545,7 @@ def search(
         names = list(
             dict.fromkeys(b["residentName"] for b in beds[r["id"]] if b["residentName"])
         )
-        matched = [n for n in names if term in _normalized(n)]
+        matched = [n for n in names if term in _normalized(n)] if _can_read_residents(user) else []
         number = _normalized(r["number"])
         if (number_term and number_term in number) or matched:
             rank = (
@@ -505,6 +565,7 @@ def search(
                         "buildingName": r["buildingName"],
                         "floorId": r["floorId"],
                         "floorLabel": r["floorLabel"],
+                        **_capacity(beds[r["id"]]),
                         "matchedNames": matched,
                         "matchedResidents": [
                             {"id": bed["residentId"], "name": bed["residentName"], "bedLabel": bed["label"]}
@@ -739,26 +800,30 @@ def _set_layout(db, p):
     return "已登记楼层房间坐标"
 
 
+def _room_beds(db, state, room_id):
+    ids = {
+        row[0]
+        for row in db.execute("SELECT bedId FROM facility_beds WHERE roomId=?", (room_id,))
+    }
+    return [b for b in state["beds"] if b["id"] in ids]
+
+
 def _add_beds(db, state, room_id, count, rate):
     if not count:
         return
     r = _find(db, "facility_rooms", room_id, "房间")
     f = _find(db, "facility_floors", r["floorId"], "楼层")
     building = _find(db, "facility_building_directory", f["buildingId"], "楼栋")
-    previous = db.execute(
-        "SELECT COUNT(*) FROM facility_beds WHERE roomId=?", (room_id,)
-    ).fetchone()[0]
+    existing = _room_beds(db, state, room_id)
+    previous = sum(operational_bed(b) for b in existing)
     if previous + count > 12:
         raise ValueError("每个房间最多登记 12 张床")
+    retired = [b for b in existing if not operational_bed(b) and not b.get("residentId")]
+    for bed in retired[:count]:
+        bed["status"] = "空闲"
+    count = max(0, count - len(retired))
     # Keep all beds of a legacy room in its original room key for audit and fall observations.
     # New rooms include the building and floor to disambiguate duplicate numbers across buildings.
-    ids = {
-        row[0]
-        for row in db.execute(
-            "SELECT bedId FROM facility_beds WHERE roomId=?", (room_id,)
-        )
-    }
-    existing = [b for b in state["beds"] if b["id"] in ids]
     prefix = (
         existing[0]["label"].rsplit("-", 1)[0]
         if existing
@@ -778,6 +843,7 @@ def _add_beds(db, state, room_id, count, rate):
             if label not in labels:
                 break
         bed_id = _id("bed")
+        labels.add(label)
         state["beds"].append(
             dict(
                 id=bed_id,
@@ -791,7 +857,50 @@ def _add_beds(db, state, room_id, count, rate):
         db.execute("INSERT INTO facility_beds VALUES (?,?)", (bed_id, room_id))
 
 
+def _edit_room(db, state, p, user, acl):
+    if set(p) - {"roomId", "bedCount", "dailyRate"} or not p.get("roomId"):
+        raise ValueError("请指定房间和目标床位数")
+    rows = _meta(db, acl, roomId=p["roomId"])
+    if not rows:
+        raise FileNotFoundError("没有可维护的房间")
+    room_id = rows[0]["id"]
+    count = _integer(p.get("bedCount"), "房型床位数", 0, 12)
+    existing = _room_beds(db, state, room_id)
+    active = [b for b in existing if operational_bed(b)]
+    change = count - len(active)
+    if change > 0:
+        if "dailyRate" in p and not has(user, "finance"):
+            raise PermissionError("当前账号没有设置新增床位价格的权限")
+        typical = active[0] if active else (existing[0] if existing else {})
+        rate = _price(p.get("dailyRate", typical.get("dailyRate", 60)))
+        _add_beds(db, state, room_id, change, rate)
+    elif change < 0:
+        count_to_remove = -change
+        assigned = {r.get("bedId") for r in state["residents"]}
+        slots = [
+            b for b in active
+            if b["status"] == "空闲" and not b.get("residentId") and b["id"] not in assigned
+        ]
+        if len(slots) < count_to_remove:
+            raise ValueError("房型不能少于仍在使用的床位数，请先安置长者")
+        for bed in sorted(slots, key=lambda b: (b["label"], b["id"]), reverse=True)[:count_to_remove]:
+            bed["status"] = INACTIVE_BED
+    return f"已将{rows[0]['number']}房调整为{room_type(count)}（{count} 张床）"
+
+
 def apply(db, state, action, payload, user, today):
+    if action in ("facility.updateRoom", "facility.setLayout"):
+        if not user or not has(user, MANAGE_GRANT):
+            raise PermissionError("当前账号没有房型或平面图维护权限")
+        acl = _access(db, user)
+        if action == "facility.updateRoom":
+            return _edit_room(db, state, payload, user, acl)
+        floor_id = payload.get("floorId")
+        if acl.rooms is not None:
+            raise PermissionError("编辑楼层矢量布局需要整层授权")
+        if not floor_id or not _floor_rows(db, acl, floorId=floor_id):
+            raise FileNotFoundError("没有可维护的楼层")
+        return _set_layout(db, payload)
     if not user or user["kind"] != "owner":
         raise PermissionError("仅机构 Owner 可维护院区和导览")
     acl = _access(db, user)
@@ -887,7 +996,7 @@ def apply(db, state, action, payload, user, today):
         if action == "facility.linkBed":
             r = _find(db, "facility_rooms", p.get("roomId"), "房间")
             b = next((b for b in state["beds"] if b["id"] == p.get("bedId")), None)
-            if not b or b["ward"] != r["ward"]:
+            if not b or b["ward"] != r["ward"] or not operational_bed(b):
                 raise ValueError("请选择同一护理区的待定位床位")
             if db.execute(
                 "SELECT 1 FROM facility_beds WHERE bedId=?", (b["id"],)
@@ -906,8 +1015,6 @@ def apply(db, state, action, payload, user, today):
             count = _integer(p.get("count"), "新增床位数", 1, 12)
             _add_beds(db, state, r["id"], count, _price(p.get("dailyRate", 60)))
             return f"为{r['number']}房增加 {count} 张床"
-        if action == "facility.setLayout":
-            return _set_layout(db, p)
         if action == "facility.setScene":
             title = _text(p.get("title"), "场景名称", 80)
             media = _media_url(p.get("mediaUrl"))

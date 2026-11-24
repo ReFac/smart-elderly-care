@@ -152,12 +152,22 @@ function applySnapshot(snapshot) {
   }
 }
 
-function go(destination, tab, onArrival) {
+function go(destination, tab, onArrival, query) {
   if (!available(destination)) {
     toast('当前账号未开放此模块');
     return;
   }
   if (tab) selectTab(destination, tab);
+  if (query && destination === 'beds') {
+    closeMenu();
+    const params = new URLSearchParams(query);
+    if (tab) params.set('tab', tab);
+    window.history.pushState(null, '', '#' + destination + '?' + params);
+    render();
+    window.scrollTo(0, 0);
+    onArrival?.();
+    return;
+  }
   if (route === destination) {
     closeMenu();
     if (tab) render();
@@ -171,17 +181,28 @@ function go(destination, tab, onArrival) {
   } else location.hash = destination;
 }
 
+let openedBedLink = '';
 function getRoute() {
   const original=location.hash.slice(1).split('?')[0];
-  const tab = new URLSearchParams(location.hash.split('?')[1]).get('tab');
+  const params = new URLSearchParams(location.hash.split('?')[1]);
+  const tab = params.get('tab');
   if (original === 'care' && available('care') && tab === 'scheduledWork' &&
       ['care', 'clinical', 'care.schedule'].some(permitted)) {
     selectTab('care', tab);
     history.replaceState(null, '', '#care');
   }
+  if (original === 'settings' && available('settings') && tab === 'platformUpdates') {
+    selectTab('settings', tab);
+    history.replaceState(null, '', '#settings');
+  }
   if (original === 'beds' && available('beds') && tab === 'zones' && permitted('care.areas')) {
     selectTab('beds', tab);
     history.replaceState(null, '', '#beds');
+  }
+  if (original !== 'beds' || !tab) openedBedLink = '';
+  if (original === 'beds' && available('beds') && ['all', 'plan'].includes(tab) && openedBedLink !== location.hash) {
+    selectTab('beds', tab);
+    openedBedLink = location.hash;
   }
   if (original === 'assistants') {
     const home = landing();
@@ -798,7 +819,7 @@ function openLinkedResident() {
     ? {eventId, day} : undefined;
   const modal = destination === 'residents'
     ? profile(context(), row, lifeEvent)
-    : openDossier(context(), row, lifeEvent);
+    : openDossier(context(), row, lifeEvent, destination === 'dossier' ? 'medical' : undefined);
   modal.dataset.linkedResident = id;
   const target = location.hash;
   modal.addEventListener('close', () => {

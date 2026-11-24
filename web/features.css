@@ -815,12 +815,79 @@
   padding: 0;
   border: 0;
 }
-.fx-dossier-grid,
+.resident-dossier-grid,
 .fx-document-sheet,
 .fx-history-grid {
   display: grid;
   gap: 14px;
   align-items: start;
+}
+.dialog.resident-dossier-dialog {
+  width: min(1080px, calc(100% - 32px));
+}
+.resident-dossier-grid {
+  grid-template-columns: minmax(152px, 185px) minmax(0, 1fr);
+  gap: 20px;
+}
+.resident-dossier-nav {
+  position: sticky;
+  top: 68px;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafe;
+}
+.resident-dossier-nav button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 43px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.resident-dossier-nav button:hover {
+  background: var(--soft);
+}
+.resident-dossier-nav button[aria-selected="true"] {
+  border-color: var(--line);
+  background: var(--soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+.resident-dossier-content {
+  min-width: 0;
+}
+.resident-dossier-panel[hidden] {
+  display: none;
+}
+.resident-dossier-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.resident-dossier-invoice {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+@media (max-width: 690px) {
+  .resident-dossier-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .resident-dossier-nav {
+    position: static;
+  }
 }
 .fx-history-grid {
   gap: 8px;
@@ -850,15 +917,8 @@
   margin-block-start: 5px;
 }
 @media (min-width: 920px) {
-  .dialog:has(.fx-dossier),
   .dialog:has(.fx-document) {
     width: min(1000px, calc(100vw - 90px));
-  }
-  .fx-dossier-grid:has(> :nth-child(2)) {
-    grid-template-columns: minmax(255px, 0.8fr) minmax(0, 1.45fr);
-  }
-  .fx-dossier-grid:has(> :nth-child(2)) .fx-dossier-demographic .fx-facts {
-    grid-template-columns: 1fr;
   }
   .fx-history-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -154,6 +154,9 @@ def authorize_command(db, user, action, payload, state):
     if action in ("care.proposeGroupActivity", "care.confirmGroupActivity"):
         # The complete roster is checked against the event's actual campus and rooms.
         return
+    if action in ("facility.updateRoom", "facility.setLayout"):
+        # The facility service checks the actual room or complete floor scope.
+        return
     if action.startswith("leads."):
         # The contact and booking commands resolve their actual campus before each write.
         return

@@ -118,6 +118,52 @@ def send(key, body, *, timeout=8):
         return json.loads(raw)
 
 
+def stream(key, body, received, *, timeout=60):
+    """Relay only answer text and return the same final receipt shape as send()."""
+    payload = {**body, "stream": True, "stream_options": {"include_usage": True}}
+    req = Request(
+        ENDPOINT, method="POST", data=json.dumps(payload, ensure_ascii=False).encode(),
+        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json",
+                 "Accept": "text/event-stream"},
+    )
+    pieces, finish, usage = [], None, None
+    length, transferred = 0, 0
+    with build_opener(NoRedirect()).open(req, timeout=timeout) as response:
+        while raw := response.readline(MAX_REPLY_BYTES + 1):
+            transferred += len(raw)
+            if len(raw) > MAX_REPLY_BYTES or transferred > 2 * 1024 * 1024:
+                raise ValueError("云端回复超出流式限制")
+            if not raw.startswith(b"data:"):
+                continue
+            data = raw[5:].strip()
+            if data == b"[DONE]":
+                if finish is None:
+                    raise ValueError("云端回复缺少结束状态")
+                return {"usage": usage, "choices": [{
+                    "finish_reason": finish, "message": {"content": "".join(pieces)},
+                }]}
+            chunk = json.loads(data)
+            if chunk.get("usage") is not None:
+                usage = chunk["usage"]
+            for choice in chunk.get("choices", []):
+                delta = choice.get("delta") or {}
+                part = delta.get("content")
+                if choice.get("index", 0) != 0 or delta.get("tool_calls"):
+                    raise ValueError("文字回复流格式无效")
+                if part:
+                    if not isinstance(part, str):
+                        raise ValueError("云端回复分段无效")
+                    length += len(part)
+                    if length > 12000:
+                        raise ValueError("云端回复文字过长")
+                    pieces.append(part)
+                    if finish is None:
+                        received(part)
+                if choice.get("finish_reason") is not None:
+                    finish = choice["finish_reason"]
+    raise ValueError("云端回复流提前结束")
+
+
 @dataclass(frozen=True)
 class Outcome:
     status: str

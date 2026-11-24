@@ -1,4 +1,5 @@
 import { replyReader } from './assistant-reader.js';
+import { streamReply } from './assistant-stream.js';
 import { networkControl, searchSources } from './assistant-network.js';
 import { el, icon } from '../lib/ui.js';
 import { node } from './shared.js';
@@ -167,6 +168,7 @@ function buildChat(getContext, actor, area, region, label) {
     retry,
     lastFocused,
     destroyed = false;
+  let partial = '', partialRow, partialFrame, speechTurn;
   const requestURL = path + (area ? '?' + area : '');
   let voice;
   const network = networkControl({
@@ -361,11 +363,9 @@ function buildChat(getContext, actor, area, region, label) {
     if (!messages.length && loaded && !waiting && !sending) log.append(emptyState());
     if (sending) {
       log.append(row({ role: 'user', content: retry.text }));
-      const pending = node('div', 'assistant-waiting', [
-        mark(14),
-        retry.webSearch ? '正在查阅公开资料…' : '正在整理回答…',
-      ]);
-      log.append(pending);
+      partialRow = el('div', 'assistant-current');
+      partialRow.append(pendingReply());
+      log.append(partialRow);
     }
     if (waiting && !messages.length) log.append(el('p', 'assistant-loading', '正在读取对话…'));
     if (scroll === 'start') log.scrollTop = 0;
@@ -388,6 +388,22 @@ function buildChat(getContext, actor, area, region, label) {
       } else log.scrollTop = log.scrollHeight;
     } else log.scrollTop = wasAt;
     sync();
+  }
+  function pendingReply() {
+    return partial ? row({ role: 'assistant', content: partial }) : node('div', 'assistant-waiting', [
+      mark(14), retry.webSearch ? '正在查阅公开资料…' : '正在整理回答…',
+    ]);
+  }
+  function appendText(text) {
+    partial += text;
+    if (partialFrame) return;
+    partialFrame = requestAnimationFrame(() => {
+      partialFrame = 0;
+      if (!sending || !partialRow?.isConnected) return;
+      const follows = log.scrollHeight - log.clientHeight - log.scrollTop < 32;
+      partialRow.replaceChildren(pendingReply());
+      if (follows) log.scrollTop = log.scrollHeight;
+    });
   }
   function update(result, sent = false) {
     const next = result.generation || '';
@@ -438,7 +454,10 @@ function buildChat(getContext, actor, area, region, label) {
     if (!destroyed && loaded) problem(message);
   }
   function hide(keepPlayback = false) {
-    if (keepPlayback !== true) reader.stop();
+    if (keepPlayback !== true) {
+      reader.stop();
+      speechTurn = null;
+    }
     if (network.probing) network.reset();
     panel.hidden = true;
     voice.cancel();
@@ -480,10 +499,14 @@ function buildChat(getContext, actor, area, region, label) {
       text.length > input.maxLength
     )
       return;
-    const page = location.hash.slice(1) || 'overview';
+    const startPage = location.hash;
+    const page = startPage.slice(1).split('?')[0] || 'overview';
     if (!retry || retry.text !== text || retry.page !== page || retry.webSearch !== network.enabled)
       retry = { text, page, id: crypto.randomUUID(), webSearch: network.enabled };
     sending = true;
+    reader.stop();
+    partial = '';
+    speechTurn = null;
     network.status.textContent = '';
     input.value = '';
     note.textContent = '';
@@ -492,36 +515,48 @@ function buildChat(getContext, actor, area, region, label) {
     draw('pending');
     request = new AbortController();
     let action,
-      received = false;
+      received = false,
+      speechFrames = false;
     try {
-      const result = await json(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: request.signal,
-        body: JSON.stringify({
-          text,
-          requestId: retry.id,
-          ...(retry.webSearch ? { webSearch: true } : {}),
-          page: retry.page,
-          region,
-          scopeKey,
-          generation,
-        }),
+      const speechRequested = reader.enabled;
+      const result = await streamReply(path + '/stream', {
+        text,
+        requestId: retry.id,
+        ...(retry.webSearch ? { webSearch: true } : {}),
+        page: retry.page,
+        region,
+        scopeKey,
+        generation,
+        readAloud: speechRequested,
+      }, request.signal, event => {
+        if (destroyed) return;
+        if (event.type === 'begin' && !panel.hidden && speechRequested)
+          speechTurn = { region, scopeKey: event.scopeKey, generation: event.generation, requestId: event.requestId };
+        if (event.type === 'text' && typeof event.text === 'string') appendText(event.text);
+        if (event.type === 'speech' && Number.isInteger(event.sentence)) {
+          speechFrames = true;
+          if (!panel.hidden && speechTurn) reader.enqueueSentence(event.sentence, speechTurn);
+        }
       });
       if (destroyed) return;
       update(result, true);
       received = true;
-      if (!panel.hidden) reader.enqueue(messages.at(-1), {region, scopeKey, generation});
+      if (!panel.hidden && !speechFrames)
+        reader.enqueue(messages.at(-1), {region, scopeKey, generation});
       if (
         messages.at(-2)?.content === text &&
-        page === (location.hash.slice(1) || 'overview')
+        startPage === location.hash
       )
         action = assistantCommand(getContext(), messages.at(-1));
       retry = null;
     } catch (e) {
       if (destroyed) return;
+      reader.stop();
       if (!input.value) input.value = text;
-      if (e.status === 409) {
+      if (e.status === 401) {
+        await getContext().refreshWorkspace();
+        if (!destroyed) problem('登录已过期，请重新登录。');
+      } else if (e.status === 409) {
         sending = false;
         await reloadConflict('对话或权限已变化，已重新读取，请核对后发送。');
       } else if (e.status === 403) {
@@ -552,6 +587,10 @@ function buildChat(getContext, actor, area, region, label) {
       }
     } finally {
       if (!destroyed) {
+        cancelAnimationFrame(partialFrame);
+        partialFrame = 0;
+        partial = '';
+        speechTurn = null;
         sending = false;
         draw(received ? 'answer' : 'preserve');
         adjustInput();

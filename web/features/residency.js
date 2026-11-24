@@ -6,6 +6,7 @@ import {
   isTrial, register, registry, statusLabel,
 } from './admission.js';
 import { goToRoom, roomsPage } from './rooms.js';
+import { roomTypeLabel } from './room-vector.js';
 import { residentInsights } from './resident-insights.js';
 import { healthProfile } from './resident-health.js';
 import {
@@ -338,8 +339,30 @@ let bedViewPreference;
 function allBeds(ctx) {
   const personFor = new Map(active(ctx).map(person => [person.bedId, person]));
   if (bedViewPreference?.userId !== ctx.state.user.id)
-    bedViewPreference = {userId: ctx.state.user.id, building: '', area: '', status: '', query: '', order: 'floor'};
+    bedViewPreference = {
+      userId: ctx.state.user.id, building: '', area: '', status: '', query: '', order: 'floor',
+      capacity: '', limit: 0, request: '',
+    };
   const view = bedViewPreference;
+  const params = new URLSearchParams(location.hash.split('?')[1]);
+  const requested = ['capacity', 'limit', 'campus', 'building', 'floor', 'room'].map(key => params.get(key));
+  const key = JSON.stringify(requested);
+  if (requested.some(Boolean) && view.request !== key) {
+    const [capacity, limit, campus, building, floor, room] = requested;
+    view.request = key;
+    view.capacity = /^[1-9]$|^1[0-2]$/.test(capacity || '') ? capacity : '';
+    view.limit = /^[1-9]$|^[12][0-9]$|^30$/.test(limit || '') ? Number(limit) : 0;
+    view.campus = campus || '';
+    view.floor = floor || '';
+    view.room = room || '';
+    view.building = building || '';
+    view.area = view.query = view.status = '';
+  } else if (!requested.some(Boolean) && view.request) {
+    view.request = '';
+    view.limit = 0;
+    view.campus = view.floor = view.room = '';
+  }
+  let selectedRooms = null;
   const directory = new Map();
   const places = new Map();
   const unmapped = '__unmapped__';
@@ -351,6 +374,7 @@ function allBeds(ctx) {
     const place = ctx.state.bedDirectory?.[bed.id];
     const [oldCampus, oldBuilding, oldFloor] = ctx.state.bedLocations?.[bed.id] || [];
     const campusName = place?.campusName || oldCampus || '';
+    const campusId = place?.campusId || '';
     const buildingName = place?.buildingName || oldBuilding || '';
     const floorLabel = place?.floorLabel || oldFloor || '';
     const buildingId = place?.buildingId || (buildingName ? scopeText(campusName, buildingName) : unmapped);
@@ -362,6 +386,7 @@ function allBeds(ctx) {
       directory.set(buildingId, scopeText(campusName, buildingName));
     if (!places.has(identity)) places.set(identity, {
       id: place?.roomId, buildingId, campusName, buildingName, floorId, floorLabel,
+      campusId,
       floorNumber: place?.floorNumber, roomNumber, areaId: place?.areaId, areaPath,
       areaIds: place?.areaIds || [],
       x: place?.x, y: place?.y, beds: [],
@@ -377,6 +402,10 @@ function allBeds(ctx) {
   search.value = view.query;
   const building = node('select', 'fx-input');
   const area = node('select', 'fx-input');
+  const capacity = node('select', 'fx-input');
+  capacity.add(new Option('全部房型', ''));
+  for (let count = 1; count <= 12; count++) capacity.add(new Option(roomTypeLabel(count), String(count)));
+  capacity.value = view.capacity;
   const order = node('select', 'fx-input');
   const label = (title, control) => node('label', 'bed-list-control', [node('span', '', title), control]);
   for (const [value, title] of bedViewSorts) order.add(new Option(title, value));
@@ -384,7 +413,7 @@ function allBeds(ctx) {
   const controls = node('section', 'fx-panel bed-list-controls', [
     node('div', 'bed-list-fields', [
       label('搜索床位', search), label('楼栋', building),
-      label('区域或病区', area), label('排序方式', order),
+      label('区域或病区', area), label('房间类型', capacity), label('排序方式', order),
     ]),
   ]);
   const statusBar = node('div', 'fx-bed-filters');
@@ -392,7 +421,14 @@ function allBeds(ctx) {
   statusBar.setAttribute('aria-label', '筛选床位状态');
   const count = node('span', 'fx-muted bed-list-count');
   count.setAttribute('role', 'status');
-  controls.append(node('div', 'bed-list-status', [statusBar, count]));
+  const clearScope = link(ctx, '清除快速筛选范围', () => {
+    view.limit = 0;
+    view.campus = view.floor = view.room = view.building = '';
+    fillBuildings();
+    fillAreas();
+    draw();
+  });
+  controls.append(node('div', 'bed-list-status', [statusBar, count, clearScope]));
   const cards = node('div', 'fx-wards bed-list-grid');
   const metrics = node('div', 'bed-list-metrics');
 
@@ -435,7 +471,11 @@ function allBeds(ctx) {
   }
   const areaKey = room => room.areaId || scopeText(room.buildingId, room.areaPath || '未分区');
   function roomsInBuilding() {
-    return [...places.values()].filter(r => !view.building || r.buildingId === view.building);
+    return [...places.values()].filter(r =>
+      (!view.building || r.buildingId === view.building) &&
+      (!view.campus || r.campusId === view.campus) &&
+      (!view.floor || r.floorId === view.floor) &&
+      (!view.room || r.id === view.room));
   }
   function fillAreas() {
     const entries = new Map();
@@ -500,7 +540,7 @@ function allBeds(ctx) {
       node('div', 'bed-list-room-heading', [
         node('div', '', [
           node('h3', 'fx-room-title', [ctx.ui.icon('bed', 15), title]),
-          within ? node('small', 'fx-muted', within) : null,
+          node('small', 'fx-muted', scopeText(roomTypeLabel(room.beds.length), within)),
         ]),
         showMap,
       ]),
@@ -530,9 +570,15 @@ function allBeds(ctx) {
     let total = 0;
     let vacant = 0;
     let shown = 0;
+    let shownRooms = 0;
+    let matchedRooms = 0;
     for (const room of roomsInBuilding().sort(compare)) {
+      if (view.capacity && Number(view.capacity) !== room.beds.length) continue;
       const matched = room.beds.filter(bed => inArea(room, bed) && matches(bed, room, terms));
       const visible = matched.filter(bed => !view.status || bed.status === view.status);
+      if (visible.length) matchedRooms++;
+      if (selectedRooms && view.limit && !selectedRooms.has(room.id)) continue;
+      if (view.limit && shownRooms >= view.limit) continue;
       const free = matched.filter(bed => bed.status === '空闲').length;
       total += matched.length;
       vacant += free;
@@ -542,13 +588,18 @@ function allBeds(ctx) {
       const group = groups.get(key);
       group.total += matched.length;
       group.vacant += free;
-      if (visible.length) group.rooms.push(renderRoom(room, visible));
+      if (visible.length) {
+        group.rooms.push(renderRoom(room, visible));
+        shownRooms++;
+      }
       shown += visible.length;
     }
     for (const button of statusBar.children)
       button.setAttribute('aria-pressed', String(button.dataset.value === view.status));
     metrics.replaceChildren(kpis([['床位总数', total], ['已入住', total - vacant], ['空闲床位', vacant]]));
-    count.textContent = '显示 ' + shown + ' 张床位';
+    count.textContent = '显示 ' + shownRooms + ' 间，' + shown + ' 张床位' +
+      (shownRooms < matchedRooms ? '（共 ' + matchedRooms + ' 间符合条件）' : '');
+    clearScope.hidden = !(view.limit || view.campus || view.floor || view.room);
     const visibleGroups = [...groups.values()].filter(group => group.rooms.length);
     cards.replaceChildren(...(visibleGroups.length ? visibleGroups.map(renderGroup)
       : [node('div', 'fx-empty fx-panel', '没有符合条件的床位')]));
@@ -561,8 +612,9 @@ function allBeds(ctx) {
     button.addEventListener('click', () => { view.status = value; draw(); });
     statusBar.append(button);
   }
-  building.addEventListener('change', () => { view.building = building.value; fillAreas(); draw(); });
+  building.addEventListener('change', () => { view.building = building.value; view.limit = 0; fillAreas(); draw(); });
   area.addEventListener('change', () => { view.area = area.value; draw(); });
+  capacity.addEventListener('change', () => { view.capacity = capacity.value; view.limit = 0; draw(); });
   order.addEventListener('change', () => { view.order = order.value; draw(); });
   search.addEventListener('input', event => {
     if (!event.isComposing) { view.query = search.value; draw(); }
@@ -581,6 +633,17 @@ function allBeds(ctx) {
     fillAreas();
     draw();
   }).catch(() => {});
+  if (view.limit) {
+    const query = new URLSearchParams({limit: String(view.limit)});
+    for (const [name, value] of Object.entries({
+      bedCount: view.capacity, campusId: view.campus, buildingId: view.building, floorId: view.floor, roomId: view.room,
+    })) if (value) query.set(name, value);
+    ctx.get('/api/facility/rooms?' + query).then(result => {
+      if (!panel.isConnected || !view.limit) return;
+      selectedRooms = new Set(result.rooms.map(room => room.id));
+      draw();
+    }).catch(() => {});
+  }
   return panel;
 }
 

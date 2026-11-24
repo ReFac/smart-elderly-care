@@ -217,7 +217,8 @@ class BackupService:
                 dict(r)
                 for r in db.execute(
                     """SELECT rowid AS cursor,id,created,state,revision,bytes,source_bytes AS sourceBytes,captured,error,
-                 CASE WHEN request LIKE 'import:%' THEN 'import' WHEN request LIKE 'protection:%' THEN 'protection' WHEN owner='' THEN 'automatic' ELSE 'manual' END AS kind FROM backup_points
+                 CASE WHEN request LIKE 'import:%' THEN 'import' WHEN request LIKE 'protection:%' THEN 'protection'
+                 WHEN request LIKE 'upgrade:%' THEN 'upgrade' WHEN owner='' THEN 'automatic' ELSE 'manual' END AS kind FROM backup_points
                  WHERE (?=0 OR rowid<?) ORDER BY rowid DESC LIMIT 51""",
                     (before, before),
                 )

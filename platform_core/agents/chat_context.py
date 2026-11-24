@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from .. import access, access_policy as policy, campus_access, facility, history
-from . import region, revenue, ward_brief
+from . import chat_navigation, region, revenue, ward_brief
 
 
 ROUTES = {
@@ -151,6 +151,19 @@ def evidence(store, db, actor, state, chosen, hours, topics):
             "在住人数": len(current),
             "床位数": len(beds),
             "空床数": sum(not bool(b.get("residentId")) for b in beds),
+        }
+    room_filter = chat_navigation.room_capacity(topics)
+    if room_filter and "beds" in actor["routes"] and any(
+        policy.has(actor, grant) for grant in (*facility.READ_GRANTS, facility.MANAGE_GRANT)
+    ):
+        count, limit = room_filter
+        scoped = {key: chosen[key] for key in ("campusId", "buildingId", "floorId", "roomId")} if chosen else {}
+        matches = facility.rooms(db, state, actor, bedCount=count, limit=min(limit, 12), **scoped)
+        facts["实查房型"] = {
+            "每间启用床位数": count,
+            "匹配房间数": matches["total"],
+            "房号": [{k: r[k] for k in ("number", "buildingName", "floorLabel", "occupiedCount")}
+                   for r in matches["rooms"]],
         }
     if policy.has(actor, "care"):
         today = now.date().isoformat()

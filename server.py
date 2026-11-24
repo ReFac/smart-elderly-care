@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from platform_core.agents import chat
 from platform_core.operations import expense_import
 from platform_core.backups import exchange
-from platform_core import access, facility, visitor_access
+from platform_core import access, facility, updates, visitor_access
 from platform_core import daily_life, lead_intake, medical_visits, resident_health, scheduled_work
 from platform_core.provider import round_priorities
 from platform_core.store import Conflict, SignedOut, Store, encode
@@ -31,10 +31,14 @@ VISIT_GROUP_BODY = 34 * 1024 * 1024  # 24 MiB of originals, base64-encoded, plus
 
 
 class Handler(BaseHTTPRequestHandler):
-    def __init__(self, *args, store, public_origin=None, demo_public_tour=False, **kwargs):
+    def __init__(self, *args, store, public_origin=None, demo_public_tour=False,
+                 update_service=None, update_gate=None, update_boot=None, **kwargs):
         self.store = store
         self.public_origin = public_origin
         self.demo_public_tour = demo_public_tour
+        self.update_service = update_service
+        self.update_gate = update_gate
+        self.update_boot = update_boot
         super().__init__(*args, **kwargs)
 
     def log_request(self, code="-", size="-"):
@@ -120,6 +124,8 @@ class Handler(BaseHTTPRequestHandler):
             if not (local or configured) or parsed.username or parsed.password:
                 raise PermissionError("请使用配置的机构域名或本机地址")
             path = unquote(urlsplit(self.path).path)
+            if self.update_gate and not self.update_gate.is_file() and path != "/api/health":
+                return self.send_json(503, {"error": "机构正在切换新版，请稍后重新打开"})
             if method == "GET":
                 self.read_resource(path)
             else:
@@ -158,6 +164,9 @@ class Handler(BaseHTTPRequestHandler):
         return {key: values[0] for key, values in params.items()}
 
     def read_resource(self, path):
+        if path == "/api/updates":
+            service = self.update_service or updates.UpdateService(self.store)
+            return self.send_json(200, service.status(self.token()))
         if path == "/api/catalog/hospitals":
             from platform_core import hospital_catalog
 
@@ -350,12 +359,14 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path in (
             "/api/facility/search",
+            "/api/facility/rooms",
             "/api/facility/tour",
             "/api/agent/room-context",
         ):
             kind = path.rsplit("/", 1)[1]
             extras = {
                 "search": ("q", "limit"),
+                "rooms": ("bedCount", "limit"),
                 "tour": (),
                 "room-context": ("limit", "offset"),
             }
@@ -389,7 +400,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/branding":
             return self.send_json(200, self.store.branding())
         if path == "/api/health":
-            return self.send_json(200, {"status": "ok"})
+            state = {"status": "ok"}
+            if self.update_boot:
+                state["boot"] = self.update_boot
+            return self.send_json(200, state)
         if path == "/api/version":
             return self.send_json(200, self.store.version(token))
         if path == "/api/state":
@@ -508,7 +522,66 @@ class Handler(BaseHTTPRequestHandler):
         image, mime = self.store.tour_media(token, path)
         self.respond(200, image, mime)
 
+    def assistant_stream(self, request):
+        from platform_core.agents.chat_progress import Progress
+
+        speak = request.pop("readAloud", False)
+        if type(speak) is not bool:
+            raise ValueError("朗读选项格式无效")
+        self.close_connection = True
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, no-transform")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        connected = True
+
+        def emit(event):
+            nonlocal connected
+            if connected:
+                try:
+                    self.wfile.write((encode(event) + "\n").encode())
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    connected = False
+
+        progress = Progress(self.store, emit, speak=speak)
+        try:
+            result = chat.reply(self.store, self.token(), request, progress=progress)
+            emit({"type": "done", "result": result})
+        except (SignedOut, Conflict, PermissionError, FileNotFoundError, chat.Unavailable,
+                ValueError, TypeError, OverflowError, RecursionError, *OPERATIONAL_ERRORS) as err:
+            if isinstance(err, SignedOut):
+                status = 401
+            elif isinstance(err, Conflict):
+                status = 409
+            elif isinstance(err, (PermissionError, FileNotFoundError)):
+                status = 403
+            elif isinstance(err, (chat.Unavailable, OPERATIONAL_ERRORS)):
+                status = 503
+            else:
+                status = 400
+            message = "数据库暂时不可用，请稍后重试" if isinstance(err, OPERATIONAL_ERRORS) else str(err)
+            emit({"type": "error", "status": status, "error": message})
+        finally:
+            progress.close()
+
     def write_resource(self, path):
+        if path in ("/api/updates/check", "/api/updates/settings", "/api/updates/download", "/api/updates/install"):
+            service = self.update_service or updates.UpdateService(self.store)
+            data = self.read_json(1024)
+            token = self.token()
+            if path.endswith("/settings"):
+                view = service.configure(token, data)
+            elif path.endswith("/check") and not data:
+                view = service.check(token)
+            elif set(data) == {"version"} and path.endswith(("/download", "/install")):
+                action = service.download if path.endswith("/download") else service.queue
+                view = action(token, data["version"])
+            else:
+                raise ValueError("请选择更新操作或版本")
+            return self.send_json(200, view)
         if path == "/api/care/admission/preview":
             return self.send_json(200, self.store.admission_preview(self.token(), self.read_json(SMALL_BODY)))
         if path == "/api/inventory/matches":
@@ -572,6 +645,8 @@ class Handler(BaseHTTPRequestHandler):
             from platform_core.provider import read_aloud
 
             return self.respond(200, read_aloud.listen(self.store, self.token(), self.read_json(SMALL_BODY)), "audio/wav")
+        if path == "/api/assistant/chat/stream":
+            return self.assistant_stream(self.read_json(SMALL_BODY))
         if path in ("/api/assistant/chat", "/api/assistant/chat/reset"):
             request = self.read_json(SMALL_BODY)
             operation = chat.reset if path.endswith("/reset") else chat.reply
@@ -909,6 +984,15 @@ def dispatch_scheduled_work(store, stopped):
         stopped.wait(10)
 
 
+def dispatch_updates(service, stopped):
+    while not stopped.is_set():
+        try:
+            service.automatic()
+        except (OSError, ValueError, *OPERATIONAL_ERRORS):
+            logging.getLogger(__name__).exception("机构自动更新检查未完成")
+        stopped.wait(60)
+
+
 def main():
     parser = argparse.ArgumentParser(description="安康医养平台 · 机构工作台")
     parser.add_argument("--port", type=int, default=8765)
@@ -955,16 +1039,41 @@ def main():
             "请再次输入："
         ):
             parser.error("初始密码长度不符或两次输入不同")
-    store = Store(
-        args.db, initial_data=args.initial_data, initial_owner_password=initial_password
+    from platform_core.backups import process_lock
+
+    args.db.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    with process_lock(updates.update_directory(args.db), "running-server") as locked:
+        if not locked:
+            parser.error("此机构资料库已有一个程序在运行")
+        serve_institution(args, origin, initial_password)
+
+
+def serve_institution(args, origin, initial_password):
+    store = Store(args.db, initial_data=args.initial_data, initial_owner_password=initial_password)
+    update_service = updates.UpdateService(store)
+    gate = Path(os.environ["NH_UPDATE_GATE"]) if os.environ.get("NH_UPDATE_GATE") else None
+    handler = partial(
+        Handler, store=store, public_origin=origin, demo_public_tour=args.demo_public_tour,
+        update_service=update_service, update_gate=gate, update_boot=os.environ.get("NH_UPDATE_BOOT"),
     )
-    handler = partial(Handler, store=store, public_origin=origin, demo_public_tour=args.demo_public_tour)
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
-        store.backups.start()
-        store.rounds.start()
         stopped = Event()
         worker = Thread(target=dispatch_scheduled_work, args=(store, stopped), name="scheduled-work", daemon=True)
-        worker.start()
+        auto = Thread(target=dispatch_updates, args=(update_service, stopped), name="platform-updates", daemon=True)
+
+        def start_services():
+            while gate and not gate.is_file():
+                if stopped.wait(0.1):
+                    return
+            if not stopped.is_set():
+                store.backups.start()
+                store.rounds.start()
+                worker.start()
+                if update_service.managed:
+                    auto.start()
+
+        startup = Thread(target=start_services, name="institution-startup", daemon=True)
+        startup.start()
         print(f"安康医养平台已启动  http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()
@@ -972,7 +1081,11 @@ def main():
             pass
         finally:
             stopped.set()
-            worker.join(timeout=12)
+            startup.join(timeout=1)
+            if worker.ident is not None:
+                worker.join(timeout=12)
+            if auto.ident is not None:
+                auto.join(timeout=1)
             store.rounds.stop()
             store.backups.stop()
 

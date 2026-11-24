@@ -14,12 +14,14 @@ class Page:
     aliases: tuple = ()
     tab: str = ""
     grant: str = ""
+    params: tuple = ()
 
     def link(self):
         return {
             "route": self.route,
             "title": self.title,
             **({"tab": self.tab} if self.tab else {}),
+            **({"params": dict(self.params)} if self.params else {}),
         }
 
 
@@ -40,7 +42,8 @@ PAGES = (
     Page("beds", "全部床位", ("床位列表", "床位名册"), "all"),
     Page("beds", "区域设置", ("护理区域", "护工职责", "照护区域", "楼栋分区"), "zones"),
     Page("beds", "楼层平面图", ("平面图", "房间工作台"), "plan"),
-    Page("dossier", "个人与医疗档案", ("个人档案", "医疗档案", "医疗存档")),
+    Page("beds", "编辑矢量平面图", ("平面图设置", "矢量平面图", "编辑平面图"), "plan", "facility.manage", (("edit", "layout"),)),
+    Page("dossier", "个人与医疗档案", ("个人档案", "医疗档案", "医疗存档", "医疗资料", "过去诊疗记录", "会诊记录")),
     Page("assessments", "能力评估", ("长者评估", "老人评估")),
     Page("assessments", "评估记录", (), "assess"),
     Page("assessments", "等级判定", ("护理等级", "评估结果"), "grading", "care"),
@@ -99,6 +102,7 @@ PAGES = (
     Page("settings", "定时巡查", ("巡查设置",), "rounds"),
     Page("settings", "试住约定", ("试住设置", "试住默认价", "试住默认天数"), "trials"),
     Page("settings", "备份与恢复", ("备份", "快照", "恢复备份"), "backups"),
+    Page("settings", "平台更新", ("自动更新", "检查更新", "更新设置", "升级前备份", "软件更新", "版本更新"), "platformUpdates"),
     Page("account", "个人中心", ("我的账户", "我的账号")),
     Page("tour", "环境导览", ("院内环境", "养老院环境", "院区环境", "全景导览")),
     Page("family", "家属服务", ("长者服务", "照护消息", "家属消息", "家属推送")),
@@ -121,6 +125,48 @@ PUBLIC = re.compile(
     re.I,
 )
 SENTENCE = re.compile(r"[。！？!?；;\n]+")
+ROOM_NUMBER = {"单": 1, "一": 1, "双": 2, "两": 2, "二": 2, "三": 3, "四": 4,
+               "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+ROOM_CAPACITY = re.compile(r"(1[0-2]|[1-9单双一两二三四五六七八九十])\s*(?:人间|人房|床房)")
+ROOM_LIMIT = re.compile(r"(\d{1,3}|[一两二三四五六七八九十])\s*(?:间|个)\s*(?:[1-9单双一两二三四五六七八九十]|房)")
+ROOM_EDIT = re.compile(r"(?:修改|编辑|调整|设置|改成|改为|自定义).{0,14}(?:房型|房间|人间|床位数)|房型编辑|房间设置")
+
+
+def room_capacity(text):
+    if ROOM_EDIT.search(text):
+        return None
+    capacity = ROOM_CAPACITY.search(text)
+    if not capacity:
+        return None
+    number = capacity[1]
+    limit = ROOM_LIMIT.search(text)
+    count = limit[1] if limit else "6"
+    return ROOM_NUMBER.get(number, int(number) if number.isdigit() else 1), min(
+        30, max(1, ROOM_NUMBER.get(count, int(count) if count.isdigit() else 6))
+    )
+
+
+def room_shortcut(question, pages, area):
+    if NEGATIVE.search(question) or not any(p.route == "beds" for p in pages):
+        return None
+    area = area or {}
+    scope = tuple((short, area[key]) for short, key in (
+        ("campus", "campusId"), ("building", "buildingId"), ("floor", "floorId"), ("room", "roomId"),
+    ) if area.get(key))
+    permitted_layout = any(p.route == "beds" and p.grant == "facility.manage" for p in pages)
+    if permitted_layout and (ROOM_EDIT.search(question) or re.search(r"编辑房型|调整房型", question)):
+        if area.get("roomId"):
+            return Page("beds", "编辑房型", tab="plan", params=(*scope, ("edit", "room")))
+        return Page("beds", "查找房间并编辑房型", tab="all", params=scope)
+    if permitted_layout and re.search(r"矢量平面图|编辑平面图|平面图设置", question):
+        return Page("beds", "编辑矢量平面图", tab="plan", params=(*scope, ("edit", "layout")))
+    match = room_capacity(question)
+    if match:
+        beds, limit = match
+        label = {1: "单人间", 2: "双人间", 3: "三人间"}.get(beds, f"{beds} 人间")
+        return Page("beds", f"查看{label}", tab="all",
+                    params=(*scope, ("capacity", str(beds)), ("limit", str(limit))))
+    return None
 
 
 def visible(user, routes):
@@ -186,7 +232,8 @@ def local_question(text):
     """Page-finding stays inside the workspace even when public search is enabled."""
     return bool(
         not public_topic(text)
-        and (PREVIOUS.search(text) or WAYFINDING.search(text) and named(text, PAGES))
+        and (room_capacity(text) or ROOM_EDIT.search(text) or PREVIOUS.search(text)
+             or WAYFINDING.search(text) and named(text, PAGES))
     )
 
 
@@ -206,10 +253,11 @@ def navigation_actions(actions, text, pages):
     return {r: kind for r, kind in actions.items() if r in targets}
 
 
-def resolve(question, answer, pages, previous=(), action=None):
+def resolve(question, answer, pages, previous=(), action=None, area=None):
     if public_topic(question):
         return []
-    matches = []
+    shortcut = room_shortcut(question, pages, area)
+    matches = [shortcut] if shortcut else []
     for sentence in SENTENCE.split(question):
         if WAYFINDING.search(sentence) and not NEGATIVE.search(sentence):
             matches.extend(named(sentence, pages))
@@ -241,6 +289,8 @@ def resolve(question, answer, pages, previous=(), action=None):
         matches = [p for p in pages if (p.route, p.tab) == target]
     # A specific tab already opens its parent. Show only the most useful destination once.
     with_tab = {page.route for page in matches if page.tab}
+    if shortcut:
+        matches = [shortcut, *(page for page in matches if page.route != "beds")]
     return list(
         dict.fromkeys(
             page for page in matches if page.tab or page.route not in with_tab

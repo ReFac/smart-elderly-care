@@ -11,6 +11,8 @@ from urllib.error import HTTPError, URLError
 
 from platform_core import provider
 from platform_core.agents import chat
+from platform_core.agents.chat_progress import Progress, sentences
+from platform_core.provider import read_aloud
 from platform_core.store import Conflict, SignedOut, Store, TIMEZONE
 
 
@@ -90,6 +92,63 @@ class ChatTests(unittest.TestCase):
     def facts(self):
         body = self.transport.call_args.args[1]
         return json.loads(body["messages"][1]["content"])["本次可见资料"]
+
+    def test_short_sentence_is_authorized_before_complete_chat_turn(self):
+        events, clips = [], []
+        first = "今天的探访安排可以在接待时间表里核对。"
+        key = patch.object(read_aloud, "read_key", return_value="mock-provider-credential")
+        key.start()
+        self.addCleanup(key.stop)
+
+        def emit(event):
+            events.append(event)
+            if event["type"] == "speech" and event["sentence"] == 0:
+                begin = events[0]
+                with closing(self.store.connect()) as db:
+                    self.assertEqual(db.execute("SELECT count(*) FROM assistant_turns").fetchone()[0], 0)
+                read_aloud.listen(self.store, self.owner, {
+                    **{key: begin[key] for key in ("generation", "scopeKey", "requestId")},
+                    "region": {}, "sentence": 0,
+                }, transport=lambda _key, content: clips.append(content) or b"voice")
+
+        def stream(_key, _body, publish):
+            publish(first)
+            self.assertEqual(clips, [first])
+            publish("请优先按已经确认的来访时间接待。")
+            return {
+                "choices": [{"finish_reason": "stop", "message": {
+                    "content": first + "请优先按已经确认的来访时间接待。"
+                }}],
+                "usage": {"total_tokens": 100},
+            }
+
+        progress = Progress(self.store, emit, speak=True)
+        try:
+            with patch("platform_core.provider.deepseek.stream", side_effect=stream):
+                saved = chat.reply(self.store, self.owner, {
+                    "requestId": "in-progress-read", "text": "说下探访安排。"
+                }, progress=progress)
+            second = sentences(saved["messages"][-1]["content"], final=True)[1]
+            read_aloud.listen(self.store, self.owner, {
+                "scopeKey": saved["scopeKey"], "generation": saved["generation"],
+                "requestId": "in-progress-read", "region": {}, "sentence": 1,
+            }, transport=lambda _key, content: clips.append(content) or b"voice")
+            self.assertEqual(clips, [first, second])
+            self.assertEqual([e["type"] for e in events[:3]], ["begin", "text", "speech"])
+        finally:
+            progress.close()
+
+    def test_conversation_returns_filtered_room_destination(self):
+        answer = self.ask("请列出 3 间双人间")
+        link = answer["messages"][-1]["pageLinks"][0]
+        self.assertEqual(link, {
+            "title": "查看双人间", "route": "beds", "tab": "all",
+            "params": {"capacity": "2", "limit": "3"},
+        })
+        matched = self.facts()["实查房型"]
+        self.assertEqual(matched["每间启用床位数"], 2)
+        self.assertTrue(matched["房号"])
+        self.assertLessEqual(len(matched["房号"]), 3)
 
     def test_cloud_evidence_action_rechecks_scope_and_bills_synthesis(self):
         def choose(_key, body):
