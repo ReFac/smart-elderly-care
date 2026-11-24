@@ -32,7 +32,8 @@ export const quickDestinations = [
     route: 'beds',
     tab: 'plan',
   },
-  { label: '试住管理', words: '办理试住 试住转正式 试住回访', route: 'residents', tab: 'trials' },
+  { label: '试住', words: '办理试住 试住管理 试住转正式', route: 'residents', tab: 'trials' },
+  { label: '试住回访', words: '试住离院 回访报告', route: 'residents', tab: 'followups' },
   { label: '待出月账单', words: '月付账单 核算月费 账单日', route: 'billing', tab: 'due' },
   { label: '护理用具库存', words: '护理用品 物资情况 仓库盘点', route: 'inventory', tab: 'stock' },
   { label: '护理用具工单', words: '物资工单 物资任务 补货', route: 'inventory', tab: 'orders' },
@@ -59,6 +60,8 @@ function pageDestination(ctx, entry) {
     if (['layout', 'room'].includes(entry.params.edit) && canAct(ctx, entry.params.edit === 'layout' ? 'facility.setLayout' : 'facility.updateRoom'))
       params.edit = entry.params.edit;
   }
+  if (dest === 'faq' && typeof entry.params?.item === 'string' && /^[a-z][a-z0-9-]{1,60}$/.test(entry.params.item))
+    params.item = entry.params.item;
   return {
     route,
     destination: dest,

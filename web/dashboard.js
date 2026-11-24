@@ -527,7 +527,7 @@ function tasksPanel(ctx, tasks) {
 
 function shortcuts(ctx) {
   const destinations = [
-    ['residents', '长者档案', 'people'],
+    ['residents', '入住管理', 'people'],
     ['assessments', '能力评估', 'assessment'],
     ['shifts', '人员排班', 'shifts'],
     ['reports', '统计报送', 'reports'],

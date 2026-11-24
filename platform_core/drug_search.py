@@ -6,7 +6,7 @@ import re
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from .agents.chat_web import eligible
+from .agents.chat_web import privacy_allows
 
 API = "https://www.wikidata.org/w/api.php"
 PUBLIC_SEARCH = "https://pharm.ncmi.cn/pharm/fullText/search.do?"
@@ -25,14 +25,14 @@ def public_term(db, state, text):
     return not re.search(
         r"\d{4}|住址|服用|早晚|每天|早晨|房间|护工|护士|老人|患者|病人|姓名|毫克|用量",
         text,
-    ) and eligible(db, state, text, [])
+    ) and privacy_allows(db, state, text)
 
 
 def _api(**params):
     request = Request(
         API + "?" + urlencode({"format": "json", **params}),
         headers={
-            "User-Agent": "AnkangCare/1.0 (https://github.com/ReFac/smart-elderly-care)",
+            "User-Agent": "ElderlyCare/1.0 (https://github.com/ReFac/smart-elderly-care)",
             "Accept": "application/json",
         },
     )

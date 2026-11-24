@@ -135,7 +135,7 @@ def wx_native(order, now):
             "Authorization": auth,
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "Ankang-Merchant/1.0",
+            "User-Agent": "ElderlyCare-Merchant/1.0",
             "Wechatpay-Serial": setting("WXPAY_PUBLIC_KEY_ID"),
         },
     )

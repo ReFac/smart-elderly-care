@@ -250,7 +250,7 @@ def preview_file(svc, token, stream, length):
                     if remaining == length and not chunk.startswith(
                         secure_storage.SNAPSHOT_FORMATS
                     ):
-                        raise ValueError("请选择安康 .akbak 加密备份")
+                        raise ValueError("请选择平台导出的 .akbak 加密备份")
                     dest.write(chunk)
                     digest.update(chunk)
                     remaining -= len(chunk)

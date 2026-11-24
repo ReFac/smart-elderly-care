@@ -129,12 +129,12 @@ export function loginScreen(onLogin, branding = {}) {
   mark.src = '/assets/mark.svg';
   mark.alt = '';
   hero.append(
-    node('div', 'access-brand', [mark, node('strong', '', branding.brandName || '安康医养平台')]),
+    node('div', 'access-brand', [mark, node('strong', '', branding.brandName || '医养管理平台')]),
   );
   const product = node('div', 'access-product');
   product.append(
-    node('span', 'access-edition', branding.institutionName || '安康家园'),
-    node('h1', '', branding.brandName || '安康医养平台'),
+    node('span', 'access-edition', branding.institutionName || '养老机构'),
+    node('h1', '', branding.brandName || '医养管理平台'),
     careFlowFigure(),
   );
   hero.append(product);
@@ -185,7 +185,9 @@ export function loginScreen(onLogin, branding = {}) {
   recover.type='button'; recover.onclick=()=>passwordFlow({username:name.value.trim()});
   const visit = node('a', 'access-visitor-link', [icon('calendar', 18), node('strong', '', '访客咨询与预约参观'), icon('chevron', 16)]);
   visit.href = '/visit';
-  panel.append(form, recover, help, visit);
+  const faq = node('a', 'access-visitor-link', [icon('info', 18), node('strong', '', '常见问题'), icon('chevron', 16)]);
+  faq.href = '/faq';
+  panel.append(form, recover, help, visit, faq);
   entry.append(panel);
   main.append(hero, entry);
   return main;

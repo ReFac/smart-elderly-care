@@ -114,7 +114,7 @@ def schedules(store, token, command):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="建立安康家园新版演示库")
+    parser = argparse.ArgumentParser(description="建立医养管理平台演示库")
     parser.add_argument("--db", required=True, type=Path)
     args = parser.parse_args()
     if args.db.exists():

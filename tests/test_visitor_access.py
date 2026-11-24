@@ -12,6 +12,15 @@ class VisitorAccessTests(TestCase):
         self.addCleanup(directory.cleanup)
         self.store = Store(Path(directory.name) / "tour.sqlite3", initial_owner_password="visitor-test-only")
 
+    def test_public_branding_defaults_are_generic_and_preserve_configured_names(self):
+        self.assertEqual(self.store.branding(), {
+            "brandName": "医养管理平台", "institutionName": "养老机构",
+        })
+        token, _ = self.store.login("owner", "visitor-test-only")
+        settings = {"brandName": "示例照护平台", "institutionName": "示例照护中心"}
+        self.store.execute("access.settings", settings, self.store.version(token)["revision"], token)
+        self.assertEqual(Store(self.store.path).branding(), settings)
+
     def test_demo_verification_is_one_time_and_not_a_workspace_session(self):
         phone = {"phone": "13900000000"}
         with self.assertRaisesRegex(ValueError, "暂未开通"):

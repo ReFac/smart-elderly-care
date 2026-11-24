@@ -14,12 +14,14 @@ import { renderGateways } from './gateways.js';
 import { recentChanges } from './recent-changes.js';
 import { activityPage } from './activity.js';
 import { leadsPage } from './leads.js';
+import { renderFaqPage } from './faq.js';
 
 import { roomsPage, tourPage } from './rooms.js';
 
 const features = {
   leads: leadsPage,
   account: accountCenter,
+  faq: renderFaqPage,
   rooms: roomsPage,
   tour: tourPage,
   access: (ctx) => renderAccess('access', ctx),

@@ -42,7 +42,7 @@ export function networkControl({ probe, changed }) {
       if (controller.signal.aborted) return;
       if (result?.connected !== true) throw new Error('搜索服务未连接，请重试。');
       enabled = true;
-      status.textContent = '已连接，可搜索公开资料。请勿输入个人信息。';
+      status.textContent = '已连接，可查养老运营、长护险、照护和相关医疗的公开资料。';
     } catch (error) {
       if (controller.signal.aborted) return;
       status.textContent = error.status

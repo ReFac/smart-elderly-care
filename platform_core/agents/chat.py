@@ -8,18 +8,20 @@ import re
 from urllib.error import HTTPError, URLError
 from uuid import uuid4
 
-from .. import access_policy as policy, provider
+from .. import access_policy as policy, faq, provider
 from ..provider import deepseek, token_receipt
 from ..store import Conflict, SignedOut
 from . import chat_context as ctx
-from . import chat_navigation, chat_web, react, view_filters, ward_brief
+from . import chat_navigation, chat_scope, chat_web, react, view_filters, ward_brief
 
 CONTEXT_LIMIT = 100_000
+MEMORY_TURNS = 5
 OUTPUT_LIMIT = 1800
 CONTEXT_PAD = 512
 PENDING_SECONDS = 150
 
-SYSTEM = """你是安康医养平台的中文健康助理。像一位熟悉院务的同事一样直接对话。
+SYSTEM = """你是医养管理平台的中文健康助理。像一位熟悉院务的同事一样直接对话。
+只回答平台操作、养老行业与机构运营、老年照护、长护险和相关医疗知识。对其他主题简短说明范围，请用户改问相关业务。医疗答复仅作科普与照护参考，不作个体诊断或处方。
 只依据本次可见资料回答院内事实，区分当前快照、按日工单、精确起止时间内的变动。账单单位是笔，不可换算成人。没有变动记录不能据此断言一切平稳。用中文业务名称解释。
 询问单人间、双人间等房型时使用“实查房型”的匹配数和房号。启用床位数指房型容量，结合已入住床数后才可说明空余数量。房型与平面图改动均须由经办人进入有权打开的页面核对保存。
 询问院内流水、今日的财、营收或新增款时，直接引用“到账与欠款（元）”的本月流水、今日实收和截至今日待缴余额，写出元，零也写 0 元。实收含预缴，问利润或确认收入时需解释口径。只有用户询问账单笔数时才提供账单笔数。
@@ -59,17 +61,21 @@ def init(db):
     )
 
 
-def rows(db, actor, scope, generation):
+def rows(db, actor, scope, generation, limit):
     return db.execute(
         """SELECT request,asked,answered,question,answer,action,hours,web_sources FROM assistant_turns
-        WHERE actor=? AND scope=? AND generation=? ORDER BY seq DESC""",
-        (actor, scope, generation),
+        WHERE actor=? AND scope=? AND generation=? ORDER BY seq DESC LIMIT ?""",
+        (actor, scope, generation, limit),
     )
 
 
-def messages(db, actor, scope, generation, limit, pages=None, area=None):
+def messages(db, actor, scope, generation, limit, pages=None, area=None, *, memory=False):
     turns = []
-    for row in rows(db, actor, scope, generation):
+    for row in rows(db, actor, scope, generation, MEMORY_TURNS if memory else -1):
+        action = json.loads(row["action"]) if row["action"] else None
+        declined = action and action.get("kind") == "scopeRefusal"
+        if memory and declined:
+            continue
         pair = [
             {"role": "user", "content": row["question"], "at": row["asked"]},
             {
@@ -77,7 +83,7 @@ def messages(db, actor, scope, generation, limit, pages=None, area=None):
                 "content": row["answer"],
                 "requestId": row["request"],
                 "at": row["answered"],
-                "action": json.loads(row["action"]) if row["action"] else None,
+                "action": action,
                 "webSearched": row["web_sources"] is not None,
                 "sources": json.loads(row["web_sources"]) if row["web_sources"] else [],
             },
@@ -92,6 +98,10 @@ def messages(db, actor, scope, generation, limit, pages=None, area=None):
         previous = []
         for question, answer in chronological:
             action = answer["action"] or {}
+            if action.get("kind") == "scopeRefusal":
+                answer.update(action=None, pageLinks=[])
+                previous = []
+                continue
             if "filterLinks" in action:
                 # Keep a missing or unauthorized match from becoming an unfiltered page.
                 links = action["filterLinks"] if any(p.route == "beds" for p in pages) else []
@@ -103,6 +113,16 @@ def messages(db, actor, scope, generation, limit, pages=None, area=None):
                 if not links and action.get("kind") == "navigate":
                     answer["action"] = None
                 continue
+            if "faqLinks" in action:
+                links = faq.links(action["faqLinks"]) if any(p.route == "faq" for p in pages) else []
+                if action.get("kind") != "navigate" or not links:
+                    answer["action"] = None
+                if action.get("faqExplicit") or links:
+                    previous = [chat_navigation.Page(
+                        "faq", item["title"], params=tuple(item.get("params", {}).items()),
+                    ) for item in links]
+                    answer["pageLinks"] = links
+                    continue
             previous = (
                 []
                 if answer["webSearched"]
@@ -138,6 +158,7 @@ def view(db, uid, scope, thread, pages, area=None):
     return {
         "scopeKey": scope,
         "contextLimit": CONTEXT_LIMIT,
+        "memoryTurns": MEMORY_TURNS,
         "generation": thread["generation"] if thread else "",
         "messages": messages(db, uid, scope, thread["generation"], CONTEXT_LIMIT, pages, area)
         if thread
@@ -239,7 +260,7 @@ def permitted_actions(user, routes, text, selected):
         + r"(?:打开|带我去|去|进入|跳转|定位|办理|创建|新建|登记|查看.{0,10}(?:界面|页面)|找.{0,10}(?:页面|界面))",
         text,
     ):
-        if "入住" in text and "床位" not in text and "试住" not in text:
+        if "入住" in text and not any(label in text for label in ("床位", "试住", "入住管理", "入住名册")):
             return {"intake": "navigate"} if "intake" in routes else {}
         return {route: "navigate" for route in routes}
     return {}
@@ -259,6 +280,7 @@ def build_body(
     text,
     *,
     web_enabled=False,
+    include_history=True,
 ):
     envelope = {
         "本次可见资料": facts,
@@ -283,7 +305,7 @@ def build_body(
     remaining = budget - len(ctx.compact(prompt()).encode())
     if remaining < 0:
         raise ValueError("本次可见资料过多，请选择较小区域")
-    previous = messages(db, user["id"], scope, generation, remaining)
+    previous = messages(db, user["id"], scope, generation, remaining, memory=True) if include_history else []
     transcript = [{"role": p["role"], "content": p["content"]} for p in previous]
     envelope["对话上文"] = transcript
     while len(ctx.compact(prompt()).encode()) > budget and transcript:
@@ -376,6 +398,18 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
     now = store.now()
     area = data.get("region")
     receipt = "chat/" + request
+
+    def save_turn(db, answer, action, sources=None):
+        db.execute(
+            """INSERT INTO assistant_turns(actor,scope,generation,request,fingerprint,asked,answered,question,answer,action,hours,web_sources,voice_receipt)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                uid, scope, generation, request, fingerprint, now.isoformat(),
+                store.now().isoformat(), text, answer, ctx.compact(action) if action else None,
+                hours, ctx.compact(sources) if sources is not None else None, voice_receipt,
+            ),
+        )
+
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
         user, scope, routes, state, selected, thread = conversation(
@@ -404,6 +438,14 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
         if speak:
             signature.append(voice_receipt)
         fingerprint = sha256(ctx.compact(signature).encode()).hexdigest()
+        saved = db.execute(
+            "SELECT fingerprint FROM assistant_turns WHERE actor=? AND request=?",
+            (uid, request),
+        ).fetchone()
+        if saved:
+            if saved[0] != fingerprint:
+                raise Conflict("该发送编号已用于其他内容")
+            return view(db, uid, scope, thread, pages, selected)
         previous = db.execute(
             "SELECT fingerprint FROM api_usage WHERE actor=? AND request=?",
             (uid, receipt),
@@ -411,11 +453,6 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
         if previous:
             if previous[0] != fingerprint:
                 raise Conflict("该发送编号已用于其他内容")
-            if db.execute(
-                "SELECT 1 FROM assistant_turns WHERE actor=? AND request=?",
-                (uid, request),
-            ).fetchone():
-                return view(db, uid, scope, thread, pages, selected)
             raise Conflict("上次发送正在处理或未能取得答复，请刷新后重试")
         if "generation" in data and data["generation"] != previous_generation:
             raise Conflict("已开启新对话，请重新查看后发送")
@@ -429,11 +466,46 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
         ):
             raise Conflict("上一条消息仍在答复中")
         last = db.execute(
-            """SELECT hours,question FROM assistant_turns WHERE actor=? AND scope=? AND generation=?
+            """SELECT hours,question,action FROM assistant_turns WHERE actor=? AND scope=? AND generation=?
             ORDER BY seq DESC LIMIT 1""",
             (uid, scope, generation),
         ).fetchone()
-        hours = requested_hours(text, data.get("hours"), last[0] if last else None)
+        if last and last["action"] and json.loads(last["action"]).get("kind") == "scopeRefusal":
+            last = None
+        hours = requested_hours(text, data.get("hours"), last["hours"] if last else None)
+        topics = text
+        if (
+            last
+            and len(text) <= 20
+            and re.fullmatch(
+                r"(?:那|他们|这些|其中|还有|有几|哪些|多少|继续|详细|再说|再看|过去|最近|能展开|为什么|有变化).{0,12}[呢吗？?]?",
+                text,
+            )
+        ):
+            topics += " " + last["question"]
+        faq_request = faq.intent(text, last["question"] if last else "")
+        if faq_request and not faq_request["explicit"] and chat_navigation.local_question(text):
+            faq_request = None
+        actions = chat_navigation.navigation_actions(
+            permitted_actions(user, routes, text, selected), text, pages
+        )
+        if faq_request:
+            actions = {}
+        requested_filters = None if faq_request else view_filters.request(text, page, last["question"] if last else "")
+        if requested_filters is not None:
+            filter_links, open_filtered = (
+                view_filters.resolve(db, state, user, requested_filters, selected)
+                if "beds" in routes else ([], False)
+            )
+            actions = {}
+
+        brief = ward_brief.topic(text) if faq_request is None and requested_filters is None and not actions and user["kind"] in ("owner", "staff") else ""
+        if chat_scope.obvious_unrelated(text) or not (
+            faq_request or requested_filters is not None or brief or chat_navigation.local_question(text)
+            or chat_scope.conversation_subject(text, last["question"] if last else "")
+        ):
+            save_turn(db, chat_scope.REFUSAL, {"kind": "scopeRefusal"})
+            return view(db, uid, scope, thread, pages, selected)
         plan, model = provider.latest(db), provider.model_name()
         if (
             not plan
@@ -447,29 +519,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             key = provider.read_key()
         except (OSError, ValueError):
             raise Unavailable("机构的 DeepSeek 服务尚未配置，请联系管理员") from None
-        topics = text
-        if (
-            last
-            and len(text) <= 20
-            and re.fullmatch(
-                r"(?:那|他们|这些|其中|还有|有几|哪些|多少|继续|详细|再说|再看|过去|最近|能展开|为什么|有变化).{0,12}[呢吗？?]?",
-                text,
-            )
-        ):
-            topics += " " + last["question"]
-        actions = chat_navigation.navigation_actions(
-            permitted_actions(user, routes, text, selected), text, pages
-        )
-        requested_filters = view_filters.request(text, page, last["question"] if last else "")
-        if requested_filters is not None:
-            filter_links, open_filtered = (
-                view_filters.resolve(db, state, user, requested_filters, selected)
-                if "beds" in routes else ([], False)
-            )
-            actions = {}
-
-        brief = ward_brief.topic(text) if requested_filters is None and not actions and user["kind"] in ("owner", "staff") else ""
-        feature = "assistant." + (brief or "chat")
+        feature = "assistant." + ("faq" if faq_request else brief or "chat")
         if actions.get("care") == "medicationRound":
             feature = "assistant.medication"
         elif actions.get("care") == "scheduledMeal":
@@ -479,7 +529,12 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
 
         def private_body(db, state):
             nonlocal lookup_actions
-            facts = ctx.evidence(store, db, user, state, selected, hours, topics)
+            if faq_request:
+                facts = {"公开常见问题": [
+                    {"问题": entry.question, "已核对说明": entry.answer} for entry in faq_request["items"]
+                ]}
+            else:
+                facts = ctx.evidence(store, db, user, state, selected, hours, topics)
             if requested_filters is not None:
                 facts["床位页面筛选结果"] = [entry["title"] for entry in filter_links]
             if brief:
@@ -488,12 +543,12 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                     "model": model, "thinking": {"type": "disabled"}, "stream": False,
                     "max_tokens": 128, "response_format": {"type":"json_object"},
                     "messages": [
-                        {"role":"system", "content":'你是安康医养平台的健康助理。按用户问题选出最应先讲的已核对事实。返回 JSON {"first":编号}，编号从 1 开始。不能增改事实或执行写入。'},
+                        {"role":"system", "content":'你是医养管理平台的健康助理。按用户问题选出最应先讲的已核对事实。返回 JSON {"first":编号}，编号从 1 开始。不能增改事实或执行写入。'},
                         {"role":"user", "content":ctx.compact({"当前问题":text, "事实":dict(enumerate(lines,1))})},
                     ],
                 }
             explicit_lookup = re.search(r"调用工具|用工具|核[对实]最新|查最新|重新查|实时核对|查询工具", topics)
-            if (requested_filters is None and not actions and not web_enabled and ctx.institution_access(user)
+            if (faq_request is None and requested_filters is None and not actions and not web_enabled and ctx.institution_access(user)
                 and (progress is None or explicit_lookup)):
                 lookup_actions = react.chat_actions(facts, read_latest, topics)
             body = build_body(
@@ -509,11 +564,17 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                 page,
                 text,
                 web_enabled=web_enabled,
+                include_history=faq_request is None,
             )
             if lookup_actions:
                 body["tools"] = [action.function() for action in lookup_actions]
                 body["tool_choice"] = "auto"
                 body["messages"][0]["content"] += "\n可按需要调用已授权工具，复核最新的记录再回答。"
+            if faq_request:
+                body["messages"][0]["content"] += (
+                    "\n只根据本轮提供的公开常见问题回答。说明适用的操作步骤，"
+                    "不推断本机构的记录、实际授权、已办结果或当地政策。无法据条目回答时如实说明。"
+                )
             return body
 
         def read_latest():
@@ -525,6 +586,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
 
         consider_search = (
             web_enabled
+            and faq_request is None
             and requested_filters is None
             and not brief
             and not chat_navigation.local_question(text)
@@ -609,30 +671,29 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                 )
                 with closing(store.connect()) as db, db:
                     db.execute("BEGIN IMMEDIATE")
-                    visible = current_search_state(db)
+                    current_search_state(db)
                     available = (
                         provider.latest(db)["tokenLimit"]
                         - sum(provider.usage(db, plan["id"]))
                         + allowance
                     )
-                    if network is not None:
-                        feature = "assistant.webAnswer"
-                        topic, hits = network
-                        actions = {}
+                    if network is None:
+                        raise chat_web.UnverifiedTopic
+                    feature = "assistant.webAnswer"
+                    topic, hits = network
+                    actions = {}
+                    body = chat_web.public_body(
+                        model, topic, hits, OUTPUT_LIMIT, now
+                    )
+                    while len(hits) > 1 and token_allowance(body) > available:
+                        hits = hits[:-1]
                         body = chat_web.public_body(
                             model, topic, hits, OUTPUT_LIMIT, now
                         )
-                        while len(hits) > 1 and token_allowance(body) > available:
-                            hits = hits[:-1]
-                            body = chat_web.public_body(
-                                model, topic, hits, OUTPUT_LIMIT, now
-                            )
-                        sources = [
-                            {"title": item["title"], "url": item["url"]}
-                            for item in hits
-                        ]
-                    else:
-                        body = private_body(db, visible)
+                    sources = [
+                        {"title": item["title"], "url": item["url"]}
+                        for item in hits
+                    ]
                     allowance = token_allowance(body)
                     if allowance > available:
                         raise chat_web.SearchFailure(
@@ -657,7 +718,9 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                 ) from None
         if transport:
             response = transport(key, body)
-        elif progress and requested_filters is None and not (lookup_actions or brief or actions or sources is not None):
+        elif progress and requested_filters is None and not (
+            lookup_actions or brief or actions or sources is not None or faq_request and faq_request["mode"] == "list"
+        ):
             response = deepseek.stream(key, body, progress.delta)
         else:
             response = deepseek.send(key, body, timeout=60)
@@ -706,6 +769,15 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                 answer = "有多个符合条件的范围，请选择要打开的楼栋或楼层。"
             else:
                 answer = "当前授权范围内没有匹配的筛选条件。请核对院区、楼栋或楼层名称。"
+        if faq_request:
+            ids = [entry.id for entry in faq_request["items"]]
+            action = {"kind": "faqReference", "faqLinks": ids, "faqExplicit": faq_request["explicit"]}
+            if faq_request["open"] and "faq" in routes:
+                destination = faq.links(ids[:1]) if len(ids) < 2 else faq.links([])
+                action.update(destination[0], kind="navigate")
+                action["faqLinks"] = ids if len(ids) < 2 else []
+            if faq_request["mode"] == "list":
+                answer = "常见问题可以按类别浏览，也可以搜索来访、入住、照护和平台操作。"
         if sources is not None:
             answer = chat_web.public_response(answer, sources)
             if not answer:
@@ -716,6 +788,9 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             progress.complete(answer)
         result = (answer, action)
         status = "ok"
+    except chat_web.UnverifiedTopic:
+        # An unsafe or unrecognized search topic never falls back to private evidence.
+        result, status = (chat_scope.NO_TOPIC, {"kind": "scopeRefusal"}), "closed"
     except chat_web.SearchFailure as err:
         # No synthesis was sent. Topic-selection tokens and the search call have their own receipts.
         status, failure, rejected = "closed", str(err), True
@@ -786,25 +861,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             ):
                 current_scope = None
             if current_scope == scope:
-                db.execute(
-                    """INSERT INTO assistant_turns(actor,scope,generation,request,fingerprint,asked,answered,question,answer,action,hours,web_sources,voice_receipt)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (
-                        uid,
-                        scope,
-                        generation,
-                        request,
-                        fingerprint,
-                        now.isoformat(),
-                        store.now().isoformat(),
-                        text,
-                        answer,
-                        ctx.compact(action) if action else None,
-                        hours,
-                        ctx.compact(sources) if sources is not None else None,
-                        voice_receipt,
-                    ),
-                )
+                save_turn(db, *result, sources)
                 return view(db, uid, scope, current, pages, selected)
     if result:
         raise Conflict("当前账号权限或区域已变化，请重新打开助理")

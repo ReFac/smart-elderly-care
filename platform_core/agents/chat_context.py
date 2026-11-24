@@ -12,7 +12,7 @@ from . import chat_navigation, region, revenue, ward_brief
 ROUTES = {
     "overview": "运营总览",
     "intake": "老人入住",
-    "residents": "长者档案",
+    "residents": "入住管理",
     "beds": "床位管理及平面图",
     "dossier": "个人与医疗档案",
     "assessments": "能力评估",
@@ -32,6 +32,7 @@ ROUTES = {
     "account": "个人中心",
     "tour": "环境导览",
     "family": "家属服务",
+    "faq": "常见问题",
 }
 
 

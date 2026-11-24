@@ -141,7 +141,7 @@ def open_package(store, token, packet):
             or len(packet) < len(MAGIC) + 28
             or not packet.startswith(MAGIC)
         ):
-            raise ValueError("请选择安康医养平台导出的 .akdoc 文件")
+            raise ValueError("请选择医养管理平台导出的 .akdoc 文件")
         if not db.execute(
             "SELECT 1 FROM protected_documents WHERE packet_hash=?",
             (sha256(packet).digest(),),

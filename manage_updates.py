@@ -25,7 +25,7 @@ def build(version, output, keyfile, notes):
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError("发布私钥须为 Ed25519")
     output.mkdir(parents=True, mode=0o700, exist_ok=False)
-    archive = output / ("ankang-" + version + ".zip")
+    archive = output / ("elderly-care-" + version + ".zip")
     with ZipFile(archive, "x", ZIP_DEFLATED, compresslevel=6) as package:
         package.write(ROOT / "server.py", "server.py")
         for entry in ("platform_core", "web"):

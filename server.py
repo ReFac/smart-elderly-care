@@ -222,6 +222,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(200, raw, mime)
         if path in ("/visit", "/visit/"):
             return self.respond(200, (WEB / "visit.html").read_bytes(), "text/html; charset=utf-8")
+        if path in ("/faq", "/faq/"):
+            return self.respond(200, (WEB / "faq.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/api/public/faq":
+            from platform_core import faq
+
+            return self.send_json(200, faq.read())
         if path in ("/roomtour", "/roomtour/", "/visit/roomtour"):
             return self.respond(200, (WEB / "roomtour.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/api/public/visitor/status":
@@ -1002,7 +1008,7 @@ def dispatch_updates(service, stopped):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="安康医养平台 · 机构工作台")
+    parser = argparse.ArgumentParser(description="医养管理平台 · 机构工作台")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(
         "--db", type=Path, default=ROOT / ".local" / "workspace.sqlite3"
@@ -1082,7 +1088,7 @@ def serve_institution(args, origin, initial_password):
 
         startup = Thread(target=start_services, name="institution-startup", daemon=True)
         startup.start()
-        print(f"安康医养平台已启动  http://127.0.0.1:{server.server_port}", flush=True)
+        print(f"医养管理平台已启动  http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

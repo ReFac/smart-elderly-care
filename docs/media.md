@@ -1,6 +1,6 @@
 # DeepSeek 文书识别与语音转写
 
-安康医养平台从机构服务端调用 DeepSeek 官方 OCR 和 ASR。两个工具分别按成功识别页数、音频时长计费。部署方维护 DeepSeek 凭据，院方总管理员控制开关并查看已用和预留额度。终端无需配置 API key。[官方 OCR 文档](https://api-docs.deepseek.com/guides/ocr/) · [官方 ASR 文档](https://api-docs.deepseek.com/guides/asr/)
+平台从机构服务端调用 DeepSeek 官方 OCR 和 ASR。两个工具分别按成功识别页数、音频时长计费。部署方维护 DeepSeek 凭据，院方总管理员控制开关并查看已用和预留额度。终端无需配置 API key。[官方 OCR 文档](https://api-docs.deepseek.com/guides/ocr/) · [官方 ASR 文档](https://api-docs.deepseek.com/guides/asr/)
 
 ## 开通
 
@@ -22,8 +22,6 @@ python3 manage_plan.py --db .local/workspace.sqlite3 status
 服务主机需安装 Poppler 的 `pdfinfo` 和 `pdftoppm`（Debian 或 Ubuntu 的 `poppler-utils`），分别用于核页和逐页生成预览。医疗原件在内存中交给这两个程序。PDF 的原件下载、页面预览都检查医疗查阅权限及分院归属。复核人可按页比对文字、位置框和原件，逐页确认，回填凭证保留具体页码与行号。
 
 `dossier.ocr` 接受 `residentId`、`documentId` 或 `imageHash` 及布尔值 `consent: true`。服务端以本人的医疗写入授权和长者所在分院核对原件。返回文字及供应商提供的位置框；无位置的文字按原文展示。失败时可以查看原图后手工录入。具备医疗查阅、医疗写入和临床权限的人员核对姓名、原文和待改字段，再签认一次性概括。再次查看、核对或读取已归档的结果均在本地完成。既有档案的原件、识别结果与签署来源继续可读。
-
-[查看第 6 页 OCR 复核实拍](previews/ocr-multipage.jpg)
 
 ## 在任一业务页说话
 

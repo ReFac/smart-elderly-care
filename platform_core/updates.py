@@ -156,7 +156,7 @@ class ReleaseSource:
             raise UpdateError("机构更新源与发布公钥尚未配置")
         normalized_origin(url)
         try:
-            return self.transport(Request(url, headers={"User-Agent": "Ankang-Platform-Updates"}), timeout=timeout)
+            return self.transport(Request(url, headers={"User-Agent": "ElderlyCare-Platform-Updates"}), timeout=timeout)
         except (URLError, OSError) as error:
             raise UpdateError("访问机构更新源失败，请核对网络与发布配置") from error
 

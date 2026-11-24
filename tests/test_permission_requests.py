@@ -174,7 +174,7 @@ class PermissionRequestsTests(unittest.TestCase):
             requests.EDIT,
             requestId=grant,
             name="登记姓名已核对",
-            address="汝州市测试地址",
+            address="示例城区测试地址",
         )
         self.assertEqual(self.queue(self.worker)["sent"][0]["status"], "used")
         with self.assertRaises(PermissionError):

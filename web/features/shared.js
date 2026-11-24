@@ -360,6 +360,10 @@ export function selectTab(route, key) {
   selectedTabs.set(route, key);
 }
 
+export function currentTab(route) {
+  return selectedTabs.get(route);
+}
+
 export function tabs(route, choices) {
   let selected = selectedTabs.get(route);
   if (!choices.some((item) => item[0] === selected)) selected = choices[0][0];

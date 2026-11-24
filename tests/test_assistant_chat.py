@@ -328,7 +328,14 @@ class ChatTests(unittest.TestCase):
             "可见办理入口（页面及分页签）"
         ]
         self.assertIn("长护险经办台账", guide["长期护理保险"][0])
-        self.assertIn("档案名册", " ".join(guide["长者档案"]))
+        self.assertIn("入住管理名册", " ".join(guide["入住管理"]))
+
+    def test_opens_the_named_admission_workbench(self):
+        self.transport.return_value = result(kind="navigate", route="residents")
+        reply = self.ask("打开入住管理")["messages"][-1]
+        self.assertEqual(reply["action"]["kind"], "navigate")
+        self.assertEqual(reply["action"]["route"], "residents")
+        self.assertIn({"route": "residents", "title": "入住管理"}, reply["pageLinks"])
 
     def test_internal_destination_unavailable_to_employee_stays_off_public_network(
         self,
@@ -348,9 +355,10 @@ class ChatTests(unittest.TestCase):
 
     def test_how_to_links_to_real_pages_and_tabs_without_opening_a_form(self):
         cases = [
+            ("入住管理在哪里？", "residents", None),
             ("在哪里办理老人入住？", "residents", "all"),
             ("哪里办理试住？", "residents", "trials"),
-            ("我的试住回访入口在哪里？", "residents", "trials"),
+            ("我的试住回访入口在哪里？", "residents", "followups"),
             ("试住默认价在哪里修改？", "settings", "trials"),
             ("在哪里核算月付账单？", "billing", "due"),
             ("我想按平面图选床，该从哪里进入？", "beds", "plan"),
@@ -447,11 +455,11 @@ class ChatTests(unittest.TestCase):
                 db.execute("SELECT status FROM api_usage").fetchone()[0], "uncertain"
             )
         self.transport.side_effect = None
-        self.ask("再次询问", "retry")
+        self.ask("我想再次查物资库存", "retry")
         with closing(self.store.connect()) as db, db:
             provider.disable(db)
         with self.assertRaises(chat.Unavailable):
-            self.ask("没有额度", "noplan")
+            self.ask("查看今天的护理用具库存", "noplan")
         self.assertEqual(self.transport.call_count, 2)
         with self.assertRaises(SignedOut):
             chat.read(self.store, "invalid")
@@ -532,8 +540,7 @@ class ChatTests(unittest.TestCase):
         self.assertFalse(chat.read(self.store, self.owner)["messages"])
 
     def test_token_budget_discards_whole_oldest_turns_and_keeps_latest(self):
-        # Fill the synthetic thread without paying for additional provider calls.
-        first = self.ask("第一轮")
+        first = self.ask("第一轮问物资库存")
         with closing(self.store.connect()) as db, db:
             actor = self.store.actor(db, self.owner)["id"]
             for index in range(14):
@@ -546,16 +553,17 @@ class ChatTests(unittest.TestCase):
                         first["generation"],
                         f"fill{index}",
                         "demo",
-                        f"问题{index}",
-                        "库存依据" * 800,
+                        f"物资问题{index}",
+                        "库存依据" * 2500,
                     ),
                 )
         self.ask("继续", "last")
         body = self.transport.call_args.args[1]
         prompt = json.loads(body["messages"][-1]["content"])
         self.assertGreater(len(prompt["对话上文"]), 2)
-        self.assertEqual(prompt["对话上文"][-2]["content"], "问题13")
-        self.assertNotIn("第一轮", [m["content"] for m in prompt["对话上文"]])
+        self.assertEqual(prompt["对话上文"][-2]["content"], "物资问题13")
+        self.assertNotIn("第一轮问物资库存", [m["content"] for m in prompt["对话上文"]])
+        self.assertLess(len(prompt["对话上文"]), 2 * chat.MEMORY_TURNS)
         self.assertEqual(len(prompt["对话上文"]) % 2, 0)
         self.assertLessEqual(
             len(chat.ctx.compact(body["messages"]).encode())
@@ -563,6 +571,21 @@ class ChatTests(unittest.TestCase):
             + chat.CONTEXT_PAD,
             100000,
         )
+
+    def test_provider_remembers_five_turns_and_never_reinjects_refused_content(self):
+        questions = [f"第 {i} 轮，查已授权的物资记录" for i in range(7)]
+        for i, question in enumerate(questions):
+            self.ask(question, f"turn-{i}")
+        self.ask("再看物资", "last-allowed")
+        history = json.loads(self.transport.call_args.args[1]["messages"][-1]["content"])["对话上文"]
+        self.assertEqual([m["content"] for m in history if m["role"] == "user"], questions[-5:])
+        refused = "拒答测试标识：电脑什么配置比较好"
+        out_of_scope = self.ask(refused, "off-topic")
+        self.assertEqual(out_of_scope["memoryTurns"], 5)
+        self.assertGreater(len(out_of_scope["messages"]), 10)
+        self.ask("继续查仓库", "next")
+        history = json.loads(self.transport.call_args.args[1]["messages"][-1]["content"])["对话上文"]
+        self.assertEqual([m["content"] for m in history if m["role"] == "user"], [*questions[-3:], "再看物资"])
 
     def test_reset_during_transport_discards_reply_and_settles_usage(self):
         def resetting(key, body):

@@ -12,7 +12,7 @@ from platform_core.provider import media, search_usage
 
 
 def main():
-    parser = argparse.ArgumentParser(description="安康医养平台 · 平台运营方套餐管理")
+    parser = argparse.ArgumentParser(description="医养管理平台 · 运营方套餐管理")
     parser.add_argument(
         "--db", type=Path, required=True, help="该机构的现有工作区数据库"
     )

@@ -158,7 +158,7 @@ export function healthDesk(ctx, { vitalForm, inspectVital, resolveVital }) {
         node('div', '', [node('dt', '', '巡查简报'), node('dd', '', '长者授权后由家属订阅站内简报')]),
       ]),
       canShareConsent && canViewResidents
-        ? action(ctx, '到长者档案核对分享授权', () => ctx.go('residents','all'))
+        ? action(ctx, '到入住管理核对分享授权', () => ctx.go('residents','all'))
         : null,
     ]);
     panels.append(panel(ctx, '家属查阅范围', 'people', body,

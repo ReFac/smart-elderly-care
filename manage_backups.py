@@ -72,7 +72,7 @@ def install_timer(db_path, environment=None):
     ident = sha256(str(db_path.resolve()).encode()).hexdigest()[:12]
     name = "ankang-backup-" + ident
     spec = {
-        "service": "[Unit]\nDescription=Ankang encrypted business snapshots\n[Service]\nType=oneshot\nUMask=0077\n"
+        "service": "[Unit]\nDescription=Encrypted elderly care snapshots\n[Service]\nType=oneshot\nUMask=0077\n"
         + env_line
         + "ExecStart="
         + exe
@@ -81,7 +81,7 @@ def install_timer(db_path, environment=None):
         + " --db "
         + unit_arg(db_path.resolve())
         + " run-due\n",
-        "timer": "[Unit]\nDescription=Ankang daily backup clock\n[Timer]\nOnCalendar=*-*-* 00:00:00 Asia/Shanghai\nOnStartupSec=2min\nOnUnitInactiveSec=15min\nAccuracySec=1s\nPersistent=true\n[Install]\nWantedBy=timers.target\n",
+        "timer": "[Unit]\nDescription=Daily elderly care backup schedule\n[Timer]\nOnCalendar=*-*-* 00:00:00 Asia/Shanghai\nOnStartupSec=2min\nOnUnitInactiveSec=15min\nAccuracySec=1s\nPersistent=true\n[Install]\nWantedBy=timers.target\n",
     }
     for suffix, content in spec.items():
         file = config / (name + "." + suffix)
@@ -95,7 +95,7 @@ def install_timer(db_path, environment=None):
 
 
 def main():
-    p = argparse.ArgumentParser(description="安康医养加密快照与异地恢复")
+    p = argparse.ArgumentParser(description="医养管理平台加密快照与异地恢复")
     p.add_argument("--db", type=Path, default=ROOT / ".local/workspace.sqlite3")
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("run-due", help="补做本期完整快照并重试异地队列")

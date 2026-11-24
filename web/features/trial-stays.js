@@ -1,10 +1,9 @@
 import { admissionPayment } from './billing.js';
-import { residentAnchor, residentLabel, staffLabel } from './people-labels.js';
-import { allocate, billingSchedule, bindAdmissionDate, bindContractFields, contractFields, isTrial, monthlyDayField } from './admission.js';
+import { residentLabel, staffLabel } from './people-labels.js';
+import { billingSchedule, bindAdmissionDate, bindContractFields, contractFields, monthlyDayField } from './admission.js';
 import { admissionFinance, admissionFinanceFields } from './admission-fees.js';
-import { profile } from './residency.js';
 import { trialLength, trialTermFields } from './trial-terms.js';
-import { bedName, btn, canAct, choose, facts, field, link, memo, money, named, nextDay, node, section, select, table, today } from './shared.js';
+import { bedName, btn, canAct, facts, field, memo, money, nextDay, node, section, select, today } from './shared.js';
 
 export function confirmStay(ctx, person, targetBed = null) {
   const needsBed = !person.bedId;
@@ -75,29 +74,6 @@ export async function endTrial(ctx, person) {
   } catch (error) {
     ctx.toast(error.message);
   }
-}
-
-export function trialList(ctx) {
-  const rows = ctx.state.residents.filter(isTrial).sort((a, b) => (a.trialEndsAt || '').localeCompare(b.trialEndsAt || ''));
-  return table(ctx, {
-    title: '待确认入住的试住档案', rows,
-    empty: '当前没有试住中的长者。',
-    action: canAct(ctx, 'care.admit')
-      ? btn(ctx, '选择档案办理试住', () => allocate(ctx, null, null, 'trial'), 'primary') : null,
-    search: { placeholder: '搜索姓名或档案号', value: (r) => residentLabel(ctx, r) + ' ' + r.id },
-    cols: [
-      { label: '长者', view: (r) => node('div', 'fx-named', [residentAnchor(ctx, r), node('small', '', r.id)]) },
-      { label: '床位', view: (r) => r.bedId ? bedName(ctx, r.bedId) : '已到期退床 · 待决定' },
-      { label: '试住安排', view: (r) => named(r.trialDays ? trialLength(r.trialDays) : '试住',
-        [r.admittedAt, r.trialEndsAt].filter(Boolean).join(' 至 ')) },
-      { label: '一次性试住费', view: (r) => r.trialPrice == null ? '—' : money(r.trialPrice) },
-      { label: '操作', align: 'end', view: (r) => choose(
-        link(ctx, '档案', () => profile(ctx, r)),
-        canAct(ctx, 'care.confirmStay') ? link(ctx, '确认入住', () => confirmStay(ctx, r)) : null,
-        canAct(ctx, 'care.endTrial') ? link(ctx, '取消入住', () => endTrial(ctx, r)) : null,
-      ) },
-    ],
-  });
 }
 
 export function trialSettings(ctx) {

@@ -66,6 +66,7 @@ PRESETS["护士长"] = [*PRESETS["护士"], "care.groupConfirm", "care.schedule"
 # Empty grants is still a valid employee account.
 ROUTE_GRANTS = {
     "overview": (),
+    "faq": (),
     "history": (),
     "assistants": ("assistants",),
     "intake": ("intake",),
@@ -232,8 +233,8 @@ FACILITY_COMMANDS = (
     "facility.withdrawScene",
 )
 DEFAULT_UI = {
-    "brandName": "安康医养平台",
-    "institutionName": "安康家园",
+    "brandName": "医养管理平台",
+    "institutionName": "养老机构",
     "theme": "forest",
     "hiddenRoutes": [],
 }
@@ -277,7 +278,7 @@ def has_agent_domain(user):
 
 def resolve_routes(user):
     if user["kind"] == "family":
-        return ["family", "tour", "account"]
+        return ["family", "tour", "faq", "account"]
     routes = [
         route
         for route, grants in ROUTE_GRANTS.items()

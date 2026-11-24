@@ -11,7 +11,7 @@ export const groups = [
     '照护业务',
     [
       ['beds', '床位管理', 'bed'],
-      ['residents', '长者档案', 'people'],
+      ['residents', '入住管理', 'people'],
       ['dossier', '个人与医疗档案', 'folder'],
       ['assessments', '能力评估', 'assessment'],
       ['care', '照护服务', 'care'],
@@ -43,6 +43,7 @@ export const groups = [
     [
       ['family', '家属服务', 'people'],
       ['tour', '环境导览', 'building'],
+      ['faq', '常见问题', 'info'],
       ['account', '个人中心', 'people'],
     ],
   ],

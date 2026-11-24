@@ -17,6 +17,8 @@ import {
   page,
   table,
   tabs,
+  currentTab,
+  selectTab,
   kpis,
   field,
   memo,
@@ -40,7 +42,7 @@ import {
 } from './shared.js';
 import { openDossier } from './dossier.js';
 import { clinicalHistory } from './care-pathway.js';
-import { confirmStay, endTrial, trialList } from './trial-stays.js';
+import { confirmStay, endTrial } from './trial-stays.js';
 import { trialFollowups } from './trial-followups.js';
 import { trialLength } from './trial-terms.js';
 
@@ -314,39 +316,58 @@ export function intake(ctx) {
   return residents(ctx);
 }
 
+function renewalSection(ctx, open) {
+  if (!canAct(ctx, 'care.renew')) return null;
+  const rows = renewalReminders(ctx.state.residents);
+  const panel = disclosure('到期续住', table(ctx, {
+    title: '续住提醒',
+    rows,
+    empty: '当前没有需要核对的续住事项。',
+    search: { placeholder: '搜索长者姓名', value: (r) => residentLabel(ctx, r) },
+    cols: [
+      { label: '长者', view: (r) => residentAnchor(ctx, r) },
+      { label: '合同到期', view: (r) => r.endDate || '无期限' },
+      { label: '提醒原因', view: (r) => named(
+        renewalReasons[r.renewalReminder.reason], r.renewalReminder.at,
+      ) },
+      { label: '办理', align: 'end', view: (r) => r.endDate
+        ? link(ctx, '续住', () => renew(ctx, r))
+        : link(ctx, '查看入住资料', () => openDossier(ctx, r)) },
+    ],
+  }), rows.length);
+  panel.open = open;
+  return panel;
+}
+
 export function residents(ctx) {
-  const choices = [
-    ['all', '档案名册', () => node('div', 'fx-profile', [registry(ctx), historicInquiries(ctx)])],
-    ['trials', '试住管理', () => node('div', 'fx-page-stack', [trialList(ctx), trialFollowups(ctx)])],
-  ];
-  if (canAct(ctx, 'care.renew'))
-    choices.push([
-      'renew',
-      '到期续住',
-      () =>
-        table(ctx, {
-          title: '续住提醒',
-          rows: renewalReminders(ctx.state.residents),
-          empty: '当前没有需要核对的续住事项。',
-          search: { placeholder: '搜索长者姓名', value: (r) => residentLabel(ctx, r) },
-          cols: [
-            { label: '长者', view: (r) => residentAnchor(ctx, r) },
-            { label: '合同到期', view: (r) => r.endDate || '无期限' },
-            { label: '提醒原因', view: (r) => named(
-              renewalReasons[r.renewalReminder.reason], r.renewalReminder.at,
-            ) },
-            { label: '办理', align: 'end', view: (r) => r.endDate
-              ? link(ctx, '续住', () => renew(ctx, r))
-              : link(ctx, '查看入住资料', () => openDossier(ctx, r)) },
-          ]
-        })
-    ]);
+  const view = currentTab('residents');
+  const rows = ctx.state.trialFollowups || [];
+  const showFollowups = view === 'followups' || view === 'trials';
+  const followups = rows.length || showFollowups
+    ? disclosure('试住回访', trialFollowups(ctx), rows.filter(r => r.status === '待回访').length) : null;
+  if (followups) followups.open = showFollowups;
+  const renewal = renewalSection(ctx, view === 'renew');
+  const actions = choose(
+    canAct(ctx, 'care.admit') ? btn(ctx, '办理试住', () => allocate(ctx, null, null, 'trial')) : null,
+    canAct(ctx, 'care.register') ? btn(ctx, '新建长者档案', () => register(ctx), 'primary') : null,
+  );
+  const list = registry(ctx, {
+    workbenchStatus: view || 'pending',
+    onStatusChange: status => selectTab('residents', status),
+  });
   return page(
     ctx,
-    '长者档案',
+    '入住管理',
     '',
-    canAct(ctx, 'care.register') ? btn(ctx, '新建长者档案', () => register(ctx), 'primary') : null,
-    choices.length > 1 ? tabs('residents', choices) : choices[0][2]()
+    actions.childElementCount ? actions : null,
+    node('div', 'fx-profile', [
+      view === 'renew' ? renewal : null,
+      view === 'followups' ? followups : null,
+      list,
+      view !== 'followups' ? followups : null,
+      view !== 'renew' ? renewal : null,
+      historicInquiries(ctx),
+    ]),
   );
 }
 

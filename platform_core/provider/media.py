@@ -110,7 +110,7 @@ def reconcile(db, call, charged, now):
 
 
 def invoke(kind, raw, filename, mime, key):
-    boundary = "ankang-" + uuid4().hex
+    boundary = "elderly-care-" + uuid4().hex
     data = bytearray()
     if kind == "ocr":
         data.extend(

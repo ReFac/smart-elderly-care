@@ -94,7 +94,7 @@ export function formDialog({
       const custom = el('input');
       custom.type = 'text';
       custom.maxLength = field.maxLength || 40;
-      const otherValue = '__ankang_enter_label__';
+      const otherValue = '__custom_option__';
       input.add(new Option('其他人员或班组…', otherValue));
       const row = el('label', 'field');
       row.append(el('span', '', '其他人员或班组名称'), custom);

@@ -65,7 +65,7 @@ function signedOut() {
   closeMenu();
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   document.documentElement.removeAttribute('data-theme');
-  document.title = '登录 · ' + (branding.brandName || '安康医养平台');
+  document.title = '登录 · ' + (branding.brandName || '医养管理平台');
   root.replaceChildren(
     loginScreen(async (username, password) => {
       const response = await fetch('/api/auth/login', {
@@ -159,12 +159,13 @@ function go(destination, tab, onArrival, query) {
     return;
   }
   if (tab) selectTab(destination, tab);
-  if (query && destination === 'beds') {
+  if ((query && destination === 'beds') || destination === 'faq') {
     closeMenu();
-    reopenBedFilter();
+    if (destination === 'beds') reopenBedFilter();
     const params = new URLSearchParams(query);
     if (tab) params.set('tab', tab);
-    window.history.pushState(null, '', '#' + destination + '?' + params);
+    const search = params.toString();
+    window.history.pushState(null, '', '#' + destination + (search ? '?' + search : ''));
     render();
     window.scrollTo(0, 0);
     onArrival?.();
@@ -212,11 +213,21 @@ function getRoute() {
     requestAnimationFrame(() => { if (state) openChat(context); });
     return home;
   }
-  if ((original==='rooms' && available('beds')) || (original==='intake' && available('residents'))) {
-    const destination=original==='rooms'?'beds':'residents';
-    selectTab(destination,original==='rooms'?'plan':'all');
-    window.history.replaceState(null,'','#'+destination);
-    return destination;
+  if (original === 'rooms' && available('beds')) {
+    selectTab('beds', 'plan');
+    history.replaceState(null, '', '#beds');
+    return 'beds';
+  }
+  if (['residents', 'intake'].includes(original) && available('residents')) {
+    const knownTab = ['all', 'trials', 'renew', 'followups'].includes(tab);
+    if (knownTab) selectTab('residents', tab);
+    else if (original === 'intake') selectTab('residents', 'all');
+    if (original === 'intake' || knownTab) {
+      params.delete('tab');
+      const remaining = params.toString();
+      history.replaceState(history.state, '', '#residents' + (remaining ? '?' + remaining : ''));
+    }
+    return 'residents';
   }
   return original || landing();
 }
@@ -474,7 +485,7 @@ function searchDialog() {
       .filter(([id]) => !['rooms','intake'].includes(id) && available(id))
       .map(([id, r]) => ({
         label: r.label,
-        keywords: id + ' ' + r.group,
+        keywords: id + ' ' + r.group + (id === 'faq' ? ' 帮助中心 使用指南' : ''),
         icon: r.icon,
         meta: r.group,
         open: () => go(id),
@@ -596,7 +607,7 @@ function notices() {
   if (state.groupActivityDue)
     items.unshift(['集体活动待确认', state.groupActivityDue, 'care', 'groupLife']);
   if (myTrialFollowups().length)
-    items.unshift(['待我办理的试住回访', myTrialFollowups().length, 'residents', 'trials']);
+    items.unshift(['待我办理的试住回访', myTrialFollowups().length, 'residents', 'followups']);
   if (available('leads') && pendingLeadCalls(state))
     items.unshift(['意向客户待电话回访', pendingLeadCalls(state), 'leads', 'contacts']);
   if (available('billing') && todayBillingNotices())

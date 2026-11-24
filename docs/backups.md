@@ -1,6 +1,6 @@
 # 机构完整快照与异地恢复
 
-总管理员在「系统管理 → 机构设置 → 备份与恢复」办理加密文件的导入、导出、核验和恢复。恢复点按时间分页，分别标明定时、手工创建、文件导入、恢复前保护点与更新前保护点。[电脑端恢复点清单](previews/encrypted-backups.jpg) · [机构服务版本更新](updates.md)
+总管理员在「系统管理 → 机构设置 → 备份与恢复」办理加密文件的导入、导出、核验和恢复。恢复点按时间分页，分别标明定时、手工创建、文件导入、恢复前保护点与更新前保护点。[机构服务版本更新](updates.md)
 
 ## 导出和导入文件
 
@@ -10,7 +10,7 @@
 
 ## 应用与回退
 
-选择恢复点的「恢复」可核对业务差异。点击「应用到当前工作库」后再次确认，服务器验证本人、文件、机构、预览修订及有效期，先保存当前完整加密保护点，再在同一数据库事务内发布新的业务修订。如果核对后另有人提交，需重新打开预览。应用产生独立的变更记录并保存备注，旧记录继续可查。[隔离恢复预览](previews/backup-restore-preview.jpg)
+选择恢复点的「恢复」可核对业务差异。点击「应用到当前工作库」后再次确认，服务器验证本人、文件、机构、预览修订及有效期，先保存当前完整加密保护点，再在同一数据库事务内发布新的业务修订。如果核对后另有人提交，需重新打开预览。应用产生独立的变更记录并保存备注，旧记录继续可查。
 
 在线恢复覆盖照护及运营工作数据、机构结构、长者及亲属档案。当前有效的账号与授权、套餐用量、设备确认、审计和运行会话由原工作库持续管理。如果旧时间点会撤回已完成的护理、支付回执、用药、签认或原件，页面逐项列出冲突。涉及这类差异时，可将完整加密包恢复到独立目录进行查阅，流程见下方灾备命令。每份可独立恢复的完整包亦含当时的账号与授权。
 
@@ -39,7 +39,7 @@
 ```bash
 python3 manage_backups.py --db .local/workspace.sqlite3 run-due
 python3 manage_backups.py --db .local/workspace.sqlite3 install-timer
-systemctl --user list-timers 'ankang-backup-*'
+systemctl --user list-timers
 ```
 
 部署管理员可用 `loginctl enable-linger 服务账号` 允许用户定时器在注销后继续运行。定时器在北京时间零点触发，并每隔 15 分钟检查积压任务。应用线程和主机定时器共享同一份幂等记录。其他系统可用原生任务计划程序每 15 分钟以同一账号运行上述 `run-due`，系统按固定时段去重。机器断电、磁盘写满或网盘持续不可达时，记录的最近成功时间反映实际恢复能力。最近快照显示「尚未接入位置」表示当前只有本机副本。
@@ -59,10 +59,10 @@ systemctl --user list-timers 'ankang-backup-*'
 
 ```json
 {
-  "icloud": "apple:Ankang/Backups",
-  "115": "openlist:115/Ankang/Backups",
-  "baidu": "openlist:baidu/Ankang/Backups",
-  "offsite": "second-site:Ankang/Backups"
+  "icloud": "apple:Eldercare/Backups",
+  "115": "openlist:115/Eldercare/Backups",
+  "baidu": "openlist:baidu/Eldercare/Backups",
+  "offsite": "second-site:Eldercare/Backups"
 }
 ```
 

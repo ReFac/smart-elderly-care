@@ -104,7 +104,7 @@ def send_email(address, code):
         msg["From"], msg["To"], msg["Subject"] = (
             sender,
             address,
-            "安康医养 · 账号验证码",
+            "医养管理平台 · 账号验证码",
         )
         msg.set_content(
             f"验证码为 {code}，10 分钟内有效。如非本人操作，可忽略本邮件。请勿向他人提供验证码。"

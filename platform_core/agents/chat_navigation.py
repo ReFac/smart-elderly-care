@@ -28,7 +28,7 @@ class Page:
 # The model may name a page in prose. Only this application-owned directory supplies a route or tab.
 PAGES = (
     Page("overview", "运营总览", ("院务总览", "运营首页")),
-    Page("residents", "长者档案", ("老人档案", "档案名册")),
+    Page("residents", "入住管理", ("长者档案", "老人档案", "档案名册", "入住名册")),
     Page(
         "residents",
         "办理老人入住",
@@ -37,7 +37,8 @@ PAGES = (
         "intake",
     ),
     Page("residents", "到期续住", ("续住", "续签入住", "到期续租"), "renew", "intake"),
-    Page("residents", "试住管理", ("试住", "试住入住", "试住回访", "试住转正式"), "trials"),
+    Page("residents", "试住", ("试住管理", "试住入住", "试住转正式"), "trials"),
+    Page("residents", "试住回访", (), "followups"),
     Page("beds", "床位管理", ("病房管理", "床位")),
     Page("beds", "全部床位", ("床位列表", "床位名册"), "all"),
     Page("beds", "区域设置", ("护理区域", "护工职责", "照护区域", "楼栋分区"), "zones"),
@@ -106,6 +107,7 @@ PAGES = (
     Page("account", "个人中心", ("我的账户", "我的账号")),
     Page("tour", "环境导览", ("院内环境", "养老院环境", "院区环境", "全景导览")),
     Page("family", "家属服务", ("长者服务", "照护消息", "家属消息", "家属推送")),
+    Page("faq", "常见问题", ("FAQ", "faq", "帮助中心", "使用指南")),
 )
 
 WAYFINDING = re.compile(
@@ -184,7 +186,7 @@ def directory(pages):
     names = {p.route: p.title for p in pages if not p.tab}
     content = {title: [] for title in names.values()}
     notes = {
-        ("residents", "trials"): "试住管理（可选择档案办理试住、转正式，或结束试住并安排回访；指定员工在此填写报告）",
+        ("residents", "trials"): "入住管理的「试住」筛选（在同一张名册办理试住、转正式、离院和试住回访）",
         (
             "longCare",
             "",
@@ -192,7 +194,7 @@ def directory(pages):
         (
             "residents",
             "all",
-        ): "档案名册（下方的「办理老人入住」是直达此处的快捷入口，打开后选择已有长者档案办理入住）",
+        ): "入住管理名册（点击「办理老人入住」打开名册，再选择已有长者档案办理）",
         (
             "settings",
             "backups",

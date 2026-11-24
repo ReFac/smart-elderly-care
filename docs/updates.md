@@ -9,9 +9,9 @@ Owner 打开「机构设置 → 平台更新」查看当前版本，检查新版
 安装现有 Python 依赖。由部署人员把发布公钥配置为服务账号可读的本机文件，并把更新清单地址配置为机构信任的 HTTPS 地址。
 
 ~~~bash
-export NH_UPDATE_MANIFEST_URL=https://updates.example.org/ankang/latest.json
-export NH_UPDATE_PUBLIC_KEY_FILE=/etc/ankang/release-signing.pub
-python3 manage_updates.py run --db /srv/ankang/workspace.sqlite3 --port 8765
+export NH_UPDATE_MANIFEST_URL=https://updates.example.org/eldercare/latest.json
+export NH_UPDATE_PUBLIC_KEY_FILE=/etc/eldercare/release-signing.pub
+python3 manage_updates.py run --db /srv/eldercare/workspace.sqlite3 --port 8765
 ~~~
 
 使用生产域名时保留原有 `--public-origin` 参数。每个机构资料库仅运行一个托管服务。部署为 systemd 等服务时同时管理启动器及其子进程。业务库用原有路径和密钥，平台运维密库、异地位置和部署凭据继续由原服务账号管理。

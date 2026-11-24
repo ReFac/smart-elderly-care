@@ -66,7 +66,7 @@ async function reassign(ctx, row) {
 export function trialFollowups(ctx) {
   const rows = [...(ctx.state.trialFollowups || [])].reverse();
   return table(ctx, {
-    title: '试住回访', rows, empty: '暂无需要跟进的试住回访',
+    title: '回访记录', rows, empty: '暂无需要跟进的试住回访',
     filter: {
       label: '回访进度', all: '全部回访', options: ['待我回访', '待回访', '已回访'],
       initial: rows.some(r => mine(ctx, r)) ? '待我回访' : '',
