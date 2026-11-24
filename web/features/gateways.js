@@ -33,7 +33,7 @@ const choices = (obj) => Object.entries(obj).map(([value, label]) => ({ value, l
 const roomName = (bed) => bed.ward + ' / ' + bed.label.replace(/-[^-]+$/, '');
 const uniqueId = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, '0')
+    byte.toString(16).padStart(2, '0'),
   ).join('');
 
 function simulate(ctx) {
@@ -50,7 +50,7 @@ function simulate(ctx) {
       select(
         'bedId',
         '观测房间',
-        Array.from(rooms, ([label, value]) => ({ value, label }))
+        Array.from(rooms, ([label, value]) => ({ value, label })),
       ),
       field('eventId', '源事件编号', { value: uniqueId() }),
       field('evidenceRef', '图片、示意图或片段的证据编号', { required: false }),
@@ -74,7 +74,7 @@ function newProposal(ctx) {
         tasks.map((t) => ({
           value: t.id,
           label: residentName(ctx, t.residentId) + ' · ' + t.title + ' · ' + t.date + ' ' + t.time,
-        }))
+        })),
       ),
       memo('transcript', '模拟转写文本', true),
       memo('note', '拟写入的执行记录', true),
@@ -98,13 +98,13 @@ function review(ctx, row) {
       select(
         'decision',
         '复核结论',
-        options(row.candidates.length ? ['已核实', '误报', '无法核实'] : ['误报', '无法核实'])
+        options(row.candidates.length ? ['已核实', '误报', '无法核实'] : ['误报', '无法核实']),
       ),
       select(
         'residentId',
         '现场核实的长者',
         [{ value: '', label: '请选择，误报或无法核实可留空' }, ...names],
-        { required: false }
+        { required: false },
       ),
       memo('note', '现场情况与处置记录', true),
     ],
@@ -126,18 +126,20 @@ function inspectAlert(ctx, row) {
     node('div', '', [node('strong', '', row.room), node('small', '', sources[row.source])]),
     badge(ctx, row.status, pending ? 'amber' : 'blue'),
   ]);
-  const observed = node('li', '', [
-    node('div', 'gw-step-head', [
-      node('h3', '', '设备观测'),
-      node('time', '', stamp(row.observedAt)),
+  const observed = row.observations.map((entry) =>
+    node('li', '', [
+      node('div', 'gw-step-head', [
+        node('h3', '', sources[entry.source] + '观测'),
+        node('time', '', stamp(entry.observedAt)),
+      ]),
+      node('p', '', entry.observation || '设备未附观测摘要'),
+      facts([
+        ['设备提示的长者', row.residentHint ? residentName(ctx, row.residentHint) : '待现场核实'],
+        ['证据编号', entry.evidenceRef],
+        ['源事件编号', entry.eventId],
+      ]),
     ]),
-    node('p', '', row.observation || '设备未附观测摘要'),
-    facts([
-      ['设备提示的长者', row.residentHint ? residentName(ctx, row.residentHint) : '待现场核实'],
-      ['证据编号', row.evidenceRef],
-      ['源事件编号', row.eventId],
-    ]),
-  ]);
+  );
   const resolution = node('li', pending ? 'gw-step-pending' : '', [
     node('div', 'gw-step-head', [
       node('h3', '', '现场复核'),
@@ -155,7 +157,7 @@ function inspectAlert(ctx, row) {
   ]);
   ctx.detail(
     signals[row.signal],
-    node('div', 'gw-detail', [headline, node('ol', 'gw-steps', [observed, resolution])])
+    node('div', 'gw-detail', [headline, node('ol', 'gw-steps', [observed, resolution])]),
   );
 }
 
@@ -174,7 +176,7 @@ function changePreview(ctx, task, row) {
       '当前工单',
       task?.status || '不可用',
       task?.note || '尚未填写',
-      task?.operator || '待登记'
+      task?.operator || '待登记',
     ),
     record('确认后写入', '已完成', row.note, ctx.state.user.displayName),
   ]);
@@ -193,7 +195,7 @@ function confirmProposal(ctx, row) {
         approve.disabled = false;
       }
     },
-    'primary'
+    'primary',
   );
   const dismiss = btn(ctx, '退回申请', () => {
     runForm(ctx, {
@@ -242,19 +244,24 @@ function searchBox(ctx, placeholder) {
 function queueRow(ctx, row, alerts) {
   const pending = row.status === '待复核';
   const title = alerts ? signals[row.signal] : row.title;
-  const meta = alerts ? sources[row.source] : '申请人 ' + row.requester;
+  const meta = alerts
+    ? row.observations.map((e) => sources[e.source]).join('、')
+    : '申请人 ' + row.requester;
   const note = alerts ? row.observation : row.note;
   const action = btn(
     ctx,
     alerts ? (pending ? '查看并复核' : '查看记录') : '核对改动',
     () => (alerts ? inspectAlert(ctx, row) : confirmProposal(ctx, row)),
-    'secondary'
+    'secondary',
   );
   return node('li', 'gw-event', [
     mark(ctx, alerts ? 'pulse' : 'care', alerts && pending ? 'gw-gold' : ''),
     node('div', 'gw-event-main', [
       node('div', 'gw-event-title', [
         node('strong', '', title),
+        alerts && pending
+          ? badge(ctx, row.priority, row.signal === 'possible_fall' ? 'red' : 'neutral')
+          : null,
         badge(ctx, alerts ? row.status : '待确认', pending || !alerts ? 'amber' : 'blue'),
       ]),
       node('div', 'gw-event-meta', [
@@ -300,7 +307,12 @@ function queuePanel(ctx, alerts) {
       )
         return false;
       const keys = alerts
-        ? [r.room, r.eventId, sources[r.source], signals[r.signal]]
+        ? [
+            r.room,
+            r.priority,
+            signals[r.signal],
+            ...r.observations.flatMap((e) => [e.eventId, sources[e.source]]),
+          ]
         : [r.room, r.title, r.requester, residentName(ctx, r.residentId)];
       return !needle || keys.join(' ').toLocaleLowerCase().includes(needle);
     });
@@ -318,8 +330,8 @@ function queuePanel(ctx, alerts) {
             ? filter.value === 'pending'
               ? '当前没有待复核预警'
               : '当前没有设备预警记录'
-            : '当前没有待确认申请'
-      )
+            : '当前没有待确认申请',
+      ),
     );
     more.hidden = subset.length <= limit;
   }
@@ -375,7 +387,7 @@ function inbox(ctx) {
       tab.replaceChildren(
         mark(ctx, ic),
         node('span', 'gw-tab-text', [node('strong', '', label), node('small', '', hint)]),
-        node('b', 'gw-tab-count', count)
+        node('b', 'gw-tab-count', count),
       );
       tab.setAttribute('aria-label', label + '，' + hint + count + '条');
     }
@@ -421,8 +433,8 @@ function schemaDetails(ctx, title, schema, open = false) {
       node(
         'tr',
         '',
-        ['字段', '类型', '填写规则', '约束'].map((h) => node('th', '', h))
-      )
+        ['字段', '类型', '填写规则', '约束'].map((h) => node('th', '', h)),
+      ),
     ),
     node('tbody', '', rows),
   ]);
@@ -457,7 +469,7 @@ function inspectContract(ctx, row) {
       section('接入条件', node('p', 'gw-description', row.policy)),
       schemaDetails(ctx, '请求参数', row.requestSchema, true),
       schemaDetails(ctx, '适配器响应', row.responseSchema),
-    ])
+    ]),
   );
 }
 
@@ -496,7 +508,7 @@ function integrations(ctx) {
     const matches = rows.filter(
       (r) =>
         (!selected || selected === r.group) &&
-        [r.title, r.id, r.group, r.description].join(' ').toLocaleLowerCase().includes(needle)
+        [r.title, r.id, r.group, r.description].join(' ').toLocaleLowerCase().includes(needle),
     );
     result.textContent = matches.length + ' 个接口';
     label.textContent = selected || '全部接口';
@@ -514,7 +526,7 @@ function integrations(ctx) {
         card.type = 'button';
         card.addEventListener('click', () => inspectContract(ctx, r));
         return card;
-      })
+      }),
     );
     if (!matches.length)
       grid.append(node('div', 'gw-blank', [ctx.ui.icon('search', 24), '没有匹配的接口']));
@@ -536,7 +548,7 @@ function integrations(ctx) {
     '设备与模型接口',
     '查看设备能力、请求字段和接入条件。当前预留端口统一返回 HTTP 501。',
     null,
-    catalog
+    catalog,
   );
 }
 

@@ -90,6 +90,65 @@ class GatewayCases(TestCase):
             ],
         )
 
+    def test_independent_signals_share_one_review_and_keep_both_observations(self):
+        first = self.alert()
+        other = dict(
+            self.event,
+            source="sensor",
+            eventId="sensor-2",
+            observedAt="2026-11-24T11:31:30+08:00",
+        )
+        self.call("ingest", other, self.sensor)
+        alerts = self.view(self.nurse)["gatewayAlerts"]
+        self.assertEqual([r["id"] for r in alerts], [first["id"]])
+        self.assertEqual(
+            {r["eventId"] for r in alerts[0]["observations"]},
+            {other["eventId"], self.event["eventId"]},
+        )
+        before = len(self.state["archives"])
+        self.call(
+            "review",
+            {
+                "alertId": first["id"],
+                "decision": "已核实",
+                "residentId": first["candidates"][0],
+                "note": "现场记录",
+            },
+            self.nurse,
+        )
+        self.assertEqual(len(self.state["archives"]), before + 1)
+        self.assertEqual(
+            self.db.execute(
+                "SELECT count(*) FROM gateway_alert WHERE status='已核实'"
+            ).fetchone()[0],
+            2,
+        )
+        self.call("ingest", dict(other, eventId="sensor-3"), self.sensor)
+        self.assertEqual(len(self.view(self.nurse)["gatewayAlerts"]), 2)
+
+    def test_observations_outside_episode_and_different_signals_stay_separate(self):
+        self.alert()
+        self.call(
+            "ingest",
+            dict(
+                self.event,
+                source="sensor",
+                eventId="sensor-late",
+                observedAt="2026-11-24T11:31:31+08:00",
+            ),
+            self.sensor,
+        )
+        self.call(
+            "ingest",
+            dict(self.event, eventId="bedrest", signal="prolonged_bedrest"),
+            self.sensor,
+        )
+        rows = self.view(self.nurse)["gatewayAlerts"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(
+            [r["priority"] for r in rows], ["优先现场核实", "优先现场核实", "现场观察"]
+        )
+
     def test_duplicate_report_only_creates_one_alert_and_no_file_update(self):
         before = deepcopy(self.state["archives"])
         alert = self.alert()

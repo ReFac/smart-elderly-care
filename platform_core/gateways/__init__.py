@@ -1,7 +1,7 @@
 """Local event review and authorized voice proposals. Each command runs inside Store's write transaction."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -23,7 +23,21 @@ def init(db):
         room TEXT NOT NULL, signal TEXT NOT NULL, observed_at TEXT NOT NULL, fingerprint TEXT NOT NULL,
         resident_hint TEXT NOT NULL, candidates TEXT NOT NULL, evidence_ref TEXT NOT NULL, observation TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT '待复核', reviewed_by TEXT, reviewed_at TEXT, resident_id TEXT,
-        review_note TEXT, UNIQUE(source,event_id))""")
+        review_note TEXT, episode TEXT NOT NULL DEFAULT '', allocation TEXT NOT NULL DEFAULT '', UNIQUE(source,event_id))""")
+    columns = {r[1] for r in db.execute("PRAGMA table_info(gateway_alert)")}
+    if "episode" not in columns:
+        db.execute(
+            "ALTER TABLE gateway_alert ADD COLUMN episode TEXT NOT NULL DEFAULT ''"
+        )
+        db.execute("UPDATE gateway_alert SET episode=id")
+    if "allocation" not in columns:
+        db.execute(
+            "ALTER TABLE gateway_alert ADD COLUMN allocation TEXT NOT NULL DEFAULT ''"
+        )
+    db.execute("CREATE INDEX IF NOT EXISTS alert_episode ON gateway_alert(episode)")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS alert_location ON gateway_alert(bed_id,status,signal,observed_at)"
+    )
     db.execute("""CREATE TABLE IF NOT EXISTS gateway_voice (
         id TEXT PRIMARY KEY, requester_id TEXT NOT NULL, request_id TEXT NOT NULL, requester_name TEXT NOT NULL,
         task_id TEXT NOT NULL, task_title TEXT NOT NULL, transcript TEXT NOT NULL, note TEXT NOT NULL,
@@ -89,23 +103,55 @@ def ingest(db, state, payload, user, today):
     ]
     if hint and hint not in ids:
         raise ValueError("提示的长者不在此房间的在住名单中。")
+    observed = observed or timestamp()
+    event_time = datetime.fromisoformat(observed)
+    resident_map = {r["id"]: r for r in state["residents"]}
+    allocation = json.dumps(
+        sorted((rid, active_card(state, resident_map[rid])) for rid in ids)
+    )
+    alert_id = uuid4().hex
+    # Anchor the window to the first observation; a rolling chain could mask a later incident.
+    anchor = (
+        db.execute(
+            """SELECT a.id FROM gateway_alert a WHERE a.id=a.episode AND a.status='待复核'
+           AND a.bed_id=? AND a.signal=? AND a.resident_hint=? AND a.allocation=?
+           AND a.observed_at BETWEEN ? AND ?
+           AND NOT EXISTS(SELECT 1 FROM gateway_alert b WHERE b.episode=a.id AND b.source=?)
+           ORDER BY abs(julianday(a.observed_at)-julianday(?)),a.rowid DESC LIMIT 1""",
+            (
+                bed_id,
+                signal,
+                hint,
+                allocation,
+                (event_time - timedelta(seconds=90)).isoformat(),
+                (event_time + timedelta(seconds=90)).isoformat(),
+                source,
+                observed,
+            ),
+        ).fetchone()
+        if ids
+        else None
+    )
+    episode = anchor[0] if anchor else alert_id
     db.execute(
         """INSERT INTO gateway_alert
-        (id,source,event_id,bed_id,room,signal,observed_at,fingerprint,resident_hint,candidates,evidence_ref,observation)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (id,source,event_id,bed_id,room,signal,observed_at,fingerprint,resident_hint,candidates,evidence_ref,observation,episode,allocation)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
-            uuid4().hex,
+            alert_id,
             source,
             event,
             bed_id,
             room,
             signal,
-            observed or timestamp(),
+            observed,
             fingerprint,
             hint,
             json.dumps(ids),
             evidence,
             observation,
+            episode,
+            allocation,
         ),
     )
     return f"{room} 收到{SIGNALS[signal]}，等待护士核实"
@@ -144,7 +190,7 @@ def review(db, state, payload, user, today):
             reviewerId=user["id"],
             summary=summary,
             source="设备预警人工复核",
-            alertId=row["id"],
+            alertId=row["episode"],
             room=row["room"],
             observedAt=row["observed_at"],
         )
@@ -153,8 +199,8 @@ def review(db, state, payload, user, today):
         message = f"将{row['room']}的设备预警标记为{decision}"
     db.execute(
         """UPDATE gateway_alert SET status=?,reviewed_by=?,reviewed_at=?,resident_id=?,review_note=?
-                  WHERE id=? AND status='待复核'""",
-        (decision, user["id"], timestamp(), resident_id, note, row["id"]),
+                  WHERE episode=? AND status='待复核'""",
+        (decision, user["id"], timestamp(), resident_id, note, row["episode"]),
     )
     return message
 
@@ -281,11 +327,28 @@ def project(db, data, user):
             p for p in catalog() if not p["ownerOnly"] or user["kind"] == "owner"
         ]
     if access.has(user, "alerts"):
+        episodes = {}
         for row in db.execute("SELECT * FROM gateway_alert ORDER BY rowid DESC"):
+            episodes.setdefault(row["episode"], []).append(
+                {
+                    "source": row["source"],
+                    "eventId": row["event_id"],
+                    "observedAt": row["observed_at"],
+                    "evidenceRef": row["evidence_ref"],
+                    "observation": row["observation"],
+                }
+            )
+            if row["id"] != row["episode"]:
+                continue
+            observations = episodes[row["episode"]]
             data["gatewayAlerts"].append(
                 {
                     "id": row["id"],
                     "source": row["source"],
+                    "priority": "优先现场核实"
+                    if row["signal"] == "possible_fall"
+                    else "现场观察",
+                    "observations": observations,
                     "eventId": row["event_id"],
                     "room": row["room"],
                     "signal": row["signal"],
@@ -301,6 +364,14 @@ def project(db, data, user):
                     "reviewNote": row["review_note"],
                 }
             )
+        data["gatewayAlerts"].sort(
+            key=lambda r: (
+                r["status"] == "待复核",
+                r["status"] == "待复核" and r["signal"] == "possible_fall",
+                r["observedAt"],
+            ),
+            reverse=True,
+        )
     if access.has(user, "voice.confirm") and access.has(user, "care"):
         for row in db.execute(
             "SELECT * FROM gateway_voice WHERE status='待确认' ORDER BY rowid DESC"
