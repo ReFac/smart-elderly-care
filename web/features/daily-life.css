@@ -40,3 +40,5 @@
 .life-event time { font-size:12px; color:var(--muted); }
 .life-event p { margin:3px 0; }
 @media (max-width:680px) { .group-scope { grid-template-columns:1fr; } .group-heading { align-items:flex-start; } .life-event { grid-template-columns:1fr; gap:2px; } }
+
+.life-event-target { background: var(--soft); border-radius: 6px; outline: 1px solid var(--accent); outline-offset: 2px; }

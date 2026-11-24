@@ -253,6 +253,48 @@ class ScheduledMealTests(unittest.TestCase):
             1,
         )
 
+    def test_batch_reopens_exact_signed_event_and_respects_room_scope(self):
+        staff, _ = self.staff("meal-receipt-review")
+        _, tasks = self.release()
+        draft = scheduled_meals.preview(
+            self.store, self.owner, {"taskId": tasks[0]["id"]}
+        )
+        chosen = next(row for row in draft["rows"] if row["selected"])
+        packet = self.proof(draft)
+        packet["entries"][0]["omitted"] = ["鸡蛋"]
+        self.command("care.confirmScheduledMeal", packet)
+        batch = {"occurrenceId": draft["occurrenceId"]}
+        saved = scheduled_meals.preview(self.store, self.owner, batch)
+        self.assertEqual(len(saved["rows"]), 1)
+        self.assertFalse(saved["rows"][0]["selected"])
+        (receipt,) = saved["receipts"]
+        self.assertEqual(receipt["residentId"], chosen["residentId"])
+        (event,) = daily_life.timeline(self.store, self.owner, chosen["residentId"])[
+            "events"
+        ]
+        self.assertEqual(
+            (receipt["eventId"], receipt["day"], receipt["intake"]),
+            (
+                event["id"],
+                event["day"],
+                "吃了小米粥、清蒸南瓜。没有吃鸡蛋",
+            ),
+        )
+        permitted = scheduled_meals.preview(self.store, staff, batch)
+        self.assertEqual(permitted["receipts"], [receipt])
+        another_room = next(
+            row["id"]
+            for row in scheduled_work.read(self.store, self.owner)["rooms"]
+            if row["id"] != receipt["roomId"]
+        )
+        self.store.facility_policy = lambda db, actor: {"roomIds": [another_room]}
+        with self.assertRaises(FileNotFoundError):
+            scheduled_meals.preview(self.store, staff, batch)
+        self.store.facility_policy = None
+        self.now += timedelta(days=1)
+        with self.assertRaises(FileNotFoundError):
+            scheduled_meals.preview(self.store, self.owner, batch)
+
     def test_assignee_id_not_shared_name_controls_read_and_confirmation(self):
         picker, assigned = self.staff("meal-staff-a")
         other, _ = self.staff("meal-staff-b")

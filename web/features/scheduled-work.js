@@ -1,4 +1,4 @@
-import { badge, btn, choose, named, node, table, today } from './shared.js';
+import { badge, btn, choose, hasGrant, named, node, table, today } from './shared.js';
 
 const types = { patrol: '定期巡查', care: '日常照护', meal: '伙食工单' };
 const weekdayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -194,6 +194,66 @@ function menuItems(value) {
   return items;
 }
 
+function mealPicker(preset) {
+  const course = choice([['早餐', '早餐'], ['午餐', '午餐'], ['晚餐', '晚餐']], preset.mealKind || '午餐');
+  const fallback = noteInput(preset.menu?.join('\n'), '例如 米饭、番茄炒蛋、白菜汤', 1800);
+  const summary = node('summary', '');
+  const schedule = allWeek.map(day => {
+    const control = noteInput(preset.weeklyMenus?.[day]?.join('\n'), '此日可留空，沿用默认菜单', 1800);
+    control.name = 'weeklyMenu' + day;
+    const activity = node('small', 'scheduled-day-status', '当天不派发');
+    const caption = node('span', '', [weekdayNames[day - 1], activity]);
+    return { day, control, activity, element: node('label', 'scheduled-week-menu field', [caption, control]) };
+  });
+  const week = node('details', 'scheduled-week-menus', [
+    summary, node('div', 'scheduled-week-grid', schedule.map(item => item.element)),
+  ]);
+  week.open = schedule.some(item => item.control.value.trim());
+  function title() {
+    const count = schedule.filter(item => item.control.value.trim()).length;
+    summary.textContent = '按星期安排菜单' + (count ? ' · 已填写 ' + count + ' 天' : '');
+  }
+  for (const {control} of schedule) control.addEventListener('input', title);
+  title();
+  const element = node('fieldset', 'scheduled-meal-info', [
+    node('legend', '', '伙食菜单'),
+    node('div', 'scheduled-meal-top', [label('餐次', course), label('默认菜品', fallback)]),
+    node('p', 'fx-muted', '每行一道菜，也可用顿号分隔。指定日期的餐单优先生效。其余日期使用对应星期的菜品，留空时沿用默认菜品。'),
+    week,
+  ]);
+  return {
+    element,
+    update(isMeal, activeDays) {
+      element.hidden = !isMeal;
+      fallback.required = isMeal;
+      for (const {day, activity} of schedule) activity.hidden = activeDays.includes(day);
+    },
+    value() {
+      const menu = menuItems(fallback.value);
+      const weeklyMenus = {};
+      for (const {day, control} of schedule) {
+        if (!control.value.trim()) continue;
+        try {
+          weeklyMenus[day] = menuItems(control.value);
+        } catch (error) {
+          week.open = true;
+          control.focus();
+          throw new Error('请核对' + weekdayNames[day - 1] + '菜单。' + error.message);
+        }
+      }
+      return { mealKind: course.value, menu, weeklyMenus };
+    },
+  };
+}
+
+function planMenu(day, row) {
+  if (!day) return null;
+  const weekday = new Date(day + 'T12:00:00Z').getUTCDay() || 7;
+  const menu = row.weeklyMenus?.[weekday];
+  return menu?.length ? { menu, source: weekdayNames[weekday - 1] + '菜单' } :
+    { menu: row.menu || [], source: '默认菜单' };
+}
+
 function modalForm(ctx, title, buttonLabel, elements, submit) {
   const form = node('form', 'scheduled-editor');
   const status = node('p', 'form-error');
@@ -229,23 +289,18 @@ function editor(ctx, data, preset = {}) {
   const time = input('time', preset.time || '08:00', { required: true });
   const start = input('date', preset.startDate || data.today, { required: true });
   const end = input('date', preset.endDate, { min: start.value });
-  const mealKind = choice([['早餐', '早餐'], ['午餐', '午餐'], ['晚餐', '晚餐']], preset.mealKind || '午餐');
-  const meals = noteInput(preset.menu?.join('\n'), '例如 米饭、番茄炒蛋、白菜汤', 1800);
-  const mealInfo = node('fieldset', 'scheduled-meal-info', [
-    node('legend', '', '默认菜单'),
-    label('餐次', mealKind),
-    label('每行一道菜品，也可用顿号分隔', meals),
-  ]);
+  const meals = mealPicker(preset);
   const assignment = assigneePicker(data, preset);
   const audience = audiencePicker(data, preset.scope);
   const note = noteInput(preset.note, '填写护工需要核对的执行要求', 600);
+  const days = () => frequency.value === 'daily' ? allWeek : weekdays.value();
   frequency.addEventListener('change', update);
+  weekdays.element.addEventListener('change', update);
   kind.addEventListener('change', update);
   start.addEventListener('change', () => { end.min = start.value; });
   function update() {
     weekdays.element.hidden = frequency.value === 'daily';
-    mealInfo.hidden = kind.value !== 'meal';
-    meals.required = kind.value === 'meal';
+    meals.update(kind.value === 'meal', days());
   }
   update();
   return modalForm(ctx, isExisting ? '编辑定时计划' : '新建定时计划', '核对计划', [
@@ -256,32 +311,32 @@ function editor(ctx, data, preset = {}) {
         label('开始日期', start), label('结束日期（选填）', end)]),
       weekdays.element,
     ]),
-    mealInfo,
+    meals.element,
     audience.element,
     node('section', 'scheduled-editor-section', [node('h3', '', '执行分配'), assignment.element]),
     label('执行说明（选填）', note),
   ], () => {
-    const days = frequency.value === 'daily' ? allWeek : weekdays.value();
-    if (!days.length) throw new Error('请至少选择一个执行日。');
+    const activeDays = days();
+    if (!activeDays.length) throw new Error('请至少选择一个执行日。');
     if (end.value && end.value < start.value) throw new Error('结束日期应在开始日期当日或之后。');
     const target = audience.value();
-    const menu = kind.value === 'meal' ? menuItems(meals.value) : [];
+    const mealsConfig = kind.value === 'meal' ? meals.value() : { mealKind: '', menu: [], weeklyMenus: {} };
     const payload = {
       ...(isExisting ? { id: preset.id } : {}),
-      title: title.value.trim(), kind: kind.value, time: time.value, weekdays: days,
+      title: title.value.trim(), kind: kind.value, time: time.value, weekdays: activeDays,
       startDate: start.value, endDate: end.value, scope: target.scope,
-      ...assignment.value(), mealKind: menu.length ? mealKind.value : '',
-      menu, note: note.value.trim(),
+      ...assignment.value(), ...mealsConfig, note: note.value.trim(),
     };
     if (!payload.title) throw new Error('请填写计划名称。');
     return ctx.command('care.saveSchedule', payload, {
       title: '核对定时工单计划',
       target: payload.title,
       fields: [
-        ['工单类型', types[payload.kind]], ['执行时间', recurrence(days) + ' ' + payload.time],
+        ['工单类型', types[payload.kind]], ['执行时间', recurrence(activeDays) + ' ' + payload.time],
         ['生效日期', payload.startDate + (payload.endDate ? ' 至 ' + payload.endDate : ' 起')],
         ['执行范围', target.display], ['分配给', assignment.label()],
-        ...(menu.length ? [['默认' + payload.mealKind + '菜单', menu.join('、')]] : []),
+        ...(payload.menu.length ? [['默认' + payload.mealKind + '菜单', payload.menu.join('、')]] : []),
+        ...Object.entries(payload.weeklyMenus).map(([day, menu]) => [weekdayNames[day - 1] + '菜单', menu.join('、')]),
       ],
     });
   });
@@ -292,15 +347,19 @@ function editMenu(ctx, data, row) {
   if (row.startDate > day.min) day.min = day.value = row.startDate;
   const control = noteInput('', '每行一道菜品，也可用顿号分隔', 1800);
   control.required = true;
+  const source = node('p', 'fx-muted');
+  source.setAttribute('role', 'status');
   function update() {
     const existing = data.menus.find(entry => entry.scheduleId === row.id && entry.day === day.value);
-    control.value = (existing?.menu || row.menu || []).join('\n');
+    const planned = existing ? { menu: existing.menu, source: '已保存的指定日期餐单' } : planMenu(day.value, row);
+    control.value = (planned?.menu || []).join('\n');
+    source.textContent = planned ? '当前取自' + planned.source + '。保存后仅在所选日期生效。' : '';
   }
   day.addEventListener('change', update);
   update();
   return modalForm(ctx, '设置指定日期餐单', '核对当天餐单', [
     node('p', 'fx-muted', row.title + ' · ' + row.mealKind),
-    label('指定日期', day), label('当餐菜品', control),
+    label('指定日期', day), source, label('当餐菜品', control),
   ], () => {
     const menu = menuItems(control.value);
     return ctx.command('care.scheduleMenu', { id: row.id, day: day.value, menu }, {
@@ -333,7 +392,12 @@ function rulesTable(ctx, data) {
     search: { placeholder: '搜索计划或执行对象', value: row => [row.title, scopeLabel(data, row.scope)] },
     filter: { label: '筛选工单类型', all: '全部类型', options: Object.values(types), value: row => types[row.kind] },
     cols: [
-      { label: '计划', view: row => named(row.title, types[row.kind] + (row.mealKind ? ' · ' + row.mealKind : '')) },
+      { label: '计划', view: row => {
+        const weeklyDays = Object.keys(row.weeklyMenus || {}).length;
+        const subtitle = [types[row.kind], row.mealKind, weeklyDays ? '按星期安排' : '']
+          .filter(Boolean).join(' · ');
+        return named(row.title, subtitle);
+      } },
       { label: '派发时间', view: row => named(recurrence(row.weekdays) + ' · ' + row.time,
         row.startDate + (row.endDate ? ' 至 ' + row.endDate : ' 起')) },
       { label: '执行范围 / 经办', view: row => node('div', 'scheduled-scope', named(scopeLabel(data, row.scope), row.assignee)) },
@@ -365,16 +429,15 @@ function runsTable(ctx, data) {
       { label: '操作', align: 'end', view: row => {
         if (row.status === 'empty') return '—';
         if (rules.get(row.scheduleId)?.kind === 'meal') {
-          const task = ctx.state.tasks?.find(item => item.occurrenceId === row.id && item.mealKind && item.status === '待执行');
-          if (task) return btn(ctx, '核对今日伙食', async () => {
+          if (!hasGrant(ctx, 'care', 'clinical', 'residents', 'medical', 'care.groupConfirm')) return '—';
+          return btn(ctx, '查看伙食批次', async () => {
             try {
               const { openScheduledMeal } = await import('./scheduled-meals.js');
-              openScheduledMeal(ctx, { taskId: task.id });
+              openScheduledMeal(ctx, { occurrenceId: row.id });
             } catch (error) {
-              ctx.toast(error.message || '暂时无法打开今日伙食确认。');
+              ctx.toast(error.message || '暂时无法打开伙食批次。');
             }
           });
-          return btn(ctx, '查看照护工单', () => ctx.go('care', 'tasks'));
         }
         return btn(ctx, '查看照护工单', () => ctx.go('care', 'tasks'));
       } },

@@ -14,15 +14,22 @@ export function residentLabel(ctx, ref) {
   return row.name + '（' + location + '）';
 }
 
-export function residentHref(ctx, ref) {
+export function residentHref(ctx, ref, lifeEvent) {
   const row = findResident(ctx, ref);
   if (!row || !ctx.available) return '';
-  const route = ['residents', 'dossier', 'billing', 'longCare', 'family'].find(key => ctx.available(key));
-  return route && ('#' + route + '?resident=' + encodeURIComponent(row.id)) || '';
+  const destinations = lifeEvent
+    ? ['dossier', 'residents'] : ['residents', 'dossier', 'billing', 'longCare', 'family'];
+  const route = destinations.find(key => ctx.available(key));
+  const params = new URLSearchParams({resident: row.id});
+  if (lifeEvent) {
+    params.set('lifeEvent', lifeEvent.eventId);
+    params.set('lifeDay', lifeEvent.day);
+  }
+  return route ? '#' + route + '?' + params : '';
 }
 
-export function residentAnchor(ctx, ref) {
-  const href = residentHref(ctx, ref);
+export function residentAnchor(ctx, ref, lifeEvent) {
+  const href = residentHref(ctx, ref, lifeEvent);
   const element = document.createElement(href ? 'a' : 'span');
   element.textContent = residentLabel(ctx, ref);
   if (href) {

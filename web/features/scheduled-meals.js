@@ -1,4 +1,5 @@
 import { btn, named, node } from './shared.js';
+import { residentAnchor, staffLabel } from './people-labels.js';
 
 async function preview(payload, signal) {
   const response = await fetch('/api/scheduled-work/meals/preview', {
@@ -53,9 +54,33 @@ function mealRow(row) {
   return {item, include, title, row, omitted, refresh};
 }
 
+
+function signedMeals(ctx, receipts) {
+  if (!receipts?.length) return null;
+  return node('section', 'group-attendance', [
+    node('h3', '', '已签认伙食'),
+    node('div', 'group-person-list', receipts.map(row => {
+      const account = {id: row.confirmedById, displayName: row.confirmedBy, role: row.confirmedByPosition};
+      const label = residentAnchor(ctx, row.residentId, {eventId: row.eventId, day: row.day});
+      if (label.textContent === '—') label.textContent = row.name + '（' + row.roomNumber + '）';
+      return node('article', 'group-person scheduled-meal-receipt', [
+        node('div', 'fx-profile', [
+          label,
+          node('p', '', row.intake ? '实际进食：' + row.intake : '当餐提供：' + row.details),
+          node('small', 'fx-muted', [
+            row.bedLabel,
+            row.confirmedAt.replace('T', ' ').slice(0, 16),
+            staffLabel(ctx, account) + ' 确认',
+          ].filter(Boolean).join(' · ')),
+        ]),
+      ]);
+    })),
+  ]);
+}
+
 export function openScheduledMeal(ctx, source) {
   const content = node('div', 'fx-profile');
-  const dialog = ctx.detail('核对今日伙食', content);
+  const dialog = ctx.detail(source.occurrenceId ? '今日伙食批次' : '核对今日伙食', content);
   dialog.classList.add('group-dialog');
   let pending;
 
@@ -115,9 +140,12 @@ export function openScheduledMeal(ctx, source) {
       try {
         const saved = await ctx.command('care.confirmScheduledMeal', payload, {
           title: '确认伙食记录', target: data.kind, fields, expectedRevision: data.revision,
-          confirmLabel: '确认并更新个人时间线',
+          confirmLabel: '确认并更新个人时间线', quiet: true,
         });
-        if (saved && dialog.open) dialog.close();
+        if (saved) {
+          if (dialog.open) dialog.close();
+          openScheduledMeal(ctx.current?.() || ctx, {occurrenceId: data.occurrenceId, region: data.region});
+        }
       } finally {
         refresh();
       }
@@ -138,7 +166,12 @@ export function openScheduledMeal(ctx, source) {
         content.replaceChildren(node('p', 'fx-muted', '今天有多批符合口述的伙食，请先选定一批。'),
           ...data.choices.map(item => btn(ctx, item.label, () => load({ ...input, taskId: item.taskId }))));
       } else {
-        content.replaceChildren(formFor(data));
+        const current = ctx.current?.() || ctx;
+        const signed = signedMeals(current, data.receipts);
+        const header = !data.rows.length
+          ? node('p', 'group-area', data.day + ' · ' + data.kind)
+          : null;
+        content.replaceChildren(...[header, signed, data.rows.length ? formFor(data) : null].filter(Boolean));
       }
     } catch (error) {
       if (operation.signal.aborted || !dialog.open) return;

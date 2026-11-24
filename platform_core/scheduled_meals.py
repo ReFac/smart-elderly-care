@@ -326,13 +326,91 @@ def _given_rows(rows, spoken):
     return rows
 
 
+def _signed_rows(db, state, user, day, occurrence, area):
+    daily_life._staff(
+        user, "care", "clinical", "residents", "medical", "care.groupConfirm"
+    )
+    names = daily_life._visible_residents(db, state, user)
+    if area:
+        rooms = set(facility.scope(db, state, user, agent=True, **area)["roomIds"])
+    elif user.get("facilityScope"):
+        rooms = {
+            room["id"]
+            for room in facility._meta(db, facility._access(db, user, environment=True))
+        }
+    else:
+        rooms = None
+    links = [
+        [task["scheduledMealEventId"], task["residentId"], task["mealKind"]]
+        for task in state["tasks"]
+        if task["date"] == day
+        and task.get("occurrenceId") == occurrence
+        and task.get("scheduledMealEventId")
+        and task.get("mealKind") in daily_life.MEALS
+        and task["residentId"] in names
+    ]
+    if not links:
+        return []
+    rows = db.execute(
+        """SELECT DISTINCT e.id AS eventId,e.day,e.kind,e.details,a.intake,
+           i.residentId,i.roomId,i.roomNumber,i.bedLabel,
+           s.confirmedAt,s.confirmedBy,s.confirmedById,s.confirmedByPosition
+        FROM json_each(?) AS ref
+        JOIN daily_life_events e ON e.id=json_extract(ref.value,'$[0]')
+        JOIN daily_life_attendance a ON a.eventId=e.id AND a.residentId=json_extract(ref.value,'$[1]')
+        JOIN daily_life_invitees i ON i.eventId=a.eventId AND i.residentId=a.residentId
+        JOIN daily_life_signatures s ON s.eventId=e.id
+        WHERE e.day=? AND e.kind=json_extract(ref.value,'$[2]')
+        ORDER BY i.roomNumber,i.bedLabel,i.residentId""",
+        (json.dumps(links), day),
+    )
+    return [
+        {**dict(row), "name": names[row["residentId"]]}
+        for row in rows
+        if rooms is None or row["roomId"] in rooms
+    ]
+
+
+def _batch(db, state, user, revision, occurrence, now, area):
+    day = now.date().isoformat()
+    receipts = _signed_rows(db, state, user, day, occurrence, area)
+    pending = (
+        [
+            row
+            for row in _rows(db, state, user, now, area)
+            if row["occurrenceId"] == occurrence
+        ]
+        if access_policy.has(user, "care")
+        else []
+    )
+    if not (pending or receipts):
+        raise FileNotFoundError("没有可查看的今日伙食批次")
+    return {
+        "revision": revision,
+        "day": day,
+        "occurrenceId": occurrence,
+        "kind": (pending or receipts)[0]["kind"],
+        "region": area,
+        "rows": [{**row, "selected": False, "omitted": []} for row in pending],
+        "receipts": receipts,
+    }
+
+
 def preview(store, token, payload):
-    if not isinstance(payload, dict) or set(payload) - {"taskId", "text", "region"}:
+    if not isinstance(payload, dict) or set(payload) - {
+        "taskId",
+        "text",
+        "region",
+        "occurrenceId",
+    }:
         raise ValueError("请选择待核对的伙食工单")
     area = _area(payload.get("region"))
     task_id = text_field(payload.get("taskId"), "工单编号", limit=100)
     text = text_field(payload.get("text"), "口述内容", limit=1500)
-    if not (text or task_id):
+    occurrence = text_field(payload.get("occurrenceId"), "伙食批次", limit=100)
+    if occurrence and (text or task_id):
+        raise ValueError("查看批次时无需填写口述或独立工单编号")
+    if not (text or task_id or occurrence):
         raise ValueError("请先选择工单或口述实际进食")
     now = store.now().astimezone(daily_life.LOCAL)
     with closing(store.connect()) as db, db:
@@ -341,7 +419,10 @@ def preview(store, token, payload):
         rev, raw = db.execute(
             "SELECT revision,data FROM workspace WHERE id=1"
         ).fetchone()
-        rows = _rows(db, json.loads(raw), user, now, area)
+        state = json.loads(raw)
+        if occurrence:
+            return _batch(db, state, user, rev, occurrence, now, area)
+        rows = _rows(db, state, user, now, area)
     if task_id and not any(row["taskId"] == task_id for row in rows):
         raise FileNotFoundError("伙食工单已完成、已取消或超出当前授权范围")
     if not any(not r["reason"] for r in rows):

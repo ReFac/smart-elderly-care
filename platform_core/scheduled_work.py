@@ -41,6 +41,7 @@ RULE_KEYS = {
     "scope",
     "mealKind",
     "menu",
+    "weeklyMenus",
     "note",
     "enabled",
 }
@@ -121,6 +122,12 @@ def _menu(value):
     return items
 
 
+def _weekly_menus(value):
+    if not isinstance(value, dict) or set(value) - {"1", "2", "3", "4", "5", "6", "7"}:
+        raise ValueError("请选择周一至周日的菜单")
+    return {day: _menu(items) for day, items in value.items()}
+
+
 def _clock(value):
     if not isinstance(value, str) or not re.fullmatch(
         r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value
@@ -153,11 +160,15 @@ def _config(payload, today, previous):
         raise ValueError("请选择启用或暂停")
     meal = payload.get("mealKind", "")
     menu = payload.get("menu", [])
+    weekly_menus = {}
     if kind == "meal":
         if meal not in daily_life.MEALS:
             raise ValueError("请为伙食工单选择早餐、午餐或晚餐")
         menu = _menu(menu)
-    elif meal or menu:
+        weekly_menus = _weekly_menus(
+            payload.get("weeklyMenus", previous.get("weeklyMenus", {}))
+        )
+    elif meal or menu or payload.get("weeklyMenus", {}) != {}:
         raise ValueError("仅伙食工单使用餐次和菜单")
     return dict(
         title=text_field(payload.get("title"), "模板名称", required=True, limit=100),
@@ -173,6 +184,7 @@ def _config(payload, today, previous):
         assigneeRole=text_field(payload.get("assigneeRole"), "岗位", limit=40),
         mealKind=meal,
         menu=menu,
+        weeklyMenus=weekly_menus,
         enabled=enabled,
     )
 
@@ -298,7 +310,10 @@ def _assignment(db, config, user):
 
 
 def _attributes(rule):
-    return {k: v for k, v in json.loads(rule["config"]).items() if k != "boundary"}
+    config = json.loads(rule["config"])
+    config.pop("boundary", None)
+    config.setdefault("weeklyMenus", {})
+    return config
 
 
 def _rule(db, sid):
@@ -463,6 +478,7 @@ def _assigned(db, config, person, allowed):
 
 def _releases(db, state, rules, now):
     day, timestamp = now.date().isoformat(), now.isoformat(timespec="seconds")
+    weekday = str(now.isoweekday())
     acl = facility._access(db, {"kind": "owner"}, environment=True)
     rooms = {row["id"]: row for row in facility._meta(db, acl)}
     roster = _roster(db, state, rooms, day=day)
@@ -490,7 +506,11 @@ def _releases(db, state, rules, now):
             if meal
             else None
         )
-        menu = json.loads(override[0]) if override else config["menu"]
+        menu = (
+            json.loads(override[0])
+            if override
+            else config.get("weeklyMenus", {}).get(weekday, config["menu"])
+        )
         occurrence = uuid4().hex
         matched = []
         for person in roster:

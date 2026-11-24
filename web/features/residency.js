@@ -145,7 +145,7 @@ function renew(ctx, row) {
   bindContractFields(dialog);
 }
 
-export function profile(ctx, row) {
+export function profile(ctx, row, lifeEvent) {
   const { state } = ctx;
   const own = (name) => {
     const entries = (state[name] || []).filter((item) => item.residentId === row.id);
@@ -205,7 +205,8 @@ export function profile(ctx, row) {
   if (row.status === '在住' && hasGrant(ctx, 'care', 'clinical'))
     summary.append(residentInsights(ctx, row.id));
   if (hasGrant(ctx, 'care', 'clinical', 'medical')) summary.append(healthProfile(ctx, row), renderMedicationReports(ctx, row.id));
-  if (hasGrant(ctx, 'care', 'clinical')) summary.append(dailyTimeline(ctx, row));
+  if (hasGrant(ctx, 'care', 'clinical', 'care.groupConfirm') || lifeEvent && hasGrant(ctx, 'residents', 'medical'))
+    summary.append(dailyTimeline(ctx, row, lifeEvent));
   add(
     summary,
     facts([

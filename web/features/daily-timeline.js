@@ -7,13 +7,15 @@ function weekStart(end) {
   return day.toISOString().slice(0, 10);
 }
 
-export function dailyTimeline(ctx, resident) {
+export function dailyTimeline(ctx, resident, lifeEvent) {
   const panel = node('section', 'life-timeline');
   panel.dataset.roundsResidentId = resident.id;
   const list = node('div', 'life-days');
   const last = node('input');
   last.type = 'date';
-  last.max = last.value = today(ctx);
+  last.max = today(ctx);
+  last.value = lifeEvent && lifeEvent.day <= last.max ? lifeEvent.day : last.max;
+  const focusDate = last.value;
   last.setAttribute('aria-label', '生活时间线的截止日期');
   const range = node('small', 'fx-muted');
   panel.append(node('header', 'group-heading', [
@@ -36,10 +38,11 @@ export function dailyTimeline(ctx, resident) {
         if (!groups.has(event.day)) groups.set(event.day, []);
         groups.get(event.day).push(event);
       }
+      let focusRow;
       const days = [...groups].map(([day, rows]) => {
         const events = rows.map(e => {
           const meal = e.kind !== '集体活动';
-          return node('li', 'life-event', [
+          const entry = node('li', 'life-event', [
             node('time', '', e.startsAt + '–' + e.endsAt),
             node('div', '', [
               node('strong', '', meal ? e.kind : e.details),
@@ -48,10 +51,23 @@ export function dailyTimeline(ctx, resident) {
                 staffLabel(ctx, { id: e.confirmedById, displayName: e.confirmedBy, role: e.confirmedByPosition }) + ' 确认'].filter(Boolean).join(' · ')),
             ]),
           ]);
+          if (e.id === lifeEvent?.eventId) {
+            entry.tabIndex = -1;
+            entry.classList.add('life-event-target');
+            focusRow = entry;
+          }
+          return entry;
         });
         return node('section', 'life-day', [node('h4', '', day), node('ol', '', events)]);
       });
       list.replaceChildren(...(days.length ? days : [node('p', 'fx-muted', '这七天还没有已确认的用餐或集体活动。')]));
+      if (focusRow && end === focusDate) requestAnimationFrame(() => {
+        if (focusRow.isConnected && ticket === sequence && focusRow.closest('dialog')?.open) {
+          focusRow.focus({preventScroll: true});
+          focusRow.scrollIntoView({block: 'nearest'});
+        }
+      });
+      else if (lifeEvent && end === focusDate) list.prepend(node('p', 'fx-muted', '这条伙食记录不在当前时间线的查阅范围内。'));
     } catch (error) {
       if (ticket === sequence) list.replaceChildren(node('p', 'form-error', error.message), btn(ctx, '重试', draw));
     }

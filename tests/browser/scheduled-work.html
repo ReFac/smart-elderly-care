@@ -18,7 +18,7 @@
     const day = '2026-11-24';
     const template = {
       id:'meal', title:'晚餐模板', kind:'meal', time:'17:30', weekdays:[1, 2, 3, 4, 5, 6, 7], enabled:true,
-      scope:{kind:'rooms',roomIds:['room2']}, startDate:day, endDate:'', mealKind:'晚餐', menu:['小米粥','鸡蛋'],
+      scope:{kind:'rooms',roomIds:['room2']}, startDate:day, endDate:'', mealKind:'晚餐', menu:['小米粥','鸡蛋'], weeklyMenus:{2:['蒸饺'],4:['红薯','青菜']},
     };
     const data = {
       today: day, canManage:true, allowAll:true,
@@ -40,7 +40,7 @@
     const links = [];
     const root = document.querySelector('#work');
     const ctx = {
-      ui, detail, state:{today: day, tasks:[]},
+      ui, detail, state:{today: day, tasks:[], user:{kind:'owner'}},
       async get(path) { if (path !== '/api/scheduled-work') throw new Error('未识别接口'); return data; },
       async command(action, payload, review) { commands.push({action,payload,review}); return true; },
       available:() => true, go:(...args) => links.push(args),
@@ -70,6 +70,7 @@
       root.append(scheduledWork(ctx));
       await wait(() => root.textContent.includes('内置巡查'), '等待排程读取');
       check(root.textContent.includes('其他自动维护') && root.textContent.includes('加密快照'), '还原系统既有流程且维护区独立');
+      check(root.textContent.includes('查看伙食批次'), '已派发的菜单始终可回看');
       check(root.textContent.includes(day + ' 21:30'), '上海本地的无偏移时间不被重复转换');
       click('进入相关页面');
       check(links[0].join('/') === 'settings/rounds', '可进入已有设置');
@@ -85,19 +86,33 @@
       dialog().querySelectorAll('.scheduled-days input').forEach((input, index) => { input.checked = index === 1; });
       choose('分配方式','person');
       choose('执行员工','staff1');
-      field('每行一道菜品，也可用顿号分隔').value = '米饭、鸡蛋羹';
+      field('默认菜品').value = '米饭、鸡蛋羹';
+      dialog().querySelector('.scheduled-days').dispatchEvent(new Event('change', {bubbles:true}));
+      dialog().querySelector('.scheduled-week-menus summary').click();
+      check(dialog().querySelector('textarea[name="weeklyMenu2"]').closest('label').querySelector('.scheduled-day-status').hidden, '处于启用状态的日期可单独填菜');
+      check(!dialog().querySelector('textarea[name="weeklyMenu3"]').closest('label').querySelector('.scheduled-day-status').hidden,
+        '每周计划的未派发星期有标记');
+      dialog().querySelector('textarea[name="weeklyMenu2"]').value = '馒头、炒菜';
       click('核对计划', dialog());
       await wait(() => commands.length === 1 && !dialog(), '保存定时工单');
       const saved = commands[0];
       check(saved.action === 'care.saveSchedule' && saved.payload.weekdays.join() === '2' &&
-        saved.payload.menu.join() === '米饭,鸡蛋羹' && saved.payload.assigneeId === 'staff1' &&
+        saved.payload.menu.join() === '米饭,鸡蛋羹' && saved.payload.weeklyMenus[2].join() === '馒头,炒菜' &&
+        Object.keys(saved.payload.weeklyMenus).length === 1 && saved.payload.assigneeId === 'staff1' &&
         saved.payload.scope.residentIds.join() === 'elder2', '精确周次、人群、员工和菜品');
       click('编辑');
       check(field('派发对象').value === 'rooms' &&
         dialog().querySelector('.scheduled-residents input:checked').closest('label').textContent.includes('201'), '编辑时保留原房间');
+      check(field('默认菜品').value === '小米粥\n鸡蛋' &&
+        dialog().querySelector('textarea[name="weeklyMenu2"]').value === '蒸饺', '编辑同时保留默认和按星期的菜品');
       dialog().close();
       click('当天餐单');
       check(field('当餐菜品').value === '米饭\n蒸南瓜', '重新打开保留日期覆盖菜单');
+      choose('指定日期','2026-11-26');
+      check(field('当餐菜品').value === '红薯\n青菜', '未指定日期时使用周四菜单');
+      choose('指定日期','2026-11-25');
+      check(field('当餐菜品').value === '小米粥\n鸡蛋', '未配置星期菜单的日期使用默认菜品');
+      choose('指定日期',day);
       field('当餐菜品').value = '馒头、胡萝卜';
       click('核对当天餐单', dialog());
       await wait(() => commands.length === 2 && !dialog(), '保存指定日期餐单');

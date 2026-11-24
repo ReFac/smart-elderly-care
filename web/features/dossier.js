@@ -598,7 +598,7 @@ function showKin(ctx, resident, readOnly=false) {
   return disclosure('亲属登记', list, profiles.length);
 }
 
-export function openDossier(ctx, resident) {
+export function openDossier(ctx, resident, lifeEvent) {
   const profile = (ctx.state.dossierProfiles || []).find((p) => p.residentId === resident.id) || {};
   const archived = ['已退住','归档','已归档','已出院'].includes(resident.status);
   const actions = choose();
@@ -619,7 +619,8 @@ export function openDossier(ctx, resident) {
   if (recentChanges) actions.append(recentChanges);
   if (!archived && allowed(ctx, 'care')) contents.append(careTimeline(ctx, 'resident', resident.id));
   if (hasGrant(ctx, 'care', 'clinical', 'medical')) contents.prepend(healthProfile(ctx, resident), renderMedicationReports(ctx, resident.id));
-  if (hasGrant(ctx, 'care', 'clinical')) contents.append(dailyTimeline(ctx, resident));
+  if (hasGrant(ctx, 'care', 'clinical', 'care.groupConfirm') || lifeEvent && hasGrant(ctx, 'residents', 'medical'))
+    contents.append(dailyTimeline(ctx, resident, lifeEvent));
   if (allowed(ctx, 'medical')) contents.append(
     visitHistory(ctx, resident, archived ? null : openVisitEditor), timeline(ctx, resident)
   );

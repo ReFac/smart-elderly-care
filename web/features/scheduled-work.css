@@ -151,3 +151,54 @@
   margin: 1px 0 0;
   padding: 0;
 }
+
+.scheduled-meal-info {
+  display: grid;
+  gap: 10px;
+}
+.scheduled-meal-top {
+  display: grid;
+  grid-template-columns: minmax(95px, .48fr) minmax(0, 1.52fr);
+  align-items: start;
+  gap: 12px;
+}
+.scheduled-week-menus {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+}
+.scheduled-week-menus summary {
+  padding: 7px 10px;
+  color: var(--accent);
+  font-size: .88rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.scheduled-week-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  padding: 0 9px 9px;
+}
+.scheduled-week-menu {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: white;
+}
+.scheduled-week-menu > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+}
+.scheduled-day-status {
+  color: var(--muted);
+  font-size: .76rem;
+  font-weight: 400;
+}
+@media (max-width: 580px) {
+  .scheduled-meal-top,
+  .scheduled-week-grid { grid-template-columns: 1fr; }
+}

@@ -173,6 +173,13 @@ function go(destination, tab, onArrival) {
 
 function getRoute() {
   const original=location.hash.slice(1).split('?')[0];
+  if (original === 'care' && available('care')) {
+    const params = new URLSearchParams(location.hash.split('?')[1]);
+    if (params.get('tab') === 'scheduledWork' && ['care', 'clinical', 'care.schedule'].some(permitted)) {
+      selectTab('care', 'scheduledWork');
+      history.replaceState(null, '', '#care');
+    }
+  }
   if (original === 'assistants') {
     const home = landing();
     window.history.replaceState(null, '', '#' + home);
@@ -770,7 +777,13 @@ function openLinkedResident() {
     return;
   }
   if (destination === 'family' || document.querySelector('dialog[open][data-linked-resident]')) return;
-  const modal = destination === 'residents' ? profile(context(), row) : openDossier(context(), row);
+  const eventId = params.get('lifeEvent');
+  const day = params.get('lifeDay');
+  const lifeEvent = /^[a-f0-9]{32}$/.test(eventId || '') && /^\d{4}-\d{2}-\d{2}$/.test(day || '')
+    ? {eventId, day} : undefined;
+  const modal = destination === 'residents'
+    ? profile(context(), row, lifeEvent)
+    : openDossier(context(), row, lifeEvent);
   modal.dataset.linkedResident = id;
   const target = location.hash;
   modal.addEventListener('close', () => {

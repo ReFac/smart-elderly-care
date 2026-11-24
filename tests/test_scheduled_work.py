@@ -128,6 +128,45 @@ class ScheduledWorkTests(unittest.TestCase):
             [["小米粥", "鸡蛋"]] * 2,
         )
 
+    def test_menu_uses_date_override_then_weekday_then_default(self):
+        rule = self.rule(
+            "每周早餐",
+            weeklyMenus={"2": ["豆浆"], "3": ["馒头", " 水煮蛋 "]},
+        )
+        self.assertEqual(rule["weeklyMenus"], {"2": ["豆浆"], "3": ["馒头", "水煮蛋"]})
+        self.save(
+            "care.scheduleMenu",
+            {"id": rule["id"], "day": START.date().isoformat(), "menu": ["南瓜粥"]},
+        )
+        self.now += timedelta(minutes=1)
+        for expected in (["南瓜粥"], ["馒头", "水煮蛋"], ["小米粥", "鸡蛋"]):
+            self.assertEqual(scheduled_work.tick(self.store), 1)
+            recipes = [
+                task["menu"]
+                for task in self.tasks()
+                if task["date"] == self.now.date().isoformat()
+            ]
+            self.assertEqual(recipes, [expected])
+            self.now += timedelta(days=1)
+
+    def test_weekday_menus_are_validated_and_old_edits_preserve_them(self):
+        rule = self.rule("周菜单编辑", weeklyMenus={"2": ["豆浆"]})
+        old_edit = self.rule("旧表单编辑", id=rule["id"])
+        self.assertEqual(old_edit["weeklyMenus"], {"2": ["豆浆"]})
+        cleared = self.rule("清空周菜单", id=rule["id"], weeklyMenus={})
+        self.assertEqual(cleared["weeklyMenus"], {})
+        for invalid in (
+            {"0": ["粥"]},
+            {"8": ["粥"]},
+            {"2": []},
+            {"2": ["粥", "粥"]},
+            None,
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.rule("无效周菜单", weeklyMenus=invalid)
+        with self.assertRaises(ValueError):
+            self.rule("巡查不设周菜单", kind="patrol", weeklyMenus={"2": ["粥"]})
+
     def test_weekday_pause_and_campus_scope(self):
         staff = self.staff(["care", "care.schedule"])
         with self.assertRaises(PermissionError):
