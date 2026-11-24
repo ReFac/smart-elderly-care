@@ -22,6 +22,8 @@ import {
   money,
 } from './shared.js';
 
+import { channelOrders, expensePanel, reminders } from './settlements.js';
+
 function generate(ctx) {
   const resident = select(
     'residentId',
@@ -130,15 +132,47 @@ function billDetail(ctx, bill) {
       ['账期', bill.month],
       ['计费区间', bill.startDate + ' 至 ' + bill.endDate],
       ['计费天数', String(bill.serviceDays)],
-      ['等级快照', bill.careLevel],
-      ['床位日费', money(bill.bedFee)],
-      ['护理日费', money(bill.careFee)],
+      ['期末等级快照', bill.careLevel],
+      ['期末床位日费', money(bill.bedFee)],
+      ['期末护理日费', money(bill.careFee)],
       ['月度套餐', money(bill.packageFee)],
       ['请假天数', String(bill.leaveDays)],
       ['应收总额', money(bill.amount)],
       ['已收总额', money(bill.paid)],
       ['待缴余额', money(bill.balance)],
     ]),
+    ...(bill.segments
+      ? [
+          section(
+            '分段计费依据',
+            records(bill.segments, (s) =>
+              named(
+                s.start + ' 至 ' + s.end + ' · ' + (s.bedLabel || '床位未记载') + ' · ' + s.level,
+                s.days +
+                  ' 天，护理减免 ' +
+                  s.leaveDays +
+                  ' 天，床位 ' +
+                  money(s.bedFee) +
+                  '/日，护理 ' +
+                  money(s.careFee) +
+                  '/日'
+              )
+            )
+          ),
+          facts([
+            ['床位合计', money(bill.bedTotal)],
+            ['护理合计', money(bill.careTotal)],
+            [
+              '手工确认',
+              bill.manualOverrides
+                ?.map(
+                  (k) => ({ bedFee: '床位日费', careFee: '护理日费', leaveDays: '减免天数' })[k]
+                )
+                .join('、') || '按业务记录核算',
+            ],
+          ]),
+        ]
+      : []),
     section(
       '核销流水',
       records(
@@ -210,6 +244,9 @@ export function billing(ctx) {
             ],
           }),
       ],
+      ['orders', '渠道对账', () => channelOrders(ctx)],
+      ['reminders', '欠费提醒', () => reminders(ctx)],
+      ['expenses', '支出登记', () => expensePanel(ctx)],
       [
         'deposits',
         '预交余额',

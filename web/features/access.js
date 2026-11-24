@@ -108,13 +108,13 @@ export function loginScreen(onLogin, branding = {}) {
   mark.src = '/assets/mark.svg';
   mark.alt = '';
   hero.append(
-    node('div', 'access-brand', [mark, node('strong', '', branding.brandName || '安康医养平台')])
+    node('div', 'access-brand', [mark, node('strong', '', branding.brandName || '安康医养平台')]),
   );
   const product = node('div', 'access-product');
   product.append(
     node('span', 'access-edition', branding.institutionName || '安康家园'),
     node('h1', '', branding.brandName || '安康医养平台'),
-    careFlowFigure()
+    careFlowFigure(),
   );
   hero.append(product);
 
@@ -123,7 +123,7 @@ export function loginScreen(onLogin, branding = {}) {
   panel.append(
     node('span', 'access-login-icon', icon('shield', 25)),
     node('h2', '', '登录工作台'),
-    node('p', 'access-login-intro', '使用机构分配的员工、亲属或总管理员账号。')
+    node('p', 'access-login-intro', '使用机构分配的员工、亲属或总管理员账号。'),
   );
   const form = node('form', 'access-form access-login-form');
   const [nameRow, name] = inputField('登录账号', 'username', '', {
@@ -173,7 +173,8 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
   const [nameRow, name] = inputField('姓名', 'displayName', target?.displayName || '', { max: 60 });
   const identity = node('div', 'access-field-pair', nameRow);
   form.append(identity);
-  let username, password, resident, familyServices;
+  let username, password, resident, familyServices, portalIdentity;
+  const scopeControls = new Map();
   if (!target) {
     let row;
     [row, username] = inputField('登录名', 'username', '', {
@@ -196,7 +197,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       node('div', 'access-fixed-login', [
         node('span', '', '登录名'),
         node('strong', '', target.username),
-      ])
+      ]),
     );
   let role, grants;
   if (family) {
@@ -206,7 +207,16 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       const [residentRow, select] = selectField('已获授权的长者', options);
       resident = select;
       resident.required = true;
-      form.append(residentRow, node('p', 'fx-muted', '请先核验亲属身份和长者授权。'));
+      const [typeRow, typeControl] = selectField('使用人', [
+        ['family', '已授权亲属'],
+        ['self', '长者本人'],
+      ]);
+      portalIdentity = typeControl;
+      form.append(
+        typeRow,
+        residentRow,
+        node('p', 'fx-muted', '请核对使用人身份、绑定长者和查阅授权。'),
+      );
     } else {
       form.append(
         facts([
@@ -214,38 +224,46 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
             '绑定长者',
             state.residents.find((r) => r.id === target.residentId)?.name || target.residentId,
           ],
-        ])
+        ]),
       );
     }
     familyServices = node('input');
     familyServices.type = 'checkbox';
     familyServices.name = 'familyServices';
     familyServices.checked = target?.familyServices === true;
+    const scopeRows = [
+      ['careSchedule', '查看照护工单与执行进度'],
+      ['medication', '查看已复核医嘱和给药时间'],
+    ].map(([key, label]) => {
+      const control = node('input');
+      control.type = 'checkbox';
+      control.name = key;
+      control.checked = target?.portalScopes?.includes(key) || false;
+      scopeControls.set(key, control);
+      return node('label', 'access-check', [control, node('span', '', label)]);
+    });
     form.append(
       section(
-        '家属查阅授权',
+        '绑定账号查阅授权',
         node('div', 'access-family-grant', [
           node('label', 'access-check', [familyServices, node('span', '', '查看已完成的照护服务')]),
-          node(
-            'p',
-            'fx-muted',
-            '开通后可查看绑定长者近期已完成的服务日期和项目。亲属可自行维护本人的资料。'
-          ),
-        ])
-      )
+          ...scopeRows,
+          node('p', 'fx-muted', '每项授权只适用于此账号和绑定长者，可随时收回。'),
+        ]),
+      ),
     );
   } else {
     const preset = target?.role || defaultRole;
     const [roleRow, roleSelect] = selectField(
       '岗位模板',
       Object.keys(state.rolePresets).map((x) => [x, x]),
-      preset
+      preset,
     );
     role = roleSelect;
     role.name = 'role';
     grants = grantPicker(
       state.permissionOptions,
-      target?.permissions || state.rolePresets[preset] || []
+      target?.permissions || state.rolePresets[preset] || [],
     );
     role.addEventListener('change', () => grants.write(state.rolePresets[role.value] || []));
     form.append(
@@ -256,7 +274,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
         kind: 'staff',
         role: role.value,
         permissions: grants.read(),
-      }))
+      })),
     );
   }
   saveForm(form, target ? '保存变更' : '创建账号', () => {
@@ -266,7 +284,14 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
     if (!family) Object.assign(payload, { role: role.value, permissions: grants.read() });
     else {
       payload.familyServices = familyServices.checked;
-      if (!target) payload.residentId = resident.value;
+      payload.portalScopes = [...scopeControls]
+        .filter(([, control]) => control.checked)
+        .map(([key]) => key);
+      if (!target)
+        Object.assign(payload, {
+          residentId: resident.value,
+          portalSelf: portalIdentity.value === 'self',
+        });
     }
     return ctx.command(target ? 'access.update' : 'access.create', payload);
   });
@@ -319,7 +344,7 @@ function roleTemplates(ctx) {
     card.append(
       node('span', 'access-template-icon', icon(icons[role] || 'people', 19)),
       node('strong', '', role),
-      node('small', '', permissions.length + ' 项授权')
+      node('small', '', permissions.length + ' 项授权'),
     );
     card.addEventListener('click', () => {
       const content = node('section', 'access-template-detail');
@@ -328,8 +353,8 @@ function roleTemplates(ctx) {
           node(
             'ul',
             'access-grant-list',
-            permissions.map((key) => node('li', '', ctx.state.permissionOptions[key]))
-          )
+            permissions.map((key) => node('li', '', ctx.state.permissionOptions[key])),
+          ),
         );
       else content.append(node('p', 'access-login-intro', '从空权限开始勾选。'));
       const detail = ctx.detail(role + ' · 岗位模板', content);
@@ -341,8 +366,8 @@ function roleTemplates(ctx) {
             detail.close();
             editAccount(ctx, 'staff', null, role);
           },
-          'primary'
-        )
+          'primary',
+        ),
       );
     });
     cards.append(card);
@@ -365,8 +390,8 @@ function accounts(ctx) {
                   'ul',
                   'access-grant-list',
                   account.permissions.map((key) =>
-                    node('li', '', state.permissionOptions[key] || key)
-                  )
+                    node('li', '', state.permissionOptions[key] || key),
+                  ),
                 )
               : node('p', 'fx-muted', '当前账号未分配业务权限。'),
           ])
@@ -376,7 +401,7 @@ function accounts(ctx) {
         node(
           'span',
           'access-person-icon',
-          icon(account.kind === 'owner' ? 'shield' : 'people', 22)
+          icon(account.kind === 'owner' ? 'shield' : 'people', 22),
         ),
         named(account.displayName, account.username + ' · ' + account.role),
         badge(ctx, account.enabled ? '已启用' : '已停用', account.enabled ? 'green' : 'neutral'),
@@ -389,6 +414,8 @@ function accounts(ctx) {
               state.residents.find((r) => r.id === account.residentId)?.name || account.residentId,
             ],
             ['已完成照护服务', account.familyServices ? '可查阅近期服务日期和项目' : '未开通查阅'],
+            ['照护工单', account.portalScopes.includes('careSchedule') ? '可查阅' : '未开通查阅'],
+            ['医嘱与给药', account.portalScopes.includes('medication') ? '可查阅' : '未开通查阅'],
           ])
         : null,
       capabilitySummary(ctx, account),
@@ -405,9 +432,9 @@ function accounts(ctx) {
       : '可管理员工的现有权限和新分配的权限均限于你的业务授权。',
     choose(
       state.accessManagement.canBindFamily
-        ? btn(ctx, '绑定亲属', () => editAccount(ctx, 'family'))
+        ? btn(ctx, '绑定亲属或长者', () => editAccount(ctx, 'family'))
         : null,
-      btn(ctx, '新增员工', () => editAccount(ctx, 'staff'), 'primary')
+      btn(ctx, '新增员工', () => editAccount(ctx, 'staff'), 'primary'),
     ),
     table(ctx, {
       title: isOwner ? '机构账号' : '可管理员工',
@@ -445,7 +472,7 @@ function accounts(ctx) {
                 : r.kind === 'family'
                   ? '亲属权限'
                   : r.permissions.length + ' 项授权',
-              () => showPermissions(r)
+              () => showPermissions(r),
             ),
         },
         {
@@ -461,12 +488,12 @@ function accounts(ctx) {
               link(ctx, '重设密码', () => resetPassword(ctx, r)),
               r.kind === 'owner'
                 ? null
-                : link(ctx, r.enabled ? '停用' : '恢复', () => status(ctx, r))
+                : link(ctx, r.enabled ? '停用' : '恢复', () => status(ctx, r)),
             ),
         },
       ],
     }),
-    roleTemplates(ctx)
+    roleTemplates(ctx),
   );
   management.classList.add('access-management');
   return management;
@@ -487,7 +514,7 @@ function settings(ctx) {
       ['ocean', '海蓝'],
       ['plum', '紫蓝'],
     ],
-    visual.theme
+    visual.theme,
   );
   const orgTitle = node('strong'),
     brandTitle = node('span');
@@ -507,14 +534,14 @@ function settings(ctx) {
     .map((r) => [r, routes.get(r)?.label || r]);
   const visible = checkboxes(
     routeChoices,
-    routeChoices.map((x) => x[0]).filter((r) => !visual.hiddenRoutes.includes(r))
+    routeChoices.map((x) => x[0]).filter((r) => !visual.hiddenRoutes.includes(r)),
   );
   appearance.append(
     node('h2', 'access-settings-heading', [icon('layers', 21), '机构界面']),
     preview,
     node('div', 'access-field-pair', [brandRow, orgRow]),
     themeRow,
-    section('导航可见模块', visible.element)
+    section('导航可见模块', visible.element),
   );
   saveForm(appearance, '保存界面设置', () =>
     ctx.command('access.settings', {
@@ -522,7 +549,7 @@ function settings(ctx) {
       institutionName: org.value,
       theme: theme.value,
       hiddenRoutes: routeChoices.map((x) => x[0]).filter((r) => !visible.read().includes(r)),
-    })
+    }),
   );
   const states = {
     available: '已开通',
@@ -550,7 +577,7 @@ function settings(ctx) {
     '机构设置',
     '调整机构工作台外观，查看平台 AI 套餐与用量。',
     null,
-    node('div', 'access-settings-grid', [appearance, deep])
+    node('div', 'access-settings-grid', [appearance, deep]),
   );
   result.classList.add('access-management');
   return result;

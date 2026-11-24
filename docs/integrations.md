@@ -68,4 +68,4 @@
 1. **先查实际型号。** 小米官方 Home Assistant 集成通过小米账号 OAuth 2.0 授权，按 MIoT 设备服务描述映射属性和事件。实施时先选定型号、固件、区域与网关，检查授权后实际出现的人体存在、运动或厂商跌倒事件。将结果落入 `iot.mijia-capabilities`，逐台绑定院区与房间。仅有“人体存在”时，保留该观测的原始含义。[小米官方集成说明](https://github.com/XiaoMi/ha_xiaomi_home)
 2. **媒体单独验收。** 小米说明其官方 Home Assistant 集成无法与摄像机协商 P2P 加密视频密钥，因而无法读取这类实时流。若具体设备通过厂商正式接口提供授权快照或跌倒示意图，可通过 `iot.mijia-evidence` 传递具有权限控制的证据引用。需要厂商说明样例报文、授权范围、有效期和取证限制。[官方摄像机视频流说明](https://github.com/XiaoMi/ha_xiaomi_home/wiki/Features-that-will-not-be-implemented#camera-video-stream)
 3. **接入专业设备。** `iot.sensor` 接收超声波、雷达、人体存在或床位传感器观测。`iot.youle` 接收优乐侧的疑似跌倒、持续卧床和证据引用，待厂商确认“优乐”的具体产品、签名方式、时间戳、坐标系、阈值单位与稳定事件编号。首稿的本地模拟流程可验证重复消息、双人房、误报和人工复核。
-4. **接入语音和 OCR。** `voice.transcribe` 预留音频分片、部分和最终转写。`voice.proposal` 预留意图草案。`document.ocr` 和 `deepseek-summary` 预留留档图像的识别和一次概括。设备上传、识别和推理的网络调用交由各自适配器实现。验收应覆盖断网重传、授权撤回、人工确认、处理过的申请在其他账号消失、跨房间查询与原图留存。
+4. **接入语音和 OCR。** `voice.transcribe` 预留音频分片、部分和最终转写。`voice.proposal` 预留意图草案。`document.ocr` 和 `deepseek-summary` 预留留档图像的识别和一次概括。已存文书也可选择院内中文 OCR，读取原图逐行定位并在人工核对后回填。外部云识别适配器独立于这一院内流程。验收应覆盖断网重传、授权撤回、人工确认、处理过的申请在其他账号消失、跨房间查询与原图留存。

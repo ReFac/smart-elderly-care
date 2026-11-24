@@ -2,7 +2,7 @@ import { groups } from '../lib/navigation.js';
 import { btn, node } from './shared.js';
 
 const grantGroups = [
-  ['入住与照护', ['residents', 'intake', 'care', 'clinical']],
+  ['入住与照护', ['residents', 'intake', 'care', 'clinical', 'clinical.rules']],
   ['医疗档案与亲属', ['medical', 'medical.write', 'relatives']],
   ['机构运营', ['inventory', 'finance', 'shifts', 'reports']],
   ['智能协作与设备', ['assistants', 'gateway.simulate', 'alerts', 'voice', 'voice.confirm']],
@@ -34,11 +34,27 @@ const commands = {
       vital: '录入体征',
       resolveVital: '复核异常体征',
       archive: '登记健康记录',
+      screen: '登记筛查',
+      scheduleFollowup: '安排干预与随访',
+      finishFollowup: '记录干预效果',
+      refer: '创建转介',
+      receiveReferral: '登记接收回执',
+      referralConsent: '登记或撤回资料授权',
+      exportReferral: '导出授权衔接资料',
+      publishDrugRule: '发布核准用药规则',
+      retireDrugRule: '停用核查规则',
     },
   ],
   dossier: [
     '档案维护',
-    { profile: '维护长者资料', document: '存档医疗文书', relative: '维护亲属资料' },
+    {
+      profile: '维护长者资料',
+      document: '存档医疗文书',
+      relative: '维护亲属资料',
+      ocr: '识别已存原件',
+      reviewDocument: '签认文书回填',
+      signSummary: '签认档案摘要',
+    },
   ],
   ops: [
     '运营业务',
@@ -49,6 +65,12 @@ const commands = {
       bill: '生成账单',
       deposit: '登记预交',
       pay: '核销账单',
+      paymentOrder: '登记商户订单',
+      importReceipt: '核销渠道凭证',
+      remindBill: '登记催缴',
+      expense: '登记支出',
+      submitReport: '登记报送版本',
+      reportReceipt: '登记报送回执',
       report: '生成报送草稿',
       suggest: '生成建议',
       review: '审核建议',
@@ -88,6 +110,7 @@ const commands = {
     },
   ],
   account: ['个人账号', { changePassword: '修改本人密码' }],
+  portal: ['长者与家属服务', { feedback: '评价已完成的服务' }],
 };
 
 export function grantPicker(options, current) {
@@ -134,7 +157,7 @@ function scopeRow(label, values) {
     node(
       'div',
       'access-scope-values',
-      values.map((s) => node('span', '', s))
+      values.map((s) => node('span', '', s)),
     ),
   ]);
 }
@@ -145,7 +168,7 @@ export function capabilitySummary(ctx, account) {
   const routePanel = node(
     'section',
     'access-capability-section',
-    node('h3', '', '工作台入口 · ' + visible.length)
+    node('h3', '', '工作台入口 · ' + visible.length),
   );
   for (const [group, items] of groups) {
     const labels = items.filter(([key]) => visible.includes(key)).map(([, label]) => label);

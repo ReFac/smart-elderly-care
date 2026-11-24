@@ -11,8 +11,10 @@ import zlib
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from . import access
-from .care.records import lookup
+from . import access, document_ocr
+from .dossier_summary import sign_summary, summary_draft as summary_draft
+from .care.clinical import refresh_medication_warnings
+from .care.records import append_record, lookup
 
 MAX_IMAGE = 8 * 1024 * 1024
 BASIC = {
@@ -51,7 +53,7 @@ CATEGORIES = (
     "病史补录",
     "其他医疗文书",
 )
-METHODS = ("手工描述", "人工核对的 OCR 转录")
+METHODS = ("手工描述", "人工核对的 OCR 转录", document_ocr.METHOD)
 
 
 def init(db):
@@ -66,6 +68,7 @@ def init(db):
            metadata TEXT NOT NULL, mime TEXT, original BLOB, image_hash TEXT,
            UNIQUE(resident_id,request_id), UNIQUE(resident_id,image_hash),
            UNIQUE(resident_id,fingerprint))""",
+        """CREATE INDEX IF NOT EXISTS dossier_document_original_digest ON dossier_documents(image_hash)""",
         """CREATE INDEX IF NOT EXISTS dossier_document_chronology
            ON dossier_documents(resident_id,event_date DESC)""",
         """CREATE TRIGGER IF NOT EXISTS dossier_document_no_delete BEFORE DELETE ON dossier_documents
@@ -75,6 +78,7 @@ def init(db):
     )
     for statement in statements:
         db.execute(statement)
+    document_ocr.init(db)
 
 
 def pack(data):
@@ -176,7 +180,12 @@ def edit_relative(db, state, p, user, today):
         subject = user
     elif user["kind"] == "owner":
         subject = access.account(db, p.get("accountId"))
-        if not subject or subject["kind"] != "family" or not subject["enabled"]:
+        if (
+            not subject
+            or subject["kind"] != "family"
+            or subject.get("portalSelf")
+            or not subject["enabled"]
+        ):
             raise ValueError("请选择有效的已绑定亲属账号")
         if p.get("residentId", subject["residentId"]) != subject["residentId"]:
             raise ValueError("亲属绑定与长者档案不一致")
@@ -310,7 +319,10 @@ def archive_document(db, state, p, user, today):
     if method not in METHODS:
         raise ValueError("请选择有效的描述来源")
     source = text(p, "source", 200, True)
-    description = text(p, "description", 8000, True)
+    staging = method == document_ocr.METHOD
+    description = text(p, "description", 8000, not staging)
+    if staging and description:
+        raise ValueError("请先留存原件，识别后再核对文字")
     pending = text(p, "pending", 2000)
     raw, mime, digest = photo_payload(p)
     if not raw and (kind != "病史补录" or method != METHODS[0]):
@@ -342,7 +354,8 @@ def archive_document(db, state, p, user, today):
     meta = {
         "category": kind,
         "source": source,
-        "summary": summary,
+        "summary": None if staging else summary,
+        "method": method,
         "bytes": len(raw) if raw else 0,
         "filename": text(p, "filename", 200) if raw else "",
     }
@@ -363,10 +376,142 @@ def archive_document(db, state, p, user, today):
             digest,
         ),
     )
-    return f"为长者 {rid} 存档医疗文书并保存概括"
+    return (
+        f"为长者 {rid} 留存医疗原件，等待识别"
+        if staging
+        else f"为长者 {rid} 存档医疗文书并保存概括"
+    )
+
+
+def review_document(db, state, p, user, today):
+    for grant in ("medical.write", "medical", "clinical"):
+        access.require(user, grant)
+    if set(p) != {
+        "residentId",
+        "documentId",
+        "verifiedName",
+        "sourceFacts",
+        "pending",
+        "method",
+        "changes",
+    }:
+        raise ValueError("文书核对字段无效")
+    did, raw_meta = document_ocr.source(db, p)
+    meta = json.loads(raw_meta)
+    resident = lookup(state, "residents", p["residentId"])
+    if text(p, "verifiedName", 60, True) != resident["name"]:
+        raise ValueError("请核对原件姓名与当前长者")
+    facts = text(p, "sourceFacts", 8000, True)
+    pending = text(p, "pending", 2000)
+    changes = p["changes"]
+    if not isinstance(changes, list) or len(changes) > len(document_ocr.FIELDS):
+        raise ValueError("请逐项选择要回填的档案字段")
+    fingerprint = hashlib.sha256(pack(p).encode()).hexdigest()
+    prior = db.execute(
+        "SELECT review FROM dossier_document_reviews WHERE document_id=?", (did,)
+    ).fetchone()
+    if prior:
+        if json.loads(prior[0])["fingerprint"] == fingerprint:
+            return "该原件已完成同一复核，沿用既有概括"
+        raise ValueError("该原件已有人工核对结果")
+    row = db.execute(
+        "SELECT result FROM dossier_ocr_jobs WHERE document_id=? AND published=1",
+        (did,),
+    ).fetchone()
+    ocr = json.loads(row[0]) if row else {}
+    method = p["method"]
+    if method not in ("院内 OCR 人工核对", "手工描述") or (
+        method != "手工描述" and ocr.get("state") != "recognized"
+    ):
+        raise ValueError("请选择与实际识别结果相符的文字来源")
+    identity_mismatch = any(
+        c["field"] == "name" and c["value"] != resident["name"]
+        for c in ocr.get("candidates", [])
+    )
+    if changes and identity_mismatch:
+        raise ValueError("原文识别姓名与档案不同，请先核实身份，本次仅可留存文书")
+    recorded = {}
+    for item in changes:
+        if not isinstance(item, dict) or set(item) != {
+            "field",
+            "value",
+            "previous",
+            "line",
+        }:
+            raise ValueError("请逐项确认回填值、原值和来源")
+        key, line = item["field"], item["line"]
+        if (
+            not isinstance(key, str)
+            or key not in document_ocr.FIELDS
+            or key in recorded
+        ):
+            raise ValueError("回填字段无效或重复")
+        value = text(item, "value", 1000, True)
+        previous = resident.get(key) or ""
+        if item["previous"] != previous:
+            raise ValueError("已有档案内容发生变化，请重新核对")
+        if line is not None and (
+            type(line) is not int
+            or method == "手工描述"
+            or not any(
+                c["line"] == line and c["field"] == key
+                for c in ocr.get("candidates", [])
+            )
+        ):
+            raise ValueError("候选字段的原文行号无效")
+        recorded[key] = {"before": previous, "after": value, "page": 1, "line": line}
+    event = db.execute(
+        "SELECT event_date FROM dossier_documents WHERE id=?", (did,)
+    ).fetchone()[0]
+    reviewed = {
+        "eventDate": event,
+        "source": meta["source"],
+        "documentType": meta["category"],
+        "sourceFacts": facts,
+        "pending": pending or "未填写",
+        "reviewedBy": user["displayName"],
+        "reviewerId": user["id"],
+        "method": method,
+        "version": 1,
+    }
+    receipt = {
+        "summary": reviewed,
+        "changes": recorded,
+        "identityMatch": not identity_mismatch,
+        "reviewDate": today,
+        "fingerprint": fingerprint,
+    }
+    db.execute(
+        "INSERT INTO dossier_document_reviews(document_id,review) VALUES(?,?)",
+        (did, pack(receipt)),
+    )
+    if recorded:
+        resident.update({k: v["after"] for k, v in recorded.items()})
+        append_record(
+            state,
+            "archives",
+            residentId=resident["id"],
+            date=today,
+            source="医疗原件逐项复核",
+            documentId=did,
+            reviewer=user["displayName"],
+            summary=resident.get("summary") or facts,
+            allergies=resident.get("allergies", ""),
+            risk=resident.get("risk", ""),
+        )
+        if "allergies" in recorded:
+            refresh_medication_warnings(state, resident)
+    return f"核对长者 {resident['id']} 的文书概括" + (
+        "并回填" + "、".join(document_ocr.FIELDS[k] for k in recorded)
+        if recorded
+        else ""
+    )
 
 
 HANDLERS = {
+    "dossier.ocr": document_ocr.publish,
+    "dossier.signSummary": sign_summary,
+    "dossier.reviewDocument": review_document,
     "dossier.profile": edit_profile,
     "dossier.document": archive_document,
     "dossier.relative": edit_relative,
@@ -405,11 +550,39 @@ def project(db, data, user, today=None):
                 entry.update(json.loads(household))
             data["dossierProfiles"].append(entry)
     if user["kind"] != "family" and access.has(user, "medical"):
-        for did, rid, event, recorded, meta, mime in db.execute(
-            """SELECT id,resident_id,event_date,recorded_date,metadata,mime FROM dossier_documents
-               ORDER BY event_date DESC,rowid DESC"""
+        for (
+            did,
+            rid,
+            event,
+            recorded,
+            meta,
+            mime,
+            digest,
+            ocr_status,
+            ocr_error,
+            review,
+        ) in db.execute(
+            """SELECT d.id,d.resident_id,d.event_date,d.recorded_date,d.metadata,d.mime,d.image_hash,
+                    json_extract(j.result,'$.state'),json_extract(j.result,'$.error'),r.review
+               FROM dossier_documents d LEFT JOIN dossier_ocr_jobs j ON j.document_id=d.id AND j.published=1
+               LEFT JOIN dossier_document_reviews r ON r.document_id=d.id
+               ORDER BY d.event_date DESC,d.rowid DESC"""
         ):
             if rid in residents:
+                metadata = json.loads(meta)
+                if metadata.get("method") == document_ocr.METHOD:
+                    metadata["imageHash"] = digest
+                    metadata["ocr"] = {
+                        "state": ocr_status or "queued",
+                        "error": ocr_error or "",
+                    }
+                if review:
+                    receipt = json.loads(review)
+                    metadata.update(
+                        summary=receipt["summary"],
+                        reviewChanges=receipt["changes"],
+                        reviewDate=receipt["reviewDate"],
+                    )
                 data["medicalDocuments"].append(
                     {
                         "id": did,
@@ -417,7 +590,7 @@ def project(db, data, user, today=None):
                         "eventDate": event,
                         "recordedDate": recorded,
                         "hasImage": bool(mime),
-                        **json.loads(meta),
+                        **metadata,
                     }
                 )
     if user["kind"] == "family" or access.has(user, "relatives"):

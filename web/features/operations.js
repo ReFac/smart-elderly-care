@@ -289,7 +289,7 @@ function download(ctx, report) {
   );
   const a = node('a');
   a.href = url;
-  a.download = '民政报送草稿-' + report.month + '.json';
+  a.download = '民政报送-' + report.month + '-v' + (report.version || 1) + '.json';
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   ctx.toast('报送草稿已导出');
@@ -304,10 +304,19 @@ function reportDetails(ctx, r) {
         ['月份', r.month],
         ['记录数', String(r.recordCount)],
         ['校验状态', r.status],
+        ['报送进度', r.stage || '草稿'],
+        ['版本', String(r.version || 1)],
         ['生成日期', r.createdAt],
         ['数据截止', r.cutoff],
         ...Object.entries(r.summary || {}).map(([key, val]) => [key, String(val)]),
       ]),
+      r.serviceMetrics
+        ? section('照护运营汇总', facts([
+            ['计划工单（按计划日期）', String(r.serviceMetrics.scheduledTasks)],
+            ['完成工单（按完成日期）', String(r.serviceMetrics.completedTasks)],
+            ['实际服务长者（去重）', r.serviceMetrics.servedResidents + ' 人'],
+          ]))
+        : node('p', 'fx-muted', '这一版尚未收录照护运营汇总。'),
       section(
         '校验项目',
         records(r.checks || [], (i) => i)
@@ -342,7 +351,74 @@ function reportDetails(ctx, r) {
           },
         ],
       }),
-      btn(ctx, '导出 JSON 草稿', () => download(ctx, r)),
+      section(
+        '送出与回执',
+        records(
+          r.submissions || [],
+          (s) =>
+            node('div', 'fx-profile', [
+              named(
+                '第 ' + s.version + ' 版 · ' + s.recipient,
+                s.sentOn + ' · 送出凭证 ' + s.submissionRef
+              ),
+              s.receiptRef
+                ? named(s.outcome + ' · ' + s.receiptRef, s.receiptDate + ' · ' + s.note)
+                : node('p', 'fx-muted', '待接收方回执'),
+              link(ctx, '导出本版快照', () => download(ctx, s.snapshot)),
+            ]),
+          '暂无送出凭证'
+        )
+      ),
+      choose(
+        btn(ctx, '导出 JSON 草稿', () =>
+          download(
+            ctx,
+            r.submissions?.find((s) => s.version === r.version)?.snapshot || {
+              ...r,
+              submissions: undefined,
+            }
+          )
+        ),
+        (r.stage || '草稿') === '草稿' && !r.serviceMetrics
+          ? btn(ctx, '重新归集本月数据', () => ctx.command('ops.report', { month: r.month }))
+          : null,
+        (r.stage || '草稿') === '草稿' && r.status === '已校验' && r.serviceMetrics
+          ? btn(
+              ctx,
+              '登记送出凭证',
+              () =>
+                runForm(ctx, {
+                  title: '登记民政报送送出凭证',
+                  action: 'ops.submitReport',
+                  description: '按机构实际送出的版本登记接收方及凭证编号。',
+                  fields: [
+                    field('recipient', '实际接收机构'),
+                    field('submissionRef', '送出凭证编号'),
+                  ],
+                  map: (v) => ({ ...v, reportId: r.id }),
+                }),
+              'primary'
+            )
+          : null,
+        r.stage === '待回执'
+          ? btn(
+              ctx,
+              '登记接收方回执',
+              () =>
+                runForm(ctx, {
+                  title: '登记接收方回执',
+                  action: 'ops.reportReceipt',
+                  fields: [
+                    select('outcome', '受理结果', options(['已受理', '已退回'])),
+                    field('receiptRef', '回执编号'),
+                    memo('note', '回执说明或退回原因', true),
+                  ],
+                  map: (v) => ({ ...v, reportId: r.id }),
+                }),
+              'primary'
+            )
+          : null
+      ),
     ])
   );
 }
@@ -390,7 +466,7 @@ export function reports(ctx) {
         },
         {
           label: '状态',
-          view: (r) => badge(ctx, r.status),
+          view: (r) => badge(ctx, r.stage && r.stage !== '草稿' ? r.stage : r.status),
         },
         {
           label: '操作',

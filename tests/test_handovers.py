@@ -372,3 +372,97 @@ class ShiftHandoverTests(unittest.TestCase):
         self.assertNotIn("体征", care_visible["summary"])
         self.assertNotIn("openVitals", self.submit(self.owner, aide)["snapshot"])
         self.assertNotIn("openVitals", self.submit(care_token, nurse)["snapshot"])
+
+    def test_editable_preview_matches_today_completed_overdue_and_resists_scope_changes(
+        self,
+    ):
+        outgoing, actor = self.account("out-qa", "care", name="交班甲")
+        incoming, receiver = self.account("in-qa", "care", name="接班乙")
+        other, third = self.account("third-qa", "care", name="旁班丙")
+        finance, _ = self.account("fin-qa", "finance")
+
+        def add(title):
+            self.execute(
+                self.owner,
+                "care.addTask",
+                residentId=self.resident,
+                title=title,
+                assignee=actor["username"],
+                kind="自定义临床内容",
+                note="内部医学内容，只限原记录",
+            )
+
+        add("病史密文")
+        add("午餐陪护")
+        self.instant += timedelta(days=1)
+        add("晚间巡房")
+        task = next(
+            t
+            for t in self.store.snapshot(outgoing)["data"]["tasks"]
+            if t["title"] == "病史密文"
+        )
+        self.execute(
+            outgoing, "care.completeTask", taskId=task["id"], operatorId=third["id"]
+        )
+        before = self.store.version(outgoing)["revision"]
+        preview = self.store.handover_draft(outgoing, receiver["id"])
+        self.assertEqual(self.store.version(outgoing)["revision"], before)
+        self.assertEqual(
+            preview["snapshot"], dict(completedToday=1, pendingToday=1, overdue=1)
+        )
+        self.assertIn("晚间巡房", preview["note"])
+        self.assertIn("午餐陪护", preview["note"])
+        for secret in ("病史密文", "内部医学", "自定义临床内容"):
+            self.assertNotIn(secret, preview["note"])
+        for token in (finance,):
+            with self.assertRaises(PermissionError):
+                self.store.handover_draft(token, receiver["id"])
+        fields = dict(
+            assigneeId=receiver["id"],
+            residentId="",
+            note="交班甲已核对。" + preview["note"],
+            draftStamp=preview["stamp"],
+        )
+        for key, val in (("assigneeId", third["id"]), ("residentId", self.resident)):
+            with self.assertRaises(ValueError):
+                self.execute(outgoing, "care.handover", **{**fields, key: val})
+        self.execute(outgoing, "care.handover", **fields)
+        received = self.store.snapshot(incoming)["data"]["handovers"][-1]
+        self.assertEqual(
+            (received["draftScope"], received["snapshot"], received["note"]),
+            ("personal", preview["snapshot"], fields["note"]),
+        )
+        self.assertNotIn(
+            received["id"],
+            [r["id"] for r in self.store.snapshot(other)["data"]["handovers"]],
+        )
+        self.execute(incoming, "care.acceptHandover", handoverId=received["id"])
+        self.assertEqual(
+            self.store.snapshot(outgoing)["data"]["handovers"][-1]["status"], "已签收"
+        )
+        add("交班前巡访")
+        with self.assertRaises(ValueError):
+            self.execute(outgoing, "care.handover", **fields)
+
+    def test_preview_and_send_check_both_live_resident_regions(self):
+        sender, _ = self.account("shift-limited", "care")
+        _, receiver = self.account("limit-receiver", "care")
+        _, target = self.account("empty-area", "care")
+        self.store.facility_policy = lambda db, u: (
+            {"roomIds": []} if u["id"] == target["id"] else {}
+        )
+        r = self.store.handover_draft(sender, receiver["id"], self.resident)
+        with self.assertRaises(PermissionError):
+            self.store.handover_draft(sender, target["id"], self.resident)
+        self.store.facility_policy = lambda db, u: (
+            {"roomIds": []} if u["id"] == receiver["id"] else {}
+        )
+        with self.assertRaises(PermissionError):
+            self.execute(
+                sender,
+                "care.handover",
+                assigneeId=receiver["id"],
+                residentId=self.resident,
+                draftStamp=r["stamp"],
+                note=r["note"],
+            )

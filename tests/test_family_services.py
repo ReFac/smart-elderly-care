@@ -99,6 +99,21 @@ class FamilyServiceAccessTests(unittest.TestCase):
         self.assertEqual(result["medications"], [])
         self.assertEqual(result["bills"], [])
         self.assertNotIn("familyServiceHistory", self.store.snapshot(peer)["data"])
+        self.command(
+            self.owner, "access.update", id=person["id"], portalScopes=["careSchedule"]
+        )
+        version = self.store.version(family)["revision"]
+        older = self.store.portal_history(family, "careSchedule", 30, version)
+        self.assertEqual(older["total"], 33)
+        self.assertEqual(len(older["rows"]), 3)
+        self.assertTrue(
+            all(r["id"] != "elsewhere" and "note" not in r for r in older["rows"])
+        )
+        with self.assertRaises(PermissionError):
+            self.store.portal_history(peer, "careSchedule", 0, version)
+        self.command(self.owner, "access.update", id=person["id"], portalScopes=[])
+        with self.assertRaises(PermissionError):
+            self.store.portal_history(family, "careSchedule", 30, version)
         self.assertEqual(
             [
                 r["title"]
@@ -112,6 +127,47 @@ class FamilyServiceAccessTests(unittest.TestCase):
             "收回已完成服务记录查阅权限",
             self.store.snapshot(self.owner)["audit"][0]["summary"],
         )
+
+    def test_resident_portal_and_family_medication_grants_are_independent(self):
+        token, resident = self.family(
+            "resident-login",
+            "r003",
+            portalSelf=True,
+            portalScopes=["careSchedule", "medication"],
+        )
+        sibling, _ = self.family("family-peer", "r003")
+        data = self.store.snapshot(token)["data"]
+        self.assertEqual(resident["role"], "入住长者")
+        self.assertNotIn("dossier.relative", data["allowedActions"])
+        self.assertNotIn("portalMedication", self.store.snapshot(sibling)["data"])
+        self.assertTrue(data["portalMedication"])
+        self.assertEqual(data["medications"], [])
+        self.assertFalse(
+            any(
+                "reviewer" in r or "note" in r or "warnings" in r
+                for r in data["portalMedication"]
+            )
+        )
+        with self.assertRaises(PermissionError):
+            self.command(token, "dossier.relative", name="不可创建")
+        task = next(r for r in data["portalTasks"] if r["status"] == "已完成")
+        self.command(
+            token, "portal.feedback", taskId=task["id"], rating=4, note="按时完成"
+        )
+        with self.assertRaises(ValueError):
+            self.command(token, "portal.feedback", taskId=task["id"], rating=5)
+        with self.assertRaises(PermissionError):
+            self.command(token, "portal.feedback", taskId="其他档案", rating=4)
+        check = self.store.snapshot(self.owner)["data"]["qualityChecks"][-1]
+        self.assertEqual(
+            (check["source"], check["rating"], check["residentId"]),
+            ("长者本人评价", 4, "r003"),
+        )
+        self.command(self.owner, "access.update", id=resident["id"], portalScopes=[])
+        data = self.store.snapshot(token)["data"]
+        self.assertNotIn("portal.feedback", data["allowedActions"])
+        self.assertNotIn("portalTasks", data)
+        self.assertNotIn("portalMedication", data)
 
     def test_only_owner_can_grant_option_to_a_family_target(self):
         family, relative = self.family("relative", "r001")

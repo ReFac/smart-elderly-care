@@ -22,7 +22,7 @@ const assistants = [
   {
     name: '日常照护',
     icon: 'heart',
-    summary: '结合长者档案，整理当班照护计划的复核要点。',
+    summary: '根据长者最近的有效评估整理已确认的生活需求、服务项目、责任人和复评日。',
   },
   {
     name: '物资管控',
@@ -86,7 +86,7 @@ export function assistantsPage(ctx) {
         node('div', 'fx-assistant-mark', ctx.ui.icon(a.icon, 23)),
         node('h2', '', a.name),
         node('p', '', a.summary),
-        btn(ctx, '生成建议', () => generate(ctx, a)),
+        btn(ctx, a.name === '日常照护' ? '生成个体照护计划草稿' : '生成建议', () => generate(ctx, a)),
       ])
     )
   );

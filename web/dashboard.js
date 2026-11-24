@@ -168,7 +168,7 @@ function daySeries(ctx, period, mode) {
         date,
         a: s.depositEntries.filter((p) => p.date === date).reduce((n, p) => n + p.amount, 0),
         b: s.payments
-          .filter((p) => p.date === date && p.method === '线下登记')
+          .filter((p) => p.date === date && ['线下登记', '微信支付', '支付宝'].includes(p.method))
           .reduce((n, p) => n + p.amount, 0),
       };
     }
@@ -268,7 +268,7 @@ function chart(points, labels, unit, width) {
 function trend(ctx, mode) {
   const specs = {
     care: ['照护执行趋势', '计划工单', '已完成', '项'],
-    billing: ['入款趋势', '预交到账', '线下收款', '元'],
+    billing: ['入款趋势', '预交到账', '账单实收', '元'],
     inventory: ['物资流转趋势', '入库单据', '出库单据', '笔'],
   };
   const [title, first, second, unit] = specs[mode];

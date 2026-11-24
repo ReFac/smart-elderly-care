@@ -26,7 +26,7 @@ const statusBadge = (ctx, status) =>
   badge(
     ctx,
     statuses[status],
-    { awaiting_approval: 'amber', published: 'green', cancelled: 'neutral' }[status]
+    { awaiting_approval: 'amber', published: 'green', cancelled: 'neutral' }[status],
   );
 
 function composer(ctx, tools) {
@@ -55,22 +55,38 @@ function composer(ctx, tools) {
     examples.append(b);
   }
   for (const t of tools) addExample(t.agent, example[t.agent]);
+  if (tools.some((t) => t.optionalTools?.some((tool) => tool.id === 'finance.revenue')))
+    addExample('finance', '本月实收多少');
   if (tools.some((t) => t.optionalTools?.some((tool) => tool.id === 'handover.pending')))
     addExample('care', '查看我待签收的交班');
+  if (
+    tools.some((t) => t.optionalTools?.some((tool) => tool.id === 'care.planDraft')) &&
+    (!ctx.agentRegion || ctx.agentRegion.roomId)
+  )
+    addExample('care', '生成健康照护计划');
   const scope = node('select', 'fx-input');
   scope.setAttribute('aria-label', '委派范围');
   scope.add(new Option('自动分派', 'auto'));
   for (const t of tools) scope.add(new Option(names[t.agent], t.agent));
   const resident = node('select', 'fx-input');
   resident.setAttribute('aria-label', '照护对象');
-  resident.add(new Option('全院照护', ''));
-  if (!ctx.agentRegion && tools.some((t) => t.agent === 'care')) {
+  const canChooseResident =
+    tools.some((t) => t.agent === 'care') && (!ctx.agentRegion || ctx.agentRegion.roomId);
+  resident.add(new Option(ctx.agentRegion ? '本区全部长者' : '全院照护', ''));
+  if (canChooseResident && ctx.agentRegion) {
+    ctx
+      .get('/api/facility/rooms/' + encodeURIComponent(ctx.agentRegion.roomId))
+      .then((room) => {
+        for (const bed of room.beds.filter((b) => b.residentId))
+          resident.add(new Option(bed.residentName + ' · ' + bed.residentId, bed.residentId));
+      })
+      .catch((error) => ctx.toast(error.message));
+  } else if (canChooseResident) {
     for (const r of ctx.state.residents.filter((r) => r.status === '在住'))
       resident.add(new Option(r.name + ' · ' + r.id, r.id));
   } else resident.hidden = true;
   scope.addEventListener('change', () => {
-    if (ctx.agentRegion || !tools.some((t) => t.agent === 'care')) return;
-    resident.hidden = !['auto', 'care'].includes(scope.value);
+    resident.hidden = !canChooseResident || !['auto', 'care'].includes(scope.value);
     if (resident.hidden) resident.value = '';
   });
   const start = node('button', 'btn btn-primary', [ctx.ui.icon('spark', 16), '开始协作']);
@@ -84,7 +100,7 @@ function composer(ctx, tools) {
   let requestId;
   const freshId = () =>
     Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
-      b.toString(16).padStart(2, '0')
+      b.toString(16).padStart(2, '0'),
     ).join('');
   form.addEventListener('input', () => {
     requestId = undefined;
@@ -108,7 +124,7 @@ function composer(ctx, tools) {
         ...(ctx.agentRegion
           ? {
               region: Object.fromEntries(
-                Object.entries(ctx.agentRegion).filter(([key]) => key !== 'label')
+                Object.entries(ctx.agentRegion).filter(([key]) => key !== 'label'),
               ),
             }
           : {}),
@@ -120,11 +136,11 @@ function composer(ctx, tools) {
   const region = node('div', 'agent-region');
   region.append(
     ctx.ui.icon('location', 16),
-    node('strong', '', ctx.agentRegion?.label || ctx.state.uiSettings.institutionName)
+    node('strong', '', ctx.agentRegion?.label || ctx.state.uiSettings.institutionName),
   );
   if (ctx.available('rooms'))
     region.append(
-      ctx.ui.button(ctx.agentRegion ? '更换区域' : '选择楼层或房间', () => ctx.go('rooms'), 'text')
+      ctx.ui.button(ctx.agentRegion ? '更换区域' : '选择楼层或房间', () => ctx.go('rooms'), 'text'),
     );
   if (ctx.agentRegion) region.append(ctx.ui.button('清除区域', ctx.clearAgentRegion, 'text'));
   form.append(title, region, input, examples, controls);
@@ -140,7 +156,7 @@ function teamPanel(ctx, tools) {
         node('span', 'agent-icon', ctx.ui.icon(icons[tool.agent], 16)),
         node('div', '', [node('strong', '', names[tool.agent]), node('small', '', tool.title)]),
         node('code', '', tool.id),
-      ])
+      ]),
     );
   }
   panel.append(
@@ -149,8 +165,8 @@ function teamPanel(ctx, tools) {
       'agent-engine',
       ctx.state.agentCapabilities.plan?.available
         ? '本地规则 · 已开通平台 AI'
-        : '本地规则 · 云端规划需机构套餐'
-    )
+        : '本地规则 · 云端规划需机构套餐',
+    ),
   );
   return panel;
 }
@@ -168,7 +184,10 @@ export async function showRun(ctx, row) {
     const sources = node('details', 'agent-evidence');
     sources.append(node('summary', '', '查看依据（' + a.evidence.length + ' 项）'));
     for (const item of a.evidence) {
-      const entry = node('div', 'agent-source', [node('strong', '', item.label), ' · ' + item.value]);
+      const entry = node('div', 'agent-source', [
+        node('strong', '', item.label),
+        ' · ' + item.value,
+      ]);
       if (a.tool === 'handover.pending' && item.recordIds.length) {
         for (const id of item.recordIds) {
           const handover = ctx.state.handovers.find((r) => r.id === id);
@@ -177,17 +196,19 @@ export async function showRun(ctx, row) {
             continue;
           }
           const label = ['核对交班', handover.date, handover.senderName, id.slice(-6)].join(' · ');
-          entry.append(link(ctx, label, async () => {
-            try {
-              const row = await ctx.get('/api/agent/runs/' + data.id + '/handovers/' + id);
-              if (dialog.open) {
-                dialog.close();
-                showHandover(ctx, row);
+          entry.append(
+            link(ctx, label, async () => {
+              try {
+                const row = await ctx.get('/api/agent/runs/' + data.id + '/handovers/' + id);
+                if (dialog.open) {
+                  dialog.close();
+                  showHandover(ctx, row);
+                }
+              } catch (error) {
+                ctx.toast(error.message);
               }
-            } catch (error) {
-              ctx.toast(error.message);
-            }
-          }));
+            }),
+          );
         }
       } else entry.append(node('small', '', item.recordIds.join('、') || '本期无单据'));
       sources.append(entry);
@@ -198,7 +219,7 @@ export async function showRun(ctx, row) {
         node('h3', '', a.title),
         node('p', '', a.detail),
         sources,
-      ])
+      ]),
     );
   }
   const timeline = node('ol', 'agent-trace');
@@ -208,7 +229,7 @@ export async function showRun(ctx, row) {
         node('strong', '', events[e.event] || e.event),
         node('span', '', e.message),
         node('small', '', names[e.agent] + ' · ' + e.at.slice(11, 19)),
-      ])
+      ]),
     );
   const trace = node('details', 'agent-evidence', [
     node('summary', '', '运行轨迹（' + data.events.length + ' 步）'),
@@ -226,7 +247,7 @@ export async function showRun(ctx, row) {
         ' · ' +
         data.started.slice(0, 16).replace('T', ' ') +
         ' · 来源数据版本 ' +
-        data.sourceRevision
+        data.sourceRevision,
     ),
     ...(data.region
       ? [
@@ -246,16 +267,16 @@ export async function showRun(ctx, row) {
       ctx,
       '确认发布到建议台账',
       () => ctx.command('agent.publish', { runId: data.id }),
-      'primary'
+      'primary',
     );
     const cancel = btn(ctx, '取消此任务', () => ctx.command('agent.cancel', { runId: data.id }));
     body.append(
       node(
         'p',
         'agent-confirm-note',
-        '确认后将以上草稿逐项写入建议台账，保留来源单据与本次运行编号。'
+        '确认后将以上草稿逐项写入建议台账，保留来源单据与本次运行编号。',
       ),
-      choose(cancel, publish)
+      choose(cancel, publish),
     );
   }
 }
@@ -268,7 +289,7 @@ function roomTasks(ctx, roomId) {
   async function load(offset = 0) {
     try {
       const response = await ctx.get(
-        '/api/agent/room-context?' + new URLSearchParams({ roomId, offset: String(offset) })
+        '/api/agent/room-context?' + new URLSearchParams({ roomId, offset: String(offset) }),
       );
       if (!offset) body.replaceChildren();
       if (!response.targets.length && !offset)
@@ -278,7 +299,7 @@ function roomTasks(ctx, roomId) {
           '拟写执行记录',
           () => {
             const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
-              b.toString(16).padStart(2, '0')
+              b.toString(16).padStart(2, '0'),
             ).join('');
             ctx.dialog({
               title: '提交区域工单草稿',
@@ -298,10 +319,10 @@ function roomTasks(ctx, roomId) {
                 ctx.proposeRoom({ roomId, taskId: target.id, note: v.note, requestId }),
             });
           },
-          'text'
+          'text',
         );
         body.append(
-          node('div', 'agent-target', [node('span', '', target.date + ' · ' + target.label), act])
+          node('div', 'agent-target', [node('span', '', target.date + ' · ' + target.label), act]),
         );
       }
       if (response.nextOffset != null) {
@@ -324,7 +345,7 @@ function roomTasks(ctx, roomId) {
 
 export function agentDesk(ctx) {
   const tools = (ctx.state.agentCapabilities?.tools || []).filter(
-    (t) => !ctx.agentRegion || t.agent !== 'inventory'
+    (t) => !ctx.agentRegion || t.agent !== 'inventory',
   );
   const runs = ctx.state.agentRuns || [];
   const home = node('div', 'agent-home', [composer(ctx, tools), teamPanel(ctx, tools)]);
@@ -344,7 +365,7 @@ export function agentDesk(ctx) {
         align: 'end',
         view: (r) =>
           link(ctx, r.status === 'awaiting_approval' ? '核对简报' : '查看记录', () =>
-            showRun(ctx, r)
+            showRun(ctx, r),
           ),
       },
     ],

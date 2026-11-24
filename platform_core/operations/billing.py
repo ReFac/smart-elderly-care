@@ -1,5 +1,6 @@
 """按入住记录计费，登记到账、冲抵和核销凭证。"""
 
+from datetime import date
 from decimal import Decimal
 
 from .records import (
@@ -91,7 +92,7 @@ def pay(state, payload, today):
     return f"为 {bill['month']} 账单登记线下核销 ¥{amount:.2f}"
 
 
-def leave_count(state, resident_id, begin, end):
+def leave_dates(state, resident_id, begin, end):
     away = set()
     for entry in state.get("leaves", []):
         if entry["residentId"] != resident_id:
@@ -99,7 +100,7 @@ def leave_count(state, resident_id, begin, end):
         first = max(begin, parse_day(entry["startDate"]))
         last = min(end, parse_day(entry["endDate"]))
         away.update(range(first.toordinal(), last.toordinal() + 1))
-    return len(away)
+    return away
 
 
 def generate_bill(state, payload, today):
@@ -120,36 +121,27 @@ def generate_bill(state, payload, today):
     days = (end - begin).days + 1
     if days < 1:
         raise ValueError("该长者在此账期没有入住记录")
-    bed = next(
-        (b for b in state.get("beds", []) if b["id"] == resident.get("bedId")), {}
+    parts, bed_total, care_total, leave = charge_segments(
+        state, resident, payload, begin, end
     )
-    bed_fee = currency_amount(
-        payload.get("bedFee", bed.get("dailyRate", 60)), "每日床位费"
-    )
-    care_fee = currency_amount(
-        payload.get("careFee", CARE_RATES.get(resident["level"], 45)), "每日护理费"
-    )
+    last_part = parts[-1]
     package_fee = currency_amount(payload.get("packageFee", 0), "月套餐费")
-    calculated_leave = leave_count(state, resident["id"], begin, end)
-    leave = whole_number(
-        payload.get("leaveDays", calculated_leave), "请假天数", zero=True
-    )
-    if leave > days:
-        raise ValueError("请假天数超过实际入住天数")
-    amount = currency_amount(
-        bed_fee * days + care_fee * (days - leave) + package_fee, "账单合计"
-    )
+    amount = currency_amount(bed_total + care_total + package_fee, "账单合计")
     bill = dict(
         id=new_id("bill"),
         residentId=resident["id"],
         month=month,
-        bedFee=float(bed_fee),
-        careFee=float(care_fee),
+        bedFee=last_part["bedFee"],
+        careFee=last_part["careFee"],
+        bedTotal=float(bed_total),
+        careTotal=float(care_total),
+        segments=parts,
+        manualOverrides=[k for k in ("bedFee", "careFee", "leaveDays") if k in payload],
         packageFee=float(package_fee),
         leaveDays=leave,
         serviceDays=days,
-        bedId=resident.get("bedId", ""),
-        careLevel=resident["level"],
+        bedId=last_part["bedId"],
+        careLevel=last_part["level"],
         startDate=begin.isoformat(),
         endDate=end.isoformat(),
         amount=float(amount),
@@ -161,3 +153,112 @@ def generate_bill(state, payload, today):
     state["bills"].insert(0, bill)
     apply_deposit(state, get_account(state, resident["id"]), today)
     return f"生成{resident['name']} {month} 账单 ¥{amount:.2f}，待缴 ¥{bill['balance']:.2f}"
+
+
+def charge_segments(state, resident, p, begin, end):
+    """Use the last effective move/approval of each day, including the discharge day."""
+    rid = resident["id"]
+    beds = {b["id"]: b for b in state["beds"]}
+    moves = sorted(
+        (
+            m
+            for m in state.get("bedMoves", [])
+            if m["residentId"] == rid and m.get("date")
+        ),
+        key=lambda m: m["date"],
+    )
+    plans = sorted(
+        (
+            r
+            for r in state.get("plans", [])
+            if r["residentId"] == rid
+            and r.get("reviewedAt")
+            and r["status"] == "已派发"
+        ),
+        key=lambda r: r["reviewedAt"],
+    )
+    levels = {
+        a["id"]: a["level"]
+        for a in state.get("assessments", [])
+        if a.get("level") in CARE_RATES
+    }
+    bed_id = (moves[0].get("beforeBedId") if moves else None) or resident.get(
+        "bedId", ""
+    )
+    level = next(
+        (
+            m["initialCareLevel"]
+            for m in moves
+            if m.get("initialCareLevel") in CARE_RATES
+        ),
+        None,
+    )
+    level = (
+        level
+        or (plans[0].get("previousCareLevel") if plans else None)
+        or resident["level"]
+    )
+    rate = beds.get(bed_id, {}).get("dailyRate", 60)
+    move_i = plan_i = 0
+    entries = []
+    days = range(begin.toordinal(), end.toordinal() + 1)
+    for ordinal in days:
+        day = date.fromordinal(ordinal).isoformat()
+        while move_i < len(moves) and moves[move_i]["date"] <= day:
+            move = moves[move_i]
+            if move.get("bedId"):
+                bed_id = move["bedId"]
+                rate = move.get(
+                    "bedDailyRate", beds.get(bed_id, {}).get("dailyRate", 60)
+                )
+            move_i += 1
+        while plan_i < len(plans) and plans[plan_i]["reviewedAt"] <= day:
+            plan = plans[plan_i]
+            level = plan.get("careLevel") or levels.get(plan.get("assessmentId"), level)
+            plan_i += 1
+        bed_fee = currency_amount(p.get("bedFee", rate), "每日床位费")
+        care_fee = currency_amount(
+            p.get("careFee", CARE_RATES.get(level, 45)), "每日护理费"
+        )
+        entries.append((bed_id, level, bed_fee, care_fee))
+    away = leave_dates(state, rid, begin, end)
+    leave = whole_number(p.get("leaveDays", len(away)), "请假天数", zero=True)
+    if leave > len(days):
+        raise ValueError("请假天数超过实际入住天数")
+    if leave != len(away):
+        if len({day[3] for day in entries}) > 1:
+            raise ValueError(
+                "本月有多段护理单价，请按实际日期补全请假台账，或确认统一护理日费"
+            )
+        # A flat agreed care fee makes the financial result independent of the chosen dates.
+        ranked = sorted(days, key=lambda n: (n not in away, -n))
+        away = set(ranked[:leave])
+    parts = []
+    old = None
+    bed_total = care_total = Decimal(0)
+    for ordinal, charges in zip(days, entries):
+        bed_id, level, bed_fee, care_fee = charges
+        day = date.fromordinal(ordinal).isoformat()
+        if charges != old:
+            parts.append(
+                dict(
+                    start=day,
+                    end=day,
+                    bedId=bed_id,
+                    bedLabel=beds.get(bed_id, {}).get("label", bed_id),
+                    level=level,
+                    bedFee=float(bed_fee),
+                    careFee=float(care_fee),
+                    days=0,
+                    leaveDays=0,
+                )
+            )
+            old = charges
+        part = parts[-1]
+        part["end"] = day
+        part["days"] += 1
+        part["leaveDays"] += int(ordinal in away)
+        bed_total += bed_fee
+        if ordinal not in away:
+            care_total += care_fee
+    return parts, bed_total, care_total, leave

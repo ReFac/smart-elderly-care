@@ -12,7 +12,7 @@ import stat
 import time
 from uuid import uuid4
 
-from . import staff_scope
+from . import portal, staff_scope
 
 from .access_policy import (
     DEFAULT_UI,
@@ -121,6 +121,10 @@ def init(db):
         db.execute(
             "ALTER TABLE accounts ADD COLUMN family_services INTEGER NOT NULL DEFAULT 0 CHECK(family_services IN (0,1))"
         )
+    if "portal_scopes" not in {r[1] for r in db.execute("PRAGMA table_info(accounts)")}:
+        db.execute(
+            "ALTER TABLE accounts ADD COLUMN portal_scopes TEXT NOT NULL DEFAULT '[]'"
+        )
     db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS one_owner ON accounts(kind) WHERE kind='owner'"
     )
@@ -183,6 +187,8 @@ def _public(row):
     user["routes"] = resolve_routes(user)
     if user["kind"] == "family":
         user["familyServices"] = bool(row["family_services"])
+        user["portalSelf"] = user["role"] == "入住长者"
+        user["portalScopes"] = json.loads(row["portal_scopes"])
     return user
 
 
@@ -277,7 +283,7 @@ def _assignable(user):
     return (
         set(PERMISSIONS)
         if user["kind"] == "owner"
-        else set(user["permissions"]) - {"staff.manage"}
+        else set(user["permissions"]) - {"staff.manage", "clinical.rules"}
     )
 
 
@@ -308,7 +314,19 @@ def _account_definition(user, p, target=None):
     if user["kind"] != "owner" and kind != "staff":
         raise PermissionError("受托管理仅适用于员工账号")
     if kind == "family":
-        return kind, "亲属", []
+        if "portalSelf" in p and type(p["portalSelf"]) is not bool:
+            raise ValueError("请核对绑定身份")
+        return (
+            kind,
+            (
+                target["role"]
+                if target
+                else "入住长者"
+                if p.get("portalSelf")
+                else "亲属"
+            ),
+            [],
+        )
     if kind != "staff":
         raise ValueError("请选择员工或亲属账号")
     role = p.get("role", target["role"] if target else "护工")
@@ -365,6 +383,7 @@ def preview(db, user, payload, facility_policy=None):
 def _create(db, state, p, user, area_check):
     kind, role, grants = _account_definition(user, p)
     family_services = _family_services(p, kind)
+    scopes = portal.scopes(p, kind)
     username = _required(p.get("username"), "登录名", 40).lower()
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,39}", username):
         raise ValueError("登录名须为 3–40 位字母、数字、点、下划线或短横线")
@@ -382,8 +401,8 @@ def _create(db, state, p, user, area_check):
     try:
         with staff_scope.verify_change(db, area_check, lambda: account(db, account_id)):
             db.execute(
-                """INSERT INTO accounts(id,username,display_name,kind,role,permissions,resident_id,salt,password_hash,family_services)
-                 VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                """INSERT INTO accounts(id,username,display_name,kind,role,permissions,resident_id,salt,password_hash,family_services,portal_scopes)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     account_id,
                     username,
@@ -395,12 +414,15 @@ def _create(db, state, p, user, area_check):
                     salt,
                     _digest(password, salt),
                     int(family_services),
+                    json.dumps(scopes),
                 ),
             )
     except sqlite3.IntegrityError as error:
         raise ValueError("此登录名已被使用") from error
-    return f"创建{role}账号 {username}" + (
-        "，授予已完成服务记录查阅权限" if family_services else ""
+    return (
+        f"创建{role}账号 {username}"
+        + "".join("，授予" + portal.SCOPES[k] for k in scopes)
+        + ("，授予已完成服务记录查阅权限" if family_services else "")
     )
 
 
@@ -412,6 +434,7 @@ def _update(db, p, target, user):
         "permissions",
         "enabled",
         "familyServices",
+        "portalScopes",
     }:
         raise ValueError("只可修改员工或亲属的姓名、启用状态及员工岗位权限")
     enabled = p.get("enabled", target["enabled"])
@@ -424,20 +447,26 @@ def _update(db, p, target, user):
     family_services = _family_services(
         p, target["kind"], target.get("familyServices", False)
     )
+    previous_scopes = target.get("portalScopes", [])
+    scopes = portal.scopes(p, target["kind"], previous_scopes)
     db.execute(
-        "UPDATE accounts SET display_name=?,role=?,permissions=?,enabled=?,family_services=? WHERE id=?",
+        "UPDATE accounts SET display_name=?,role=?,permissions=?,enabled=?,family_services=?,portal_scopes=? WHERE id=?",
         (
             display,
             role,
             json.dumps(grants),
             int(enabled),
             int(family_services),
+            json.dumps(scopes),
             target["id"],
         ),
     )
     if not enabled:
         db.execute("DELETE FROM sessions WHERE account_id=?", (target["id"],))
     changes = []
+    for key, label in portal.SCOPES.items():
+        if (key in scopes) != (key in previous_scopes):
+            changes.append(("授予" if key in scopes else "收回") + label)
     if display != target["displayName"]:
         changes.append(f"姓名改为{display}")
     if role != target["role"]:
@@ -529,6 +558,8 @@ def project(db, state, user, facility_policy=None):
         uiSettings=json.loads(row["visual"]),
         allowedActions=allowed_actions(user),
     )
+    if user["kind"] == "family":
+        portal.project(filtered, state, user)
     if user["kind"] == "family" and user.get("familyServices"):
         tasks = (
             r

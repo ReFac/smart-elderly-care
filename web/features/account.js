@@ -45,9 +45,13 @@ function identity(ctx) {
     node('div', 'personal-avatar', user.displayName.slice(0, 1)),
     node('div', 'personal-identity-body', [
       node('h2', '', user.displayName),
-      node('dl', 'personal-details', details.map(([label, value]) =>
-        node('div', '', [node('dt', '', label), node('dd', '', value)])
-      )),
+      node(
+        'dl',
+        'personal-details',
+        details.map(([label, value]) =>
+          node('div', '', [node('dt', '', label), node('dd', '', value)]),
+        ),
+      ),
     ]),
   ]);
   if (canAct(ctx, passwordAction))
@@ -62,15 +66,20 @@ function moduleLinks(ctx, allowed) {
     for (const [id, label, icon] of items) {
       if (id === 'account' || !allowed.has(id)) continue;
       const anchor = node('a', 'personal-module-link', [
-        ctx.ui.icon(icon, 17), node('span', '', label), ctx.ui.icon('chevron', 13),
+        ctx.ui.icon(icon, 17),
+        node('span', '', id === 'family' && ctx.state.user.portalSelf ? '长者服务' : label),
+        ctx.ui.icon('chevron', 13),
       ]);
       anchor.href = '#' + id;
       links.push(anchor);
     }
     if (links.length)
-      content.append(node('section', 'personal-module-group', [
-        node('h3', '', group), node('div', 'personal-module-links', links),
-      ]));
+      content.append(
+        node('section', 'personal-module-group', [
+          node('h3', '', group),
+          node('div', 'personal-module-links', links),
+        ]),
+      );
   }
   if (!content.childElementCount) content.append(ctx.ui.empty('当前账号暂无可用业务模块'));
   return node('section', 'fx-panel personal-panel', [
@@ -84,13 +93,27 @@ export function accountCenter(ctx) {
   const grants = node('section', 'fx-panel personal-panel', [
     node('h2', 'personal-panel-title', [ctx.ui.icon('shield', 19), '我的权限']),
     permissions.length
-      ? node('ul', 'personal-grants', permissions.map(({ label }) =>
-          node('li', '', [ctx.ui.icon('check', 15), node('span', '', label)])
-        ))
-      : node('p', 'personal-empty', ctx.state.user.kind === 'family'
-          ? '此账号使用机构为本人开放的亲属服务。'
-          : '尚未分配业务操作权限，请联系机构管理员。'),
+      ? node(
+          'ul',
+          'personal-grants',
+          permissions.map(({ label }) =>
+            node('li', '', [ctx.ui.icon('check', 15), node('span', '', label)]),
+          ),
+        )
+      : node(
+          'p',
+          'personal-empty',
+          ctx.state.user.kind === 'family'
+            ? '此账号使用机构为本人开放的亲属服务。'
+            : '尚未分配业务操作权限，请联系机构管理员。',
+        ),
   ]);
-  return page(ctx, '个人中心', '', null, identity(ctx),
-    node('div', 'personal-layout', [moduleLinks(ctx, new Set(routes)), grants]));
+  return page(
+    ctx,
+    '个人中心',
+    '',
+    null,
+    identity(ctx),
+    node('div', 'personal-layout', [moduleLinks(ctx, new Set(routes)), grants]),
+  );
 }

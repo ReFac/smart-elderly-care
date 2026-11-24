@@ -13,6 +13,7 @@ from .records import (
     text_field,
 )
 from .residency import active_card
+from .scales import GROUPS, score_scale
 
 
 SERVICE_ITEMS = {
@@ -47,7 +48,6 @@ def assess(state, p, today):
     level = care_level(p.get("level"))
     note = required_field(p, "note", "评估结果与照护需求")
     assigned = text_field(p.get("assignee"), "照护责任人")
-    assignee = assigned or match_staff(state, resident, today)
     source = "人工指定" if assigned else "同区当日排班与待办量"
     observations = p.get("observations", {})
     if not isinstance(observations, dict) or any(
@@ -60,10 +60,25 @@ def assess(state, p, today):
         for key, title in SERVICE_ITEMS.items()
         if observations.get(key) == "需协助"
     ]
+    method = text_field(p.get("source") or "线上采集", "采集来源")
+    scale = score_scale(p["scale"], method, today) if "scale" in p else None
+    historical = bool(
+        scale
+        and any(
+            a["residentId"] == resident["id"]
+            and a.get("scale", {}).get("assessedOn", a["date"]) > scale["assessedOn"]
+            for a in state["assessments"]
+        )
+    )
+    assignee = assigned or ("" if historical else match_staff(state, resident, today))
+    if scale:
+        for group, subtotal in scale["subtotals"].items():
+            if subtotal < sum(GROUPS[group].values()):
+                items.append(f"核对{group}支持需求")
     if not items:
         items = ["执行个体照护计划"]
     review = iso_date(p.get("reviewDate") or offset_date(today, 30), "复评日")
-    if review <= today:
+    if not historical and review <= today:
         raise ValueError("复评日须晚于今天。")
     record = append_record(
         state,
@@ -73,12 +88,16 @@ def assess(state, p, today):
         note=note,
         assignee=assignee,
         date=today,
-        reviewDate=review,
+        reviewDate="" if historical else review,
         observations=observations,
         assignmentSource=source,
-        source=text_field(p.get("source") or "线上采集", "采集来源"),
+        source=method,
+        recordedBy=text_field(p.get("operator"), "登记人"),
+        **({"scale": scale, "historyOnly": historical} if scale else {}),
     )
-    # 权威量表与版本需由机构配置，首稿只记录工作人员给出的等级。
+    if historical:
+        return f"已归档{resident['name']}较早的评估原表"
+    # The account that approves the plan confirms the institutional care level.
     for old_plan in state["plans"]:
         if old_plan["residentId"] == resident["id"] and old_plan["status"] == "待复核":
             old_plan["status"] = "已取消"
@@ -128,8 +147,14 @@ def approve_plan(state, p, today):
             and task["status"] == "待执行"
         ):
             task["status"] = "已取消"
+    plan.update(
+        status="已派发",
+        reviewer=reviewer,
+        reviewedAt=today,
+        previousCareLevel=resident["level"],
+        careLevel=assessment["level"],
+    )
     resident.update(level=assessment["level"])
-    plan.update(status="已派发", reviewer=reviewer, reviewedAt=today)
     for title in plan.get("items", ["执行个体照护计划"]):
         append_task(
             state,
@@ -199,6 +224,7 @@ def complete_task(state, p, today):
     task.update(
         status="已完成",
         operator=operator,
+        **({"operatorId": p["operatorId"]} if p.get("operatorId") else {}),
         completedAt=today,
         note=text_field(p.get("note") or task.get("note"), "执行记录"),
         checkedBedId=p.get("bedId") or "",

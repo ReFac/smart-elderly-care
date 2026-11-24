@@ -72,13 +72,16 @@ class Handler(BaseHTTPRequestHandler):
     def read_json(self, limit):
         if self.headers.get_content_type() != "application/json":
             raise InvalidMedia("仅接收 JSON 表单")
-        size = int(self.headers.get("Content-Length", "0"))
-        if size <= 0 or size > limit:
-            raise ValueError("请求为空或超过体积限制")
-        body = json.loads(self.rfile.read(size), parse_constant=self.invalid_constant)
+        body = json.loads(self.read_body(limit), parse_constant=self.invalid_constant)
         if not isinstance(body, dict):
             raise ValueError("请求必须为 JSON 对象")
         return body
+
+    def read_body(self, limit):
+        size = int(self.headers.get("Content-Length", "0"))
+        if size <= 0 or size > limit:
+            raise ValueError("请求为空或超过体积限制")
+        return self.rfile.read(size)
 
     def do_GET(self):
         self.dispatch("GET")
@@ -128,11 +131,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def read_resource(self, path):
         token = self.token()
+        if path == "/api/payments/checkout/channels":
+            return self.send_json(200, self.store.payment_channels(token))
+        match = re.fullmatch(r"/api/payments/checkout/orders/(NH-[a-f0-9]{16})", path)
+        if match:
+            return self.send_json(200, self.store.payment_order_status(token, match[1]))
         geo = ("buildingId", "floorId", "roomId")
         if path == "/api/facility":
             return self.send_json(200, self.store.facility_resource(token, "directory"))
         if path == "/api/care/handover-recipients":
             return self.send_json(200, self.store.handover_recipients(token))
+        if path == "/api/care/handover-draft":
+            params = parse_qs(
+                urlsplit(self.path).query, max_num_fields=2, keep_blank_values=True
+            )
+            if (
+                "assigneeId" not in params
+                or set(params) - {"assigneeId", "residentId"}
+                or any(len(v) != 1 for v in params.values())
+            ):
+                raise ValueError("请选择接班账号和交接范围")
+            return self.send_json(
+                200,
+                self.store.handover_draft(
+                    token, params["assigneeId"][0], params.get("residentId", [""])[0]
+                ),
+            )
         if path in (
             "/api/facility/search",
             "/api/facility/tour",
@@ -179,6 +203,23 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, self.store.version(token))
         if path == "/api/state":
             return self.send_json(200, self.store.snapshot(token))
+        match = re.fullmatch(r"/api/portal/history/(careSchedule|medication)", path)
+        if match:
+            query = parse_qs(urlsplit(self.path).query, max_num_fields=2)
+            if set(query) != {"offset", "revision"} or any(
+                len(v) != 1
+                or not v[0].isascii()
+                or not v[0].isdigit()
+                or len(v[0]) > 16
+                for v in query.values()
+            ):
+                raise ValueError("请指定有效的历史分页及版本")
+            return self.send_json(
+                200,
+                self.store.portal_history(
+                    token, match[1], int(query["offset"][0]), int(query["revision"][0])
+                ),
+            )
         if path == "/api/activity":
             query = parse_qs(urlsplit(self.path).query, max_num_fields=5)
             filters = {k: query[k][0] for k in ("room", "actor") if k in query}
@@ -207,6 +248,21 @@ class Handler(BaseHTTPRequestHandler):
         match = re.fullmatch(r"/api/integrations/([a-zA-Z0-9._-]+)", path)
         if match:
             return self.send_json(200, self.store.capabilities(token, match[1]))
+        match = re.fullmatch(r"/api/documents/([a-zA-Z0-9_-]+)/ocr", path)
+        if match:
+            return self.send_json(200, self.store.document_ocr_detail(token, match[1]))
+        match = re.fullmatch(r"/api/residents/([a-zA-Z0-9_-]+)/summary-draft", path)
+        if match:
+            return self.send_json(
+                200, self.store.dossier_summary_draft(token, match[1])
+            )
+        match = re.fullmatch(
+            r"/api/reports/([a-zA-Z0-9_-]+)/versions/([1-9][0-9]{0,8})", path
+        )
+        if match:
+            return self.send_json(
+                200, self.store.report_version(token, match[1], int(match[2]))
+            )
         match = re.fullmatch(r"/api/documents/([a-zA-Z0-9_-]+)/image", path)
         if match:
             image, mime = self.store.photo(token, match[1])
@@ -247,6 +303,31 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, target.read_bytes(), mime)
 
     def write_resource(self, path):
+        if path == "/api/payments/checkout":
+            body = self.read_json(512)
+            if set(body) != {"orderId"}:
+                raise ValueError("请选择商户订单")
+            return self.send_json(
+                200, self.store.payment_checkout(self.token(), body["orderId"])
+            )
+        channel = re.fullmatch(r"/api/payments/notify/(wechat|alipay)", path)
+        if channel:
+            from platform_core.operations import channels
+
+            provider = channel[1]
+            mime = (
+                "application/json"
+                if provider == "wechat"
+                else "application/x-www-form-urlencoded"
+            )
+            if self.headers.get_content_type() != mime:
+                raise InvalidMedia("支付渠道回调格式无效")
+            channels.receive(
+                self.store, provider, self.headers, self.read_body(SMALL_BODY)
+            )
+            if provider == "alipay":
+                return self.respond(200, b"success", "text/plain; charset=utf-8")
+            return self.send_json(200, {"code": "SUCCESS", "message": "成功"})
         if path == "/api/access/preview":
             return self.send_json(
                 200, self.store.access_preview(self.token(), self.read_json(8192))

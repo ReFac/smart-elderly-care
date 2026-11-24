@@ -37,7 +37,18 @@ SPECIALISTS = (
         "finance",
         "billing.review",
         ("bills",),
-        ("财务", "账单", "欠费", "经营", "营收", "结算"),
+        (
+            "财务",
+            "账单",
+            "欠费",
+            "经营",
+            "营收",
+            "结算",
+            "收入",
+            "实收",
+            "收款",
+            "入款",
+        ),
     ),
 )
 
@@ -46,6 +57,20 @@ HANDOVER_TOOL = replace(
     tool="handover.pending",
     collections=("handovers",),
     keywords=("签收", "待接班"),
+)
+
+CARE_PLAN_TOOL = replace(
+    next(s for s in SPECIALISTS if s.key == "care"),
+    tool="care.planDraft",
+    collections=("residents", "assessments", "plans", "tasks"),
+    keywords=("照护计划", "护理计划", "照护方案", "护理方案", "照护草稿", "护理草稿"),
+)
+
+REVENUE_TOOL = replace(
+    next(s for s in SPECIALISTS if s.key == "finance"),
+    tool="finance.revenue",
+    collections=("depositEntries", "payments", "bills"),
+    keywords=("营收", "收入", "实收", "收款", "入款"),
 )
 
 
@@ -92,6 +117,16 @@ def contract(user, available):
         for item in available
     ]
     for tool in tools:
+        if tool["agent"] == REVENUE_TOOL.key:
+            tool["optionalTools"] = [
+                {
+                    "id": REVENUE_TOOL.tool,
+                    "collections": list(REVENUE_TOOL.collections),
+                    "scope": "authorized_region",
+                    "effect": "read",
+                    "cloudTokens": 0,
+                }
+            ]
         if tool["agent"] == HANDOVER_TOOL.key:
             tool["optionalTools"] = [
                 {
@@ -100,7 +135,14 @@ def contract(user, available):
                     "scope": "assigned_to_current_actor",
                     "effect": "read",
                     "cloudTokens": 0,
-                }
+                },
+                {
+                    "id": CARE_PLAN_TOOL.tool,
+                    "collections": list(CARE_PLAN_TOOL.collections),
+                    "scope": "one_resident_in_authorized_region",
+                    "effect": "read",
+                    "cloudTokens": 0,
+                },
             ]
     adapters = [
         {

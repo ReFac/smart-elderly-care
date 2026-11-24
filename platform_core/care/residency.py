@@ -43,6 +43,9 @@ def active_card(state, resident):
 
 def move(state, resident, today, kind, old_bed=None, new_bed=None):
     card_code = make_card_code(len(state["bedMoves"]) + 1) if new_bed else ""
+    rates = {"bedDailyRate": new_bed.get("dailyRate", 60)} if new_bed else {}
+    if kind == "入住":
+        rates["initialCareLevel"] = resident["level"]
     if old_bed:
         old_bed.update(residentId="", status="空闲")
     if new_bed:
@@ -57,6 +60,7 @@ def move(state, resident, today, kind, old_bed=None, new_bed=None):
         beforeBedId=old_bed["id"] if old_bed else "",
         bedId=resident["bedId"],
         cardCode=card_code,
+        **rates,
     )
 
 

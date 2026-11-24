@@ -28,12 +28,21 @@ RELATED = {
     "care.approvePlan": ("planId", "plans"),
     "care.completeTask": ("taskId", "tasks"),
     "care.quality": ("taskId", "tasks"),
+    "portal.feedback": ("taskId", "tasks"),
     "care.giveMedication": ("medicationId", "medications"),
     "care.reviewMedication": ("medicationId", "medications"),
     "care.resolveVital": ("vitalId", "vitals"),
     "care.acceptHandover": ("handoverId", "handovers"),
     "care.withdrawHandover": ("handoverId", "handovers"),
     "ops.pay": ("billId", "bills"),
+    "ops.importReceipt": ("billId", "bills"),
+    "ops.remindBill": ("billId", "bills"),
+    "ops.paymentOrder": ("billId", "bills"),
+    "care.scheduleFollowup": ("followupId", "followups"),
+    "care.finishFollowup": ("followupId", "followups"),
+    "care.receiveReferral": ("referralId", "referrals"),
+    "care.referralConsent": ("referralId", "referrals"),
+    "care.exportReferral": ("referralId", "referrals"),
     "ops.review": ("id", "suggestions"),
 }
 PERSON_ACTIONS = {
@@ -50,6 +59,11 @@ PERSON_ACTIONS = {
     "ops.bill",
     "ops.deposit",
     "dossier.document",
+    "care.screen",
+    "care.refer",
+    "dossier.ocr",
+    "dossier.reviewDocument",
+    "dossier.signSummary",
     "dossier.profile",
 }
 

@@ -5,6 +5,7 @@ from decimal import Decimal
 from statistics import median
 
 from .billing import CARE_RATES
+from .care_draft import draft
 from .records import get_resident, lookup, new_id, parse_day, text_field
 
 
@@ -14,7 +15,7 @@ def cite_records(source, label, rows, value):
     )
 
 
-def care_suggestion(state, payload, today):
+def care_review(state, payload, today):
     resident = get_resident(state, payload)
     if resident["status"] != "在住":
         raise ValueError("照护建议仅适用于在住长者")
@@ -59,6 +60,13 @@ def care_suggestion(state, payload, today):
         )
     evidence.append(cite_records("tasks", "到期且待执行的工单", due, f"{len(due)} 项"))
     return rid, f"复核{resident['name']}的照护计划", "".join(descriptions), evidence
+
+
+def care_suggestion(state, payload, today):
+    resident = get_resident(state, payload)
+    if resident["status"] != "在住":
+        raise ValueError("照护建议仅适用于在住长者")
+    return draft(state, resident, today, cite_records)
 
 
 def stock_suggestion(state, today):
@@ -141,8 +149,15 @@ def finance_suggestion(state, today):
             for k in ("amount", "paid", "balance", "bedFee", "careFee", "packageFee")
         )
         expected = (
-            bed_rate * bill["serviceDays"]
-            + care_rate * (bill["serviceDays"] - bill["leaveDays"])
+            Decimal(str(bill.get("bedTotal", bed_rate * bill["serviceDays"])))
+            + Decimal(
+                str(
+                    bill.get(
+                        "careTotal",
+                        care_rate * (bill["serviceDays"] - bill["leaveDays"]),
+                    )
+                )
+            )
             + package
         )
         reasons = []

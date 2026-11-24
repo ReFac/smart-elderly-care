@@ -30,7 +30,8 @@ export function monthlyPanel(ctx) {
     const bills = state.bills.filter((b) => b.month === month);
     const deposits = state.depositEntries.filter(inMonth);
     const payments = state.payments.filter(inMonth);
-    const cash = payments.filter((p) => p.method === '线下登记');
+    const cash = payments.filter((p) => ['线下登记', '微信支付', '支付宝'].includes(p.method));
+    const expenses = (state.expenses || []).filter(inMonth);
     const offsets = payments.filter((p) => p.method === '预交金冲抵');
     const tasks = state.tasks.filter((t) => inMonth(t) && t.status !== '已取消');
     const completed = tasks.filter((t) => t.status === '已完成');
@@ -42,7 +43,7 @@ export function monthlyPanel(ctx) {
           [
             ...cash.map((p) => ({
               ...p,
-              channel: '线下核销',
+              channel: p.method,
             })),
             ...deposits.map((p) => ({
               ...p,
@@ -89,6 +90,28 @@ export function monthlyPanel(ctx) {
               money(sumMoney(cash, 'amount') + sumMoney(deposits, 'amount')),
               '按到账日期汇总',
               paymentsDetail,
+            ],
+            [
+              '机构实际支出',
+              money(sumMoney(expenses, 'amount')),
+              expenses.length + ' 笔支出凭证',
+              () =>
+                ctx.detail(
+                  month + ' · 支出凭证',
+                  records(
+                    expenses,
+                    (r) =>
+                      r.date +
+                      ' · ' +
+                      r.voucher +
+                      ' · ' +
+                      r.payee +
+                      ' · ' +
+                      r.note +
+                      ' · ' +
+                      money(r.amount)
+                  )
+                ),
             ],
             [
               '预交金冲抵',
@@ -218,10 +241,19 @@ export function monthlyPanel(ctx) {
             kpis([
               ['本期账单当前待缴', money(sumMoney(bills, 'balance'))],
               ['预交到账', money(sumMoney(deposits, 'amount'))],
-              ['线下直接收款', money(sumMoney(cash, 'amount'))],
+              ['直接收款', money(sumMoney(cash, 'amount'))],
+              [
+                '本月收支净额',
+                money(
+                  sumMoney(cash, 'amount') +
+                    sumMoney(deposits, 'amount') -
+                    sumMoney(expenses, 'amount')
+                ),
+              ],
             ]),
           ]
         : []),
+      compareMonths(ctx, month),
       ...(ranges.length ? [breakdown] : []),
       ...(hasGrant(ctx, 'inventory') ? [consumption] : [])
     );
@@ -230,4 +262,102 @@ export function monthlyPanel(ctx) {
   const label = node('label', 'fx-actions', [node('span', '', '经营月份'), picker]);
   draw();
   return node('section', 'fx-page', [label, body]);
+}
+
+function compareMonths(ctx, month) {
+  const state = ctx.state;
+  const [year, m] = month.split('-').map(Number);
+  const prevEnd = new Date(Date.UTC(year, m - 1, 0));
+  const prior = prevEnd.toISOString().slice(0, 7);
+  const now = today(ctx);
+  const currentEnd =
+    month === now.slice(0, 7) ? now : new Date(Date.UTC(year, m, 0)).toISOString().slice(0, 10);
+  const priorEnd =
+    month === now.slice(0, 7)
+      ? prior + '-' + String(Math.min(Number(now.slice(-2)), prevEnd.getUTCDate())).padStart(2, '0')
+      : prevEnd.toISOString().slice(0, 10);
+  const included = (r, start, end) => r.date?.startsWith(start) && r.date <= end;
+  const data = [];
+  function metric(label, rows, measure, format, detail, analyze) {
+    const cur = rows.filter((r) => included(r, month, currentEnd));
+    const prev = rows.filter((r) => included(r, prior, priorEnd));
+    const a = measure(cur),
+      b = measure(prev);
+    const change = Math.round((a - b) * 100) / 100;
+    data.push({
+      label,
+      a: format(a),
+      b: format(b),
+      change: (change > 0 ? '+' : '') + format(change),
+      assessment: analyze(cur, prev, change),
+      show: () =>
+        ctx.detail(
+          label + ' · 环比依据',
+          node('div', 'fx-page', [
+            node('h3', '', month + ' 至 ' + currentEnd),
+            records(cur, detail),
+            node('h3', '', prior + ' 至 ' + priorEnd),
+            records(prev, detail),
+          ])
+        ),
+    });
+  }
+  if (hasGrant(ctx, 'finance')) {
+    const cash = [
+      ...state.depositEntries,
+      ...state.payments.filter((p) => ['线下登记', '微信支付', '支付宝'].includes(p.method)),
+    ];
+    const describe = (r) => r.date + ' · ' + (r.voucher || r.id) + ' · ' + money(r.amount);
+    metric('实际入款', cash, (r) => sumMoney(r, 'amount'), money, describe, (cur, prev, delta) => {
+      if (!cur.length && !prev.length) return '两期均无入款凭证';
+      const receipts = cur.length + ' 笔到账，上期 ' + prev.length + ' 笔';
+      return delta < 0 ? receipts + '。可按账期核对待缴明细' : receipts;
+    });
+    metric('机构支出', state.expenses || [], (r) => sumMoney(r, 'amount'), money, describe, (cur) => {
+      if (!cur.length) return '本期尚无支出凭证';
+      const groups = new Map();
+      for (const row of cur) {
+        groups.set(row.category, (groups.get(row.category) || 0) + Math.round(row.amount * 100));
+      }
+      const [label, cents] = [...groups].sort((a, b) => b[1] - a[1])[0];
+      return '支出最多为' + label + '，合计 ' + money(cents / 100);
+    });
+  }
+  if (hasGrant(ctx, 'care')) {
+    metric(
+      '已完成护理工单',
+      state.tasks.filter((t) => t.status === '已完成'),
+      (r) => r.length,
+      (n) => n + ' 项',
+      (r) => r.date + ' · ' + r.title + ' · ' + r.id,
+      () => {
+        const pending = state.tasks.filter((r) =>
+          included(r, month, currentEnd) && r.status === '待执行'
+        ).length;
+        return '当期计划中的 ' + pending + ' 项仍待执行';
+      }
+    );
+  }
+  if (hasGrant(ctx, 'inventory')) {
+    metric(
+      '领用单据',
+      state.transactions.filter((t) => t.type === '出库'),
+      (r) => r.length,
+      (n) => n + ' 笔',
+      (r) => r.date + ' · ' + r.id + ' · ' + r.note,
+      (cur) => '本期共领用 ' + new Set(cur.map((r) => r.itemId)).size + ' 种物资'
+    );
+  }
+  return table(ctx, {
+    title: '月度经营诊断 · ' + currentEnd + ' / ' + priorEnd,
+    rows: data,
+    cols: [
+      { label: '指标', view: (r) => r.label },
+      { label: '本期', view: (r) => r.a },
+      { label: '上期', view: (r) => r.b },
+      { label: '增减', view: (r) => r.change },
+      { label: '经营观察', view: (r) => r.assessment },
+      { label: '依据', view: (r) => link(ctx, '对比明细', r.show) },
+    ],
+  });
 }

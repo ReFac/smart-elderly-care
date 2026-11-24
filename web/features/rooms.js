@@ -1,5 +1,5 @@
-import { node, page } from './shared.js';
-import { profile } from './residency.js';
+import { active, canAct, choose, node, page } from './shared.js';
+import { admit, profile, transfer } from './residency.js';
 import { chooseAdmin } from './room-admin.js';
 import { openFacilityTour } from './room-tour.js';
 import { button, statusText, pathName, heading, lookup, failure } from './room-elements.js';
@@ -245,6 +245,32 @@ function floorPlan(ctx, data, chooseRoom) {
   };
 }
 
+function placeInBed(ctx, room, bed) {
+  const actions = choose();
+  const dialog = ctx.detail(
+    pathName(room.buildingName, room.floorLabel, bed.label + ' 床'),
+    actions
+  );
+  if (canAct(ctx, 'care.admit'))
+    actions.append(
+      ctx.ui.button(
+        '办理新入住',
+        () => {
+          dialog.close();
+          admit(ctx, { bedId: bed.id });
+        },
+        'primary'
+      )
+    );
+  if (canAct(ctx, 'care.transfer') && active(ctx).length)
+    actions.append(
+      ctx.ui.button('转入在住长者', () => {
+        dialog.close();
+        transfer(ctx, null, bed);
+      })
+    );
+}
+
 function roomDetails(ctx, room, canRead, highlighted, openTour) {
   const people = node('div', 'room-bed-rows');
   for (const bed of room.beds) {
@@ -253,15 +279,21 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
       bed.residentId &&
       ctx.available('residents') &&
       ctx.state.residents.find((r) => r.id === bed.residentId);
-    const name = canRead && bed.residentName ? bed.residentName : bed.status;
+    const allocatable =
+      bed.status === '空闲' &&
+      (canAct(ctx, 'care.admit') || (canAct(ctx, 'care.transfer') && active(ctx).length));
+    const name =
+      canRead && bed.residentName ? bed.residentName : allocatable ? '空闲 · 办理分配' : bed.status;
     const body = [
       ctx.ui.icon('bed', 18),
       node('span', '', [node('small', '', bed.label + ' 床'), node('strong', '', name)]),
-      resident ? ctx.ui.icon('chevron', 14) : null,
+      resident || allocatable ? ctx.ui.icon('chevron', 14) : null,
     ];
     const row = resident
       ? button('查看' + name + '的档案', () => profile(ctx, resident), 'room-bed-row', body)
-      : node('div', 'room-bed-row', body);
+      : allocatable
+        ? button('分配空床 ' + bed.label, () => placeInBed(ctx, room, bed), 'room-bed-row', body)
+        : node('div', 'room-bed-row', body);
     if (canRead && highlighted.includes(bed.residentName)) row.classList.add('matched');
     people.append(row);
   }

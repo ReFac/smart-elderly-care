@@ -1,6 +1,9 @@
 """用药复核、执行凭证、体征上报和交班。"""
 
+from datetime import datetime
 import re
+
+from . import drug_rules
 
 from .records import append_record, get_resident, lookup, required_field, text_field
 
@@ -21,6 +24,10 @@ def medication_warnings(state, resident, name, interaction_note, exclude_id=None
         for m in state["medications"]
     ):
         warnings.append("同名药品已有待处理记录，请复核是否重复。")
+    for rule in drug_rules.matching(state, resident["id"], name, exclude_id):
+        warnings.append(
+            f"配伍复核（{rule['version']}，{rule['drugA']} / {rule['drugB']}）：{rule['message']}〔{rule['source']}〕"
+        )
     if interaction_note:
         warnings.append(f"人工标记的配伍核查事项：{interaction_note}")
     return warnings
@@ -41,18 +48,48 @@ def refresh_medication_warnings(state, resident):
         med["warnings"] = warnings
 
 
+def update_drug_rules(state, p, today, change):
+    result = change(state, p, today)
+    for resident in state["residents"]:
+        if resident["status"] == "在住":
+            refresh_medication_warnings(state, resident)
+    return result
+
+
+def publish_drug_rule(state, p, today):
+    return update_drug_rules(state, p, today, drug_rules.publish)
+
+
+def retire_drug_rule(state, p, today):
+    return update_drug_rules(state, p, today, drug_rules.retire)
+
+
 def add_medication(state, p, today):
     resident = get_resident(state, p.get("residentId"))
     name = required_field(p, "name", "药品名")
     instruction = required_field(p, "instruction", "医嘱或执行说明")
     interaction = text_field(p.get("interactionNote"), "配伍核查事项")
     warnings = medication_warnings(state, resident, name, interaction)
+    scheduled = text_field(p.get("scheduledAt"), "医嘱给药时间", limit=16)
+    if scheduled:
+        try:
+            if (
+                datetime.strptime(scheduled, "%Y-%m-%dT%H:%M").strftime(
+                    "%Y-%m-%dT%H:%M"
+                )
+                != scheduled
+            ):
+                raise ValueError
+        except ValueError:
+            raise ValueError("请填写日期和24小时制的给药时间。") from None
     append_record(
         state,
         "medications",
         residentId=resident["id"],
         name=name,
         instruction=instruction,
+        scheduledAt=scheduled,
+        prescribedBy=text_field(p.get("operator"), "登记人"),
         assignee=text_field(p.get("assignee"), "责任人"),
         date=today,
         warnings=warnings,
@@ -80,6 +117,20 @@ def review_medication(state, p, today):
         note=note,
         warnings=warnings,
     )
+    record.setdefault("reviews", []).append(
+        dict(
+            reviewer=reviewer,
+            date=today,
+            note=note,
+            warnings=list(warnings),
+            ruleIds=[
+                r["id"]
+                for r in drug_rules.matching(
+                    state, resident["id"], record["name"], record["id"]
+                )
+            ],
+        )
+    )
     return f"{reviewer}复核了{resident['name']}的用药记录"
 
 
@@ -94,7 +145,13 @@ def give_medication(state, p, today):
     )
     if set(warnings) - set(record["warnings"]):
         raise ValueError("发现新增风险，请重新登记并核查用药计划。")
-    record.update(status="已执行", operator=operator, executedAt=today)
+    record.update(
+        status="已执行",
+        operator=operator,
+        executedAt=today,
+        executedTime=p.get("nowLocal", today),
+        executionNote=text_field(p.get("executionNote"), "实际执行补充"),
+    )
     refresh_medication_warnings(state, resident)
     return f"{operator}记录了{resident['name']}的给药执行凭证"
 

@@ -1,8 +1,11 @@
+import { previewSummary } from './dossier-summary.js';
+import { pendingDocument, recognizeDocument, reviewReceipt } from './document-ocr.js';
 import {
   node,
   add,
   page,
   table,
+  tabs,
   choose,
   btn,
   link,
@@ -106,6 +109,33 @@ function relativeForm(ctx, resident, accountId, profile) {
   });
 }
 
+function portalTable(ctx, scope, config) {
+  const total = ctx.state.portalTotals[scope];
+  if (total <= config.rows.length) return table(ctx, config);
+  const root = node('div', 'fx-profile');
+  async function load(offset) {
+    if (!root.isConnected) return;
+    try {
+      const next = await ctx.get(
+        '/api/portal/history/' + scope + '?offset=' + offset + '&revision=' + ctx.state.revision
+      );
+      if (root.isConnected) render(next.rows, next.offset);
+    } catch (error) {
+      ctx.toast(error.message);
+    }
+  }
+  function render(rows, offset) {
+    const actions = choose(
+      offset ? btn(ctx, '上一组', () => load(Math.max(0, offset - 30))) : null,
+      node('span', 'fx-muted', offset + 1 + '–' + (offset + rows.length) + ' / ' + total),
+      offset + rows.length < total ? btn(ctx, '更早记录', () => load(offset + rows.length)) : null
+    );
+    root.replaceChildren(table(ctx, { ...config, rows, action: actions }));
+  }
+  render(config.rows, 0);
+  return root;
+}
+
 function myFamily(ctx) {
   const me = ctx.state.user;
   const resident = (ctx.state.residents || []).find((r) => r.id === me.residentId);
@@ -118,29 +148,124 @@ function myFamily(ctx) {
       section('其他联系方式', facts(displayed(relativeFields.slice(4), profile)))
     ])
   ]);
-  const services = me.familyServices ? table(ctx, {
-    title: '最近完成的照护服务',
-    rows: ctx.state.familyServiceHistory || [],
-    search: { placeholder: '搜索服务项目', value: (r) => r.title },
-    cols: [
-      { label: '服务项目', view: (r) => r.title },
-      { label: '完成日期', view: (r) => r.completedAt || '未登记' },
-      { label: '计划日期', view: (r) => r.date },
-      { label: '计划时间', view: (r) => r.time || '未登记' },
-    ],
-    empty: '目前没有已完成的照护服务。'
-  }) : null;
+  const services = me.familyServices
+    ? table(ctx, {
+        title: '最近完成的照护服务',
+        rows: ctx.state.familyServiceHistory || [],
+        search: { placeholder: '搜索服务项目', value: (r) => r.title },
+        cols: [
+          { label: '服务项目', view: (r) => r.title },
+          { label: '完成日期', view: (r) => r.completedAt || '未登记' },
+          { label: '计划日期', view: (r) => r.date },
+          { label: '计划时间', view: (r) => r.time || '未登记' }
+        ],
+        empty: '目前没有已完成的照护服务。'
+      })
+    : null;
   const identity = node('section', 'family-identity', [
     node('span', 'family-mark', ctx.ui.icon('people', 25)),
-    node('div', '', [node('small', '', '绑定长者'), node('h2', '', resident.name)]),
-    node('span', 'family-institution', [ctx.ui.icon('building', 15), ctx.state.uiSettings.institutionName])
+    node('div', '', [
+      node('small', '', me.portalSelf ? '我的入住档案' : '绑定长者'),
+      node('h2', '', resident.name)
+    ]),
+    node('span', 'family-institution', [
+      ctx.ui.icon('building', 15),
+      ctx.state.uiSettings.institutionName
+    ])
   ]);
+  const panels = [];
+  if (services) panels.push(['completed', '已完成服务', () => services]);
+  if (ctx.state.portalTasks)
+    panels.push([
+      'tasks',
+      '照护工单进度',
+      () =>
+        portalTable(ctx, 'careSchedule', {
+          title: '照护工单进度',
+          rows: ctx.state.portalTasks,
+          cols: [
+            { label: '服务项目', view: (r) => r.title },
+            { label: '计划时间', view: (r) => [r.date, r.time].filter(Boolean).join(' ') },
+            { label: '状态', view: (r) => r.status },
+            { label: '完成日期', view: (r) => r.completedAt || '—' },
+            {
+              label: '服务评价',
+              view: (r) =>
+                r.rating
+                  ? r.rating + ' 分'
+                  : r.status === '已完成'
+                    ? link(ctx, '评价', () =>
+                        ctx.dialog({
+                          title: '评价本次服务',
+                          description: r.title,
+                          fields: [
+                            {
+                              name: 'rating',
+                              label: '满意度（1 至 5 分）',
+                              type: 'number',
+                              min: 1,
+                              max: 5,
+                              required: true
+                            },
+                            {
+                              name: 'note',
+                              label: '评价意见',
+                              type: 'textarea',
+                              maxLength: 500,
+                              required: false
+                            }
+                          ],
+                          onSubmit: (v) =>
+                            ctx.command('portal.feedback', {
+                              taskId: r.id,
+                              rating: Number(v.rating),
+                              note: v.note
+                            })
+                        })
+                      )
+                    : '—'
+            }
+          ],
+          empty: '暂无照护工单。'
+        })
+    ]);
+  if (ctx.state.portalMedication)
+    panels.push([
+      'medication',
+      '医嘱与给药记录',
+      () =>
+        portalTable(ctx, 'medication', {
+          title: '医嘱与给药记录',
+          rows: ctx.state.portalMedication,
+          cols: [
+            { label: '药品', view: (r) => r.name },
+            { label: '已复核医嘱', view: (r) => r.instruction },
+            { label: '计划时间', view: (r) => r.scheduledAt?.replace('T', ' ') || '未登记' },
+            { label: '状态', view: (r) => r.status },
+            {
+              label: '实际执行',
+              view: (r) => (r.executedTime || r.executedAt || '—').replace('T', ' ')
+            }
+          ],
+          empty: '暂无已复核的医嘱。'
+        })
+    ]);
+  if (!me.portalSelf) panels.push(['relative', '我的亲属资料', () => body]);
+  const content =
+    me.portalScopes.length && panels.length > 1
+      ? tabs('family', panels)
+      : panels.length
+        ? panels.map(([, , render]) => render())
+        : ctx.ui.empty('目前没有开通服务记录查阅，可在环境导览中参观院区。');
   return page(
     ctx,
-    '家属服务',
+    me.portalSelf ? '长者服务' : '家属服务',
     '',
-    btn(ctx, '编辑本人资料', () => relativeForm(ctx, resident, me.id, profile), 'primary'),
-    identity, services, body
+    me.portalSelf
+      ? null
+      : btn(ctx, '编辑本人资料', () => relativeForm(ctx, resident, me.id, profile), 'primary'),
+    identity,
+    content
   );
 }
 
@@ -174,7 +299,7 @@ function newDocument(ctx, resident) {
   const source = node('input');
   source.maxLength = 200;
   source.placeholder = '例如医院名称、科室或既往病历来源';
-  const method = options(['手工描述', '人工核对的 OCR 转录']);
+  const method = options(['手工描述', '院内 OCR', '人工核对的 OCR 转录']);
   const description = node('textarea');
   description.rows = 4;
   description.maxLength = 8000;
@@ -231,6 +356,20 @@ function newDocument(ctx, resident) {
     err,
     submit
   );
+  const updateMethod = () => {
+    const local = method.value === '院内 OCR';
+    for (const field of [description, pending]) {
+      field.disabled = local;
+      field.closest('label').hidden = local;
+    }
+    submit.textContent = local ? '留存原件并在院内识别' : '确认原文并存档';
+  };
+  method.addEventListener('change', updateMethod);
+  kind.addEventListener('change', () => {
+    if (kind.value === '出院小结') method.value = '院内 OCR';
+    if (kind.value === '病史补录') method.value = '手工描述';
+    updateMethod();
+  });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (submit.disabled) return;
@@ -248,17 +387,25 @@ function newDocument(ctx, resident) {
         category: kind.value,
         source: source.value,
         method: method.value,
-        description: description.value,
-        pending: pending.value
+        description: description.disabled ? '' : description.value,
+        pending: pending.disabled ? '' : pending.value
       };
       if (file) {
         payload.filename = file.name;
         if (file.type) payload.mime = file.type;
         payload.imageBase64 = await asBase64(file);
       }
+      const imageHash =
+        file && method.value === '院内 OCR'
+          ? Array.from(
+              new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())),
+              (x) => x.toString(16).padStart(2, '0')
+            ).join('')
+          : '';
       if (!(await ctx.command('dossier.document', payload)))
         err.textContent =
           document.querySelector('#announcer')?.textContent || '存档失败，请核对后重试。';
+      else if (imageHash) await recognizeDocument(ctx, resident.id, { imageHash });
     } catch (error) {
       err.textContent = error.message;
     } finally {
@@ -269,6 +416,7 @@ function newDocument(ctx, resident) {
 }
 
 function showDocument(ctx, doc) {
+  if (!doc.summary && doc.ocr) return pendingDocument(ctx, doc);
   const s = doc.summary;
   const view = node('article', 'fx-document fx-profile', [
     node('header', 'fx-document-head', [
@@ -287,6 +435,8 @@ function showDocument(ctx, doc) {
     section('待核实事项', node('p', '', s.pending))
   ]);
   sheet.append(transcription);
+  if (doc.reviewChanges && Object.keys(doc.reviewChanges).length)
+    transcription.append(reviewReceipt(doc));
   view.append(sheet);
   if (doc.hasImage) {
     const image = node('img');
@@ -360,7 +510,7 @@ function timeline(ctx, resident) {
             'fx-time-entry',
             named(r.category, [r.source, r.recordedDate + ' 存档'].filter(Boolean).join(' · '))
           ),
-          link(ctx, '查看概括', () => showDocument(ctx, r))
+          link(ctx, r.summary ? '查看概括' : '查看待核对原件', () => showDocument(ctx, r))
         ])
       );
     }
@@ -396,7 +546,7 @@ function showKin(ctx, resident) {
   );
   if (ctx.state.user.kind === 'owner') {
     const accounts = (ctx.state.accounts || []).filter(
-      (a) => a.kind === 'family' && a.enabled && a.residentId === resident.id
+      (a) => a.kind === 'family' && !a.portalSelf && a.enabled && a.residentId === resident.id
     );
     for (const a of accounts) {
       list.append(
@@ -423,6 +573,8 @@ export function openDossier(ctx, resident) {
     actions.append(btn(ctx, '编辑登记资料', () => editResident(ctx, resident, profile)));
   if (allowed(ctx, 'medical.write'))
     actions.append(btn(ctx, '存档医疗文书', () => newDocument(ctx, resident), 'primary'));
+  if (ctx.state.allowedActions.includes('dossier.signSummary'))
+    actions.append(btn(ctx, '核对动态档案摘要', () => previewSummary(ctx, resident, showDocument)));
   if (allowed(ctx, 'medical')) contents.append(timeline(ctx, resident));
   if (allowed(ctx, 'residents') || allowed(ctx, 'intake'))
     side.append(
@@ -441,6 +593,18 @@ export function openDossier(ctx, resident) {
       showKin(ctx, resident)
     );
   if (allowed(ctx, 'clinical') || allowed(ctx, 'medical')) {
+    if (resident.summary)
+      contents.prepend(section('当前档案摘要', node('p', '', resident.summary)));
+    if (resident.allergies || resident.risk) {
+      const values = [
+        ['已登记过敏史', resident.allergies],
+        ['高危要点', resident.risk]
+      ];
+      const rows = node('div', 'fx-profile');
+      for (const [label, value] of values.filter((entry) => entry[1]))
+        rows.append(node('div', '', [badge(ctx, label, 'amber'), ' ' + value]));
+      contents.prepend(section('过敏与高危提示', rows));
+    }
     const updates = (ctx.state.archives || [])
       .filter((r) => r.residentId === resident.id)
       .reverse();
@@ -449,12 +613,21 @@ export function openDossier(ctx, resident) {
         disclosure(
           '护理复核与历史摘要',
           records(updates, (r) =>
-            named(
-              r.summary,
-              [r.source || '档案摘要复核', r.observedAt || r.date, r.room, r.reviewer]
-                .filter(Boolean)
-                .join(' · ')
-            )
+            r.evidence
+              ? disclosure(
+                  r.source + ' · ' + r.date,
+                  node('div', 'fx-profile', [
+                    named(r.summary, r.reviewer),
+                    facts(r.evidence.map((e) => [e.label, e.value]))
+                  ]),
+                  r.evidence.length
+                )
+              : named(
+                  r.summary,
+                  [r.source || '档案摘要复核', r.observedAt || r.date, r.room, r.reviewer]
+                    .filter(Boolean)
+                    .join(' · ')
+                )
           ),
           updates.length
         )

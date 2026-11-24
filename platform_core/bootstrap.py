@@ -14,6 +14,9 @@ CARE_COLLECTIONS = (
     "qualityChecks",
     "bedMoves",
     "archives",
+    "followups",
+    "referrals",
+    "drugRules",
 )
 
 OPERATIONS_COLLECTIONS = (
@@ -23,6 +26,9 @@ OPERATIONS_COLLECTIONS = (
     "deposits",
     "depositEntries",
     "payments",
+    "paymentOrders",
+    "channelReceipts",
+    "expenses",
     "shifts",
     "reports",
     "suggestions",

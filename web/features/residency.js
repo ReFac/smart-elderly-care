@@ -5,6 +5,7 @@ import {
   add,
   page,
   table,
+  tabs,
   kpis,
   field,
   select,
@@ -29,6 +30,7 @@ import {
   money
 } from './shared.js';
 import { openDossier } from './dossier.js';
+import { clinicalHistory } from './care-pathway.js';
 
 import { bedCard, familyPreview, bedside } from './bedcard.js';
 
@@ -84,15 +86,31 @@ export function admit(ctx, defaults = {}) {
   });
 }
 
-function transfer(ctx, row) {
+export function transfer(ctx, row, targetBed) {
   runForm(ctx, {
     title: '办理转床',
     action: 'care.transfer',
-    description: row.name + ' · 当前床位 ' + bedName(ctx, row.bedId),
-    fields: [select('bedId', '转入床位', bedOptions(ctx))],
+    description: row
+      ? row.name + ' · 当前床位 ' + bedName(ctx, row.bedId)
+      : '转入 ' + targetBed.label + ' 床',
+    fields: [
+      ...(row
+        ? []
+        : [
+            select('residentId', '选择转入的在住长者', [
+              { value: '', label: '请选择长者' },
+              ...active(ctx).map((p) => ({
+                value: p.id,
+                label: p.name + ' · ' + bedName(ctx, p.bedId)
+              }))
+            ])
+          ]),
+      ...(targetBed ? [] : [select('bedId', '转入床位', bedOptions(ctx))])
+    ],
     map: (v) => ({
       ...v,
-      residentId: row.id
+      bedId: targetBed?.id || v.bedId,
+      residentId: row?.id || v.residentId
     }),
     submitLabel: '确认转床'
   });
@@ -259,6 +277,7 @@ export function profile(ctx, row) {
     )
   );
   if (history.childElementCount) summary.append(history);
+  add(summary, clinicalHistory(ctx, row));
   ctx.detail('长者档案', summary);
 }
 
@@ -338,14 +357,10 @@ export function intake(ctx) {
 }
 
 export function residents(ctx) {
-  return page(
-    ctx,
-    '长者档案',
-    '按档案号或姓名查找长者。',
-    canAct(ctx, 'care.admit') ? btn(ctx, '办理入住', () => admit(ctx), 'primary') : null,
+  const list = (rows, renewals = false) =>
     table(ctx, {
-      title: '长者名册',
-      rows: byRecent(ctx.state.residents),
+      title: renewals ? '已到期及未来 30 天到期' : '长者名册',
+      rows,
       search: {
         placeholder: '搜索姓名或档案号',
         value: (r) => r.name + ' ' + r.id
@@ -374,6 +389,7 @@ export function residents(ctx) {
           label: '入住日期',
           view: (r) => r.admittedAt
         },
+        ...(renewals ? [{ label: '合同到期', view: (r) => r.endDate }] : []),
         {
           label: '状态',
           view: (r) => badge(ctx, r.status)
@@ -381,10 +397,25 @@ export function residents(ctx) {
         {
           label: '操作',
           align: 'end',
-          view: (r) => link(ctx, '查看档案', () => profile(ctx, r))
+          view: (r) =>
+            renewals && canAct(ctx, 'care.renew')
+              ? link(ctx, '办理续住', () => renew(ctx, r))
+              : link(ctx, '查看档案', () => profile(ctx, r))
         }
       ]
-    })
+    });
+  const all = byRecent(ctx.state.residents);
+  return page(
+    ctx,
+    '长者档案',
+    '按档案号或姓名查找长者。',
+    canAct(ctx, 'care.admit') ? btn(ctx, '办理入住', () => admit(ctx), 'primary') : null,
+    canAct(ctx, 'care.renew')
+      ? tabs('residents', [
+          ['all', '长者名册', () => list(all)],
+          ['renew', '到期续住', () => list(expiringContracts(all, today(ctx)), true)]
+        ])
+      : list(all)
   );
 }
 
@@ -504,4 +535,12 @@ export function beds(ctx) {
     node('div', 'fx-bed-controls', [filterBar, filter]),
     grid
   );
+}
+export function expiringContracts(residents, day) {
+  const cutoff = new Date(day + 'T00:00:00Z');
+  cutoff.setUTCDate(cutoff.getUTCDate() + 30);
+  const limit = cutoff.toISOString().slice(0, 10);
+  return residents
+    .filter((r) => r.status === '在住' && r.endDate && r.endDate <= limit)
+    .sort((a, b) => a.endDate.localeCompare(b.endDate));
 }

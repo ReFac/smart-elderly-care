@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from .room_context import room_context, validate_proposal
 from .bootstrap import empty_workspace
+from .access_policy import can_record_scale
 from . import (
     access,
     activity,
@@ -23,7 +24,7 @@ from . import (
 )
 
 TIMEZONE = ZoneInfo("Asia/Shanghai")
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class Conflict(Exception):
@@ -82,12 +83,14 @@ class Store:
             gateways.init(db)
             agents.init(db)
             provider.init(db)
-            facility.init(
-                db,
-                json.loads(
-                    db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
-                ),
+            data = json.loads(
+                db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
             )
+            missing = {k: v for k, v in empty_workspace().items() if k not in data}
+            if missing:
+                data.update(missing)
+                db.execute("UPDATE workspace SET data=? WHERE id=1", (encode(data),))
+            facility.init(db, data)
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     def actor(self, db, token):
@@ -140,6 +143,10 @@ class Store:
             data = access.project(
                 db, json.loads(row["data"]), user, self.facility_policy
             )
+            if can_record_scale(user):
+                from .care.scales import CATALOG
+
+                data["careScale"] = CATALOG
             data["selfAccess"] = {
                 "permissions": [
                     {"id": grant, "label": access.PERMISSIONS[grant]}
@@ -153,10 +160,16 @@ class Store:
                 ],
             }
             if user["kind"] == "family":
+                from .portal import SCOPES
+
                 family_permissions = data["selfAccess"]["permissions"]
-                family_permissions.append(
-                    {"id": "dossier.relative", "label": "维护本人的亲属资料"}
+                family_permissions.extend(
+                    {"id": k, "label": SCOPES[k]} for k in user["portalScopes"]
                 )
+                if not user.get("portalSelf"):
+                    family_permissions.append(
+                        {"id": "dossier.relative", "label": "维护本人的亲属资料"}
+                    )
                 if user.get("familyServices"):
                     family_permissions.append(
                         {
@@ -167,6 +180,9 @@ class Store:
             data["handovers"] = [
                 handovers.visible(record, access.has(user, "clinical"))
                 for record in data.get("handovers", ())
+                if not record.get("draftScope")
+                or user["kind"] == "owner"
+                or user["id"] in (record.get("senderId"), record.get("assigneeId"))
             ]
             if user.get("facilityScope"):
                 data["suggestions"] = [
@@ -201,6 +217,26 @@ class Store:
             )
             return {key: visual[key] for key in ("brandName", "institutionName")}
 
+    def payment_channels(self, token):
+        from .operations.checkout import enabled_channels
+
+        with closing(self.connect()) as db:
+            access.require(self.actor(db, token), "finance")
+            return {"channels": enabled_channels()}
+
+    def payment_order_status(self, token, order_id):
+        from .operations.checkout import authorized_order
+
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            _, _, order = authorized_order(self, db, token, order_id)
+            return {"orderId": order["id"], "status": order["status"]}
+
+    def payment_checkout(self, token, order_id):
+        from .operations.checkout import open_code
+
+        return open_code(self, token, order_id)
+
     def access_preview(self, token, payload):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
@@ -217,6 +253,19 @@ class Store:
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
             return handovers.recipients(db, self.actor(db, token))
+
+    def handover_draft(self, token, receiver_id, resident_id=""):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            actor = self.actor(db, token)
+            access.require(actor, "care")
+            receiver = handovers.recipient(db, actor, receiver_id, self.facility_policy)
+            state = json.loads(
+                db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+            )
+            return handovers.draft(
+                db, state, actor, receiver, resident_id, self.now().date().isoformat()
+            )
 
     def agent_handover(self, token, run_id, handover_id):
         with closing(self.connect()) as db, db:
@@ -259,6 +308,65 @@ class Store:
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
             return dossier.photo(db, doc_id, self.actor(db, token))
+
+    def document_ocr_detail(self, token, doc_id):
+        from . import document_ocr
+
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            return document_ocr.detail(db, self.actor(db, token), doc_id)
+
+    def dossier_summary_draft(self, token, resident_id):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            user = self.actor(db, token)
+            access.require(user, "medical")
+            access.require(user, "clinical")
+            state = json.loads(
+                db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+            )
+            return dossier.summary_draft(db, state, user, resident_id)
+
+    def portal_history(self, token, scope, offset, revision):
+        from . import portal
+
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            user = self.actor(db, token)
+            if user["kind"] != "family" or scope not in user["portalScopes"]:
+                raise PermissionError("该账号未获此项查阅授权")
+            row = db.execute(
+                "SELECT data, revision FROM workspace WHERE id=1"
+            ).fetchone()
+            if row["revision"] != revision:
+                raise Conflict("记录已更新，请刷新服务页重新查看")
+            return portal.history(json.loads(row["data"]), user, scope, offset)
+
+    def report_version(self, token, report_id, version):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            access.require(self.actor(db, token), "reports")
+            state = json.loads(
+                db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+            )
+            report = next((r for r in state["reports"] if r["id"] == report_id), {})
+            item = next(
+                (s for s in report.get("submissions", []) if s["version"] == version),
+                None,
+            )
+            if not item:
+                raise FileNotFoundError("未找到已冻结的报送版本")
+            site = db.execute(
+                "SELECT id FROM facility_site WHERE singleton=1"
+            ).fetchone()
+            return {
+                "schemaVersion": "ankang.civil.monthly.v1",
+                "institutionId": site[0],
+                "recipient": item["recipient"],
+                "submissionRef": item["submissionRef"],
+                "sentOn": item["sentOn"],
+                "dataset": item["snapshot"],
+            }
 
     def facility_resource(self, token, resource, key="", **filters):
         with closing(self.connect()) as db, db:
@@ -406,6 +514,10 @@ class Store:
         )
 
     def execute(self, action, payload, revision, token, *, room_bound=False):
+        if action == "dossier.ocr":
+            from . import document_ocr
+
+            document_ocr.prepare(self, token, payload, revision)
         planning = None
         if (
             action == "agent.start"
@@ -452,7 +564,9 @@ class Store:
             domain = action.partition(".")[0]
             try:
                 if action == "care.handover":
-                    summary = handovers.create(db, data, payload, user, now)
+                    summary = handovers.create(
+                        db, data, payload, user, now, self.facility_policy
+                    )
                 elif action == "care.acceptHandover":
                     summary = handovers.accept(data, payload, user, now)
                 elif action == "care.withdrawHandover":
@@ -460,6 +574,17 @@ class Store:
                 elif domain in ("ops", "care"):
                     fields = dict(payload)
                     actor_fields = {
+                        "care.assess": "operator",
+                        "care.addMedication": "operator",
+                        "care.screen": "operator",
+                        "care.scheduleFollowup": "operator",
+                        "care.finishFollowup": "operator",
+                        "care.refer": "operator",
+                        "care.receiveReferral": "operator",
+                        "care.referralConsent": "operator",
+                        "care.exportReferral": "operator",
+                        "care.publishDrugRule": "operator",
+                        "care.retireDrugRule": "operator",
                         "care.completeTask": "operator",
                         "care.giveMedication": "operator",
                         "care.vital": "operator",
@@ -471,6 +596,10 @@ class Store:
                     }
                     if action in actor_fields:
                         fields[actor_fields[action]] = user["displayName"]
+                    if action == "care.completeTask":
+                        fields["operatorId"] = user["id"]
+                    if action in ("care.giveMedication", "care.addMedication"):
+                        fields["nowLocal"] = now.strftime("%Y-%m-%dT%H:%M")
                     module = care if domain == "care" else operations
                     summary = module.apply(data, action, fields, today)
                 elif domain == "agent":
@@ -485,6 +614,10 @@ class Store:
                     )
                 elif action == "account.changePassword":
                     summary = access.change_own_password(db, user, payload)
+                elif action == "portal.feedback":
+                    from . import portal
+
+                    summary = portal.feedback(data, user, payload, today)
                 elif domain in ("gw", "dossier"):
                     module = gateways if domain == "gw" else dossier
                     summary = module.apply(db, data, action, payload, user, today)

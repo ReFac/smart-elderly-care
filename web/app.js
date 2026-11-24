@@ -11,7 +11,8 @@ import { renderFeature } from './features/index.js';
 
 import { selectTab } from './features/shared.js';
 
-import { profile } from './features/residency.js';
+import { profile, expiringContracts } from './features/residency.js';
+import { dueMedicationCount } from './features/medication-rules.js';
 
 const { el, icon, button, toast } = ui;
 
@@ -57,7 +58,7 @@ function signedOut() {
       await readState();
       render();
       return true;
-    }, branding)
+    }, branding),
   );
 }
 async function get(path) {
@@ -84,7 +85,7 @@ async function signOut() {
   }
 }
 function applySnapshot(snapshot) {
-  state = { ...snapshot.data, today: snapshot.today, audit: snapshot.audit };
+  state = { ...snapshot.data, today: snapshot.today, audit: snapshot.audit, revision: snapshot.revision };
   revision = snapshot.revision;
   branding = state.uiSettings;
   document.documentElement.dataset.theme = state.uiSettings.theme;
@@ -95,7 +96,7 @@ function applySnapshot(snapshot) {
     } catch {}
   }
   const pending = (state.gatewayAlerts || []).filter(
-    (r) => r.status === '待复核' && !seenAlerts.has(r.id)
+    (r) => r.status === '待复核' && !seenAlerts.has(r.id),
   );
   if (pending.length && permitted('alerts')) {
     pending.forEach((r) => seenAlerts.add(r.id));
@@ -105,7 +106,7 @@ function applySnapshot(snapshot) {
     toast(
       pending.length === 1
         ? '待核实预警 · ' + pending[0].room
-        : '有 ' + pending.length + ' 条新设备预警待核实'
+        : '有 ' + pending.length + ' 条新设备预警待核实',
     );
   }
 }
@@ -193,6 +194,9 @@ function context() {
   return {
     state,
     get,
+    async refreshWorkspace() {
+      if (await readState()) render();
+    },
     available,
     agentRegion,
     startScopedAgent(place) {
@@ -225,6 +229,7 @@ function visibleGroups() {
 }
 
 function moduleLink([id, label, iconName]) {
+  if (id === 'family' && state.user.portalSelf) label = '长者服务';
   const active = route === id;
   const link = el('a', 'nav-item' + (active ? ' active' : ''));
   link.href = '#' + id;
@@ -248,7 +253,7 @@ function sidebar() {
     nav.append(section);
   }
   const shortcuts = ['rooms', 'inbox', 'residents', 'reports'].filter(
-    (id) => available(id) && routes.get(id).group !== groupName
+    (id) => available(id) && routes.get(id).group !== groupName,
   );
   if (shortcuts.length) {
     const section = el('section', 'nav-shortcuts');
@@ -257,7 +262,7 @@ function sidebar() {
       ...shortcuts.map((id) => {
         const { label, icon: iconName } = routes.get(id);
         return moduleLink([id, label, iconName]);
-      })
+      }),
     );
     nav.append(section);
   }
@@ -317,7 +322,7 @@ function searchDialog() {
           r.open();
         });
         return b;
-      })
+      }),
     );
     if (!subset.length) list.append(ui.empty('没有找到匹配的模块或长者'));
   }
@@ -342,8 +347,44 @@ function notices() {
       'stock',
     ],
   ];
-  if (permitted('clinical'))
-    items.unshift(['待复核体征', state.vitals.filter((v) => v.status === '待复核').length, 'care', 'vitals']);
+  if (state.allowedActions.includes('care.renew'))
+    items.unshift([
+      '到期续住',
+      expiringContracts(state.residents, state.today).length,
+      'residents',
+      'renew',
+    ]);
+  if (permitted('clinical')) {
+    items.unshift(
+      ['到时给药', dueMedicationCount(state.medications), 'medications', 'reminders'],
+      [
+        '到期随访',
+        (state.followups || []).filter((r) => r.status === '待随访' && r.dueDate <= state.today)
+          .length,
+        'care',
+        'followups',
+      ],
+    );
+    items.unshift([
+      '待复核体征',
+      state.vitals.filter((v) => v.status === '待复核').length,
+      'care',
+      'vitals',
+    ]);
+  }
+  if (permitted('care')) {
+    const latest = new Map();
+    for (const a of state.assessments)
+      if (!a.historyOnly && (!latest.has(a.residentId) || latest.get(a.residentId).date <= a.date))
+        latest.set(a.residentId, a);
+    const due = state.residents.filter(
+      (r) =>
+        r.status === '在住' &&
+        latest.get(r.id)?.reviewDate &&
+        latest.get(r.id).reviewDate <= state.today,
+    );
+    items.unshift(['到期复评', due.length, 'assessments', 'review']);
+  }
   if (permitted('care'))
     items.unshift(['待我签收的交班', myPendingHandovers().length, 'care', 'handover']);
   if (available('inbox')) {
@@ -365,7 +406,7 @@ function notices() {
     b.append(
       icon(routes.get(destination).icon),
       el('span', '', label),
-      ui.badge(value + ' 项', value ? 'amber' : 'neutral')
+      ui.badge(value + ' 项', value ? 'amber' : 'neutral'),
     );
     b.addEventListener('click', () => {
       d.close();
@@ -381,7 +422,7 @@ function accountMenu() {
   const actor = el('div', 'account-person');
   actor.append(
     el('span', 'header-avatar', state.user.displayName.slice(0, 1)),
-    el('strong', '', state.user.displayName)
+    el('strong', '', state.user.displayName),
   );
   info.append(actor);
   for (const [key, value] of [
@@ -394,11 +435,15 @@ function accountMenu() {
   }
   const dialog = detail('当前账号', info);
   info.append(
-    button('个人中心', () => {
-      dialog.close();
-      go('account');
-    }, 'primary'),
-    button('退出登录', signOut)
+    button(
+      '个人中心',
+      () => {
+        dialog.close();
+        go('account');
+      },
+      'primary',
+    ),
+    button('退出登录', signOut),
   );
 }
 
@@ -412,7 +457,7 @@ function masthead() {
       if (open) root.querySelector('.nav-item.active')?.focus();
     },
     'icon',
-    'menu'
+    'menu',
   );
   menu.classList.add('menu-trigger');
   menu.setAttribute('aria-label', '业务导航');
@@ -426,7 +471,7 @@ function masthead() {
   const words = el('span', 'brand-words');
   words.append(
     el('strong', '', state.uiSettings.brandName),
-    el('small', '', state.uiSettings.institutionName)
+    el('small', '', state.uiSettings.institutionName),
   );
   brand.append(mark, words);
   const categories = el('nav', 'primary-nav');
@@ -446,7 +491,7 @@ function masthead() {
     search.append(
       icon('search', 17),
       el('span', '', '搜索'),
-      el('kbd', '', /Mac/.test(navigator.platform) ? '⌘ K' : 'Ctrl K')
+      el('kbd', '', /Mac/.test(navigator.platform) ? '⌘ K' : 'Ctrl K'),
     );
     search.addEventListener('click', searchDialog);
     const bell = button('', notices, 'icon', 'bell');
@@ -467,7 +512,7 @@ function masthead() {
   account.append(
     el('span', 'header-avatar', state.user.displayName.slice(0, 1)),
     el('span', 'account-name', state.user.displayName),
-    icon('down', 12)
+    icon('down', 12),
   );
   account.addEventListener('click', accountMenu);
   controls.append(account);
@@ -483,17 +528,17 @@ function contextBar() {
     icon('location', 14),
     el('span', '', info.group),
     icon('chevron', 11),
-    el('strong', '', info.label)
+    el('strong', '', route === 'family' && state.user.portalSelf ? '长者服务' : info.label),
   );
   const date = el('time', 'business-date');
   date.dateTime = state.today;
   const [year, month, day] = state.today.split('-');
   const weekday = new Intl.DateTimeFormat('zh-CN', { weekday: 'long', timeZone: 'UTC' }).format(
-    new Date(state.today + 'T12:00:00Z')
+    new Date(state.today + 'T12:00:00Z'),
   );
   date.append(
     icon('calendar', 14),
-    document.createTextNode(year + '年' + Number(month) + '月' + Number(day) + '日 · ' + weekday)
+    document.createTextNode(year + '年' + Number(month) + '月' + Number(day) + '日 · ' + weekday),
   );
   bar.append(crumbs, date);
   return bar;
@@ -513,7 +558,12 @@ function render() {
     history.replaceState(null, '', '#' + route);
   }
   closeMenu();
-  document.title = (routes.get(route)?.label || '找不到页面') + ' · ' + state.uiSettings.brandName;
+  document.title =
+    (route === 'family' && state.user.portalSelf
+      ? '长者服务'
+      : routes.get(route)?.label || '找不到页面') +
+    ' · ' +
+    state.uiSettings.brandName;
   const wrap = el('div', 'app-main');
   const main = el('main', 'content');
   main.id = 'content';
@@ -525,8 +575,8 @@ function render() {
       ui.heading(
         '找不到此页面',
         '请从左侧业务导航进入工作台。',
-        button('返回运营总览', () => go('overview'), 'primary')
-      )
+        button('返回运营总览', () => go('overview'), 'primary'),
+      ),
     );
   wrap.append(contextBar(), main);
   const shade = el('button', 'menu-backdrop');
@@ -597,33 +647,38 @@ async function refresh() {
       return;
     const snapshot = await get('/api/state');
     if (current !== epoch || saving || version !== revision) return;
-    const changedUser = JSON.stringify(state.user) !== JSON.stringify(snapshot.data.user) ||
-      JSON.stringify(state.uiSettings.hiddenRoutes) !== JSON.stringify(snapshot.data.uiSettings.hiddenRoutes);
+    const changedUser =
+      JSON.stringify(state.user) !== JSON.stringify(snapshot.data.user) ||
+      JSON.stringify(state.uiSettings.hiddenRoutes) !==
+        JSON.stringify(snapshot.data.uiSettings.hiddenRoutes);
     const dialogs = [...document.querySelectorAll('dialog[open]')];
     if (editing && !changedUser && !dialogs.length) return;
     if (dialogs.length && !changedUser) {
       const obsolete = dialogs.some(
         (d) =>
           d.dataset.proposalId &&
-          !(snapshot.data.voiceQueue || []).some((r) => r.id === d.dataset.proposalId)
+          !(snapshot.data.voiceQueue || []).some((r) => r.id === d.dataset.proposalId),
       );
       const settled = dialogs.some(
         (d) =>
           d.dataset.agentRunId &&
           !(snapshot.data.agentRuns || []).some(
-            (r) => r.id === d.dataset.agentRunId && r.status === 'awaiting_approval'
-          )
+            (r) => r.id === d.dataset.agentRunId && r.status === 'awaiting_approval',
+          ),
       );
       const received = dialogs.some(
         (d) =>
           (d.dataset.handoverId &&
             !myPendingHandovers(snapshot.data).some((r) => r.id === d.dataset.handoverId)) ||
           (d.dataset.pendingHandoverId &&
-            !snapshot.data.handovers.some((r) => r.id === d.dataset.pendingHandoverId && r.status === '待签收'))
+            !snapshot.data.handovers.some(
+              (r) => r.id === d.dataset.pendingHandoverId && r.status === '待签收',
+            )),
       );
       const lostTarget = dialogs.some(
-        (d) => d.dataset.managedAccountId &&
-          !snapshot.data.accounts?.some((a) => a.id === d.dataset.managedAccountId)
+        (d) =>
+          d.dataset.managedAccountId &&
+          !snapshot.data.accounts?.some((a) => a.id === d.dataset.managedAccountId),
       );
       if (!obsolete && !settled && !received && !lostTarget) return;
     }

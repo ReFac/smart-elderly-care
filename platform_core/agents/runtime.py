@@ -1,7 +1,11 @@
 """Dispatch bounded specialist work, then return evidence and a human-review checkpoint."""
 
+from dataclasses import replace
+
 from .contracts import (
+    CARE_PLAN_TOOL,
     HANDOVER_TOOL,
+    REVENUE_TOOL,
     LocalPlanner,
     Planner,
     SPECIALISTS,
@@ -9,8 +13,11 @@ from .contracts import (
     ToolProvider,
     TraceSink,
 )
+from .revenue import receipts
+from ..operations.care_draft import assessment_facts, plan_facts
 from ..operations.assistants import (
     care_suggestion,
+    care_review,
     stock_suggestion,
     finance_suggestion,
     cite_records,
@@ -21,8 +28,19 @@ from ..operations.assistants import (
 FIELDS = {
     "residents": ("id", "name", "status", "level"),
     "assessments": ("id", "residentId", "date", "level", "reviewDate"),
+    "plans": (
+        "id",
+        "residentId",
+        "assessmentId",
+        "date",
+        "status",
+        "assignee",
+        "reviewDate",
+    ),
     "tasks": ("id", "residentId", "date", "time", "status", "title", "assignee"),
     "handovers": ("id", "residentId", "date"),
+    "payments": ("id", "date", "method", "amount"),
+    "depositEntries": ("id", "date", "amount"),
     "inventory": ("id", "name", "quantity", "minimum", "unit"),
     "transactions": ("id", "itemId", "date", "quantity", "type"),
     "bills": (
@@ -36,6 +54,8 @@ FIELDS = {
         "careFee",
         "packageFee",
         "careLevel",
+        "bedTotal",
+        "careTotal",
         "serviceDays",
         "leaveDays",
     ),
@@ -43,6 +63,8 @@ FIELDS = {
 
 
 def scoped_records(state, spec, resident_id, member_ids=None, *, actor_id=None):
+    if spec.tool == CARE_PLAN_TOOL.tool and not resident_id:
+        raise ValueError("请先选择一位长者再生成个体照护计划")
     data = {}
     for collection in spec.collections:
         records = state[collection]
@@ -61,9 +83,20 @@ def scoped_records(state, spec, resident_id, member_ids=None, *, actor_id=None):
             records = [row for row in records if row.get(key) in member_ids]
         if resident_id and spec.key == "care":
             records = (row for row in records if row.get(key) == resident_id)
-        data[collection] = [
-            {k: row[k] for k in FIELDS[collection] if k in row} for row in records
-        ]
+        fields = (
+            ("id", "date", "amount")
+            if spec.tool == REVENUE_TOOL.tool and collection == "bills"
+            else FIELDS[collection]
+        )
+        data[collection] = []
+        for row in records:
+            item = {k: row[k] for k in fields if k in row}
+            if spec.tool == CARE_PLAN_TOOL.tool:
+                if collection == "assessments":
+                    item.update(assessment_facts(row))
+                elif collection == "plans":
+                    item.update(plan_facts(row))
+            data[collection].append(item)
     return data
 
 
@@ -121,6 +154,9 @@ def validate_artifact(artifact, spec, resident_id, allowed_ids):
 
 
 class LocalTools:
+    def __init__(self, goal=""):
+        self.goal = goal
+
     def collect(self, specialist, records, resident_id, day):
         if specialist.tool == HANDOVER_TOOL.tool:
             pending = records["handovers"]
@@ -138,7 +174,13 @@ class LocalTools:
                     )
                 ],
             )
-        elif specialist.key == "care" and not resident_id:
+        elif specialist.tool == REVENUE_TOOL.tool:
+            result = receipts(records, self.goal, day)
+        elif specialist.tool == CARE_PLAN_TOOL.tool:
+            result = care_suggestion(records, {"residentId": resident_id}, day)
+        elif specialist.key == "care" and resident_id:
+            result = care_review(records, {"residentId": resident_id}, day)
+        elif specialist.key == "care":
             due = sorted(
                 (
                     r
@@ -149,13 +191,11 @@ class LocalTools:
             )
             count = len({r["residentId"] for r in due})
             result = (
-                "",
+                resident_id,
                 "复核范围内到期照护工单",
                 f"截至 {day} 有 {len(due)} 项到期工单待执行，涉及 {count} 位长者。",
                 [cite_records("tasks", "到期工单", due, f"{len(due)} 项")],
             )
-        elif specialist.key == "care":
-            result = care_suggestion(records, {"residentId": resident_id}, day)
         elif specialist.key == "inventory":
             result = stock_suggestion(records, day)
         else:
@@ -208,13 +248,25 @@ def execute(
         "coordinator", "plan.created", "、".join(allowed[k].title for k in planned)
     )
     artifacts = []
-    provider = tools or LocalTools()
+    provider = tools or LocalTools(goal)
     for key in planned:
         spec = allowed[key]
         if key == HANDOVER_TOOL.key and any(
             word in goal for word in HANDOVER_TOOL.keywords
         ):
             spec = HANDOVER_TOOL
+        elif key == CARE_PLAN_TOOL.key and any(
+            word in goal for word in CARE_PLAN_TOOL.keywords
+        ):
+            spec = CARE_PLAN_TOOL
+        elif key == REVENUE_TOOL.key and any(
+            word in goal for word in REVENUE_TOOL.keywords
+        ):
+            spec = (
+                REVENUE_TOOL
+                if any(w in goal for w in ("营收", "收入"))
+                else replace(REVENUE_TOOL, collections=("depositEntries", "payments"))
+            )
         trace.append(key, "handoff", "接收" + spec.title + "子任务", "coordinator")
         target = resident_id if spec.key == "care" else ""
         inputs = scoped_records(state, spec, target, member_ids, actor_id=actor_id)

@@ -10,14 +10,13 @@ import {
   node,
   residentField,
   residentName,
-  runForm,
   section,
   select,
   table,
 } from './shared.js';
 
 const statusOf = (row) => (row.assigneeId ? row.status : '历史记录');
-const subject = (ctx, row) => (row.residentId ? residentName(ctx, row.residentId) : '全院');
+const subject = (ctx, row) => (row.residentId ? residentName(ctx, row.residentId) : row.draftScope === 'personal' ? '交班人当班工单' : '全院');
 const stamp = (at) => at?.slice(0, 19).replace('T', ' ');
 const mine = (ctx, row) => row.status === '待签收' && row.assigneeId === ctx.state.user.id;
 
@@ -43,23 +42,73 @@ async function create(ctx, button) {
       return;
     }
     const resident = residentField(ctx, { required: false, label: '交接范围' });
-    resident.options.unshift({ value: '', label: '全院交班' });
+    resident.options.unshift({ value: 'personal', label: '本人当班照护' }, { value: '', label: '全院交班（手工填写）' });
     const accounts = recipients.map((r) => ({
       value: r.id,
       label: r.displayName + ' · ' + r.username,
     }));
     accounts.unshift({ value: '', label: '请选择接班人员' });
-    runForm(ctx, {
+    let draftStamp = '';
+    let version = 0;
+    const feedback = node('small', 'fx-muted');
+    feedback.setAttribute('role', 'status');
+    const generate = btn(ctx, '生成当班小结初稿', async () => {
+      const selected = form.elements.residentId.value;
+      const target = form.elements.assigneeId.value;
+      if (!target || !selected) {
+        feedback.textContent = '请选择接班人，并选择本人当班照护或一位长者。';
+        return;
+      }
+      const request = ++version;
+      generate.disabled = true;
+      feedback.textContent = '正在归集照护工单…';
+      try {
+        const params = new URLSearchParams({ assigneeId: target, residentId: selected === 'personal' ? '' : selected });
+        const draft = await ctx.get('/api/care/handover-draft?' + params);
+        if (request !== version || !dialog.open) return;
+        form.elements.note.value = draft.note;
+        draftStamp = draft.stamp;
+        feedback.textContent = draft.scope + ' · ' + draft.date + '。请核对已完成、待办和逾期事项后提交。';
+        form.elements.note.focus();
+      } catch (error) {
+        if (request === version) feedback.textContent = error.message;
+      } finally {
+        if (request === version) generate.disabled = false;
+      }
+    });
+    const dialog = ctx.dialog({
       title: '登记交班',
-      action: 'care.handover',
-      description: '提交时保存当班工单摘要，交给所选账号签收。',
+      description: '交班人 ' + ctx.state.user.displayName + '。初稿可编辑，提交后交由所选账号签收。',
       fields: [
         resident,
         select('assigneeId', '接班人员', accounts),
         memo('note', '交接要点', true, { maxLength: 1000 }),
       ],
       submitLabel: '提交交班',
+      onSubmit: ({ residentId, assigneeId, note }) => {
+        if (generate.disabled) throw new Error('请等待初稿生成后核对。');
+        if (residentId === 'personal' && !draftStamp) throw new Error('请先生成并核对本人当班照护初稿。');
+        return ctx.command('care.handover', {
+          residentId: residentId === 'personal' ? '' : residentId,
+          assigneeId, note, ...(draftStamp ? { draftStamp } : {}),
+        });
+      },
     });
+    const form = dialog.querySelector('form');
+    const tools = node('div', 'fx-actions form-content', [generate, feedback]);
+    form.elements.note.rows = 6;
+    form.elements.note.closest('label').before(tools);
+    function resetScope() {
+      ++version;
+      draftStamp = '';
+      generate.disabled = false;
+      if (form.elements.note.value) {
+        form.elements.note.value = '';
+        feedback.textContent = '交接范围已更改，请按新范围重新填写或生成初稿。';
+      } else feedback.textContent = '';
+    }
+    form.elements.residentId.addEventListener('change', resetScope);
+    form.elements.assigneeId.addEventListener('change', resetScope);
   } catch (error) {
     if (button.isConnected) ctx.toast(error.message || '接班人员名单暂时无法读取，请重试。');
   } finally {

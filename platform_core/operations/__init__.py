@@ -3,7 +3,8 @@
 from .assistants import generate_suggestion, review_suggestion
 from .billing import CARE_RATES, deposit, generate_bill, pay
 from .demo import seed
-from .reports import generate_report
+from .settlements import create_order, expense, import_receipt, remind
+from .reports import generate_report, submit_report, report_receipt
 from .resources import add_item, assign_shift, record_stock
 
 
@@ -16,6 +17,12 @@ ACTIONS = {
     "ops.bill": generate_bill,
     "ops.deposit": deposit,
     "ops.pay": pay,
+    "ops.paymentOrder": create_order,
+    "ops.importReceipt": import_receipt,
+    "ops.remindBill": remind,
+    "ops.expense": expense,
+    "ops.submitReport": submit_report,
+    "ops.reportReceipt": report_receipt,
     "ops.report": generate_report,
     "ops.suggest": generate_suggestion,
     "ops.review": review_suggestion,

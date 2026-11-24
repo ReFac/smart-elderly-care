@@ -5,6 +5,7 @@ PERMISSIONS = {
     "intake": "接待、入住和床位管理",
     "care": "评估、照护和工单执行",
     "clinical": "体征、异常、医嘱和用药复核",
+    "clinical.rules": "维护经专业核准的用药核查规则",
     "medical": "查阅医疗文档原件",
     "medical.write": "登记医疗照片与概括",
     "relatives": "查看授权亲属资料",
@@ -90,15 +91,33 @@ ACTION_GRANTS = {
     "care.vital": "clinical",
     "care.resolveVital": "clinical",
     "care.archive": "clinical",
+    "care.screen": "clinical",
+    "care.scheduleFollowup": "clinical",
+    "care.finishFollowup": "clinical",
+    "care.refer": "clinical",
+    "care.receiveReferral": "clinical",
+    "care.referralConsent": "clinical",
+    "care.exportReferral": "clinical",
+    "care.publishDrugRule": "clinical.rules",
+    "care.retireDrugRule": "clinical.rules",
     "ops.stock": "inventory",
     "ops.addItem": "inventory",
     "ops.shift": "shifts",
     "ops.bill": "finance",
     "ops.deposit": "finance",
     "ops.pay": "finance",
+    "ops.importReceipt": "finance",
+    "ops.paymentOrder": "finance",
+    "ops.remindBill": "finance",
+    "ops.expense": "finance",
+    "ops.submitReport": "reports",
+    "ops.reportReceipt": "reports",
     "ops.report": "reports",
     "dossier.profile": "intake",
     "dossier.document": "medical.write",
+    "dossier.ocr": "medical.write",
+    "dossier.reviewDocument": "medical.write",
+    "dossier.signSummary": "medical",
     "agent.start": "assistants",
     "agent.publish": "assistants",
     "agent.cancel": "assistants",
@@ -117,6 +136,9 @@ COLLECTION_GRANTS = {
     "qualityChecks": "care",
     "handovers": "care",
     "medications": "clinical",
+    "followups": "clinical",
+    "referrals": "clinical",
+    "drugRules": "clinical",
     "vitals": "clinical",
     "inventory": "inventory",
     "transactions": "inventory",
@@ -125,6 +147,9 @@ COLLECTION_GRANTS = {
     "deposits": "finance",
     "depositEntries": "finance",
     "payments": "finance",
+    "paymentOrders": "finance",
+    "channelReceipts": "finance",
+    "expenses": "finance",
     "reports": "reports",
 }
 FACILITY_COMMANDS = (
@@ -157,6 +182,10 @@ def require(user, permission):
 
 
 STAFF_ACCOUNT_ACTIONS = ("access.create", "access.update", "access.password")
+
+
+def can_record_scale(user):
+    return has(user, "care") and (has(user, "clinical") or has(user, "medical"))
 
 
 def manages_accounts(user):
@@ -198,6 +227,12 @@ def authorize(user, action, payload, state):
         raise ValueError("业务操作格式无效")
     if action == "account.changePassword":
         return
+    if action == "portal.feedback":
+        if user["kind"] != "family" or "careSchedule" not in user.get(
+            "portalScopes", ()
+        ):
+            raise PermissionError("此账号没有服务评价授权")
+        return
     if action in FACILITY_COMMANDS:
         if user["kind"] != "owner":
             raise PermissionError("仅机构总管理员可以维护院区")
@@ -209,7 +244,7 @@ def authorize(user, action, payload, state):
             raise PermissionError("此账号没有对应的管理权限")
         return
     if action == "dossier.relative":
-        if user["kind"] not in ("owner", "family"):
+        if user["kind"] not in ("owner", "family") or user.get("portalSelf"):
             raise PermissionError("本人或总管理员可维护亲属资料")
         return
     if action in ("ops.suggest", "ops.review"):
@@ -234,6 +269,15 @@ def authorize(user, action, payload, state):
     if not permission:
         raise ValueError("未登记的业务操作")
     require(user, permission)
+    if action == "care.assess" and "scale" in payload and not can_record_scale(user):
+        raise PermissionError("标准量表原表录入需要照护及临床或医疗档案权限")
+    if action == "dossier.reviewDocument":
+        require(user, "clinical")
+        require(user, "medical")
+    if action == "dossier.signSummary":
+        require(user, "clinical")
+    if permission == "clinical.rules":
+        require(user, "clinical")
     if action in (
         "agent.start",
         "agent.publish",
@@ -249,6 +293,16 @@ def allowed_actions(user):
         action for action, permission in ACTION_GRANTS.items() if has(user, permission)
     ]
     actions.append("account.changePassword")
+    if user["kind"] == "family" and "careSchedule" in user.get("portalScopes", ()):
+        actions.append("portal.feedback")
+    if not (has(user, "clinical") and has(user, "medical")):
+        actions = [
+            a
+            for a in actions
+            if a not in ("dossier.reviewDocument", "dossier.signSummary")
+        ]
+    if not has(user, "clinical"):
+        actions = [a for a in actions if ACTION_GRANTS.get(a) != "clinical.rules"]
     if not has(user, "care"):
         actions = [
             a for a in actions if a not in ("gw.propose", "gw.confirm", "gw.dismiss")
@@ -257,7 +311,7 @@ def allowed_actions(user):
         actions += ["ops.suggest", "ops.review"]
     else:
         actions = [action for action in actions if not action.startswith("agent.")]
-    if user["kind"] in ("owner", "family"):
+    if user["kind"] in ("owner", "family") and not user.get("portalSelf"):
         actions.append("dossier.relative")
     if manages_accounts(user):
         actions.extend(STAFF_ACCOUNT_ACTIONS)
@@ -321,6 +375,26 @@ def visible_data(state, user):
     for key, grant in COLLECTION_GRANTS.items():
         if has(user, grant):
             data[key] = state.get(key, [])
+
+    if data["assessments"] and not can_record_scale(user):
+        # General care needs the scores and final level. Diagnoses and source paperwork
+        # remain with personnel authorized to read the professional assessment.
+        visible_scores = (
+            "version",
+            "name",
+            "assessedOn",
+            "scores",
+            "subtotals",
+            "total",
+            "grade",
+            "gradeName",
+        )
+        data["assessments"] = [
+            {**r, "scale": select_fields(r["scale"], visible_scores)}
+            if r.get("scale")
+            else r
+            for r in data["assessments"]
+        ]
 
     def any_grant(*grants):
         return any(has(user, g) for g in grants)

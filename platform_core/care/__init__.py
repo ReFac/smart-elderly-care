@@ -5,18 +5,39 @@ from .clinical import (
     give_medication,
     handover,
     resolve_vital,
+    publish_drug_rule,
+    retire_drug_rule,
     review_medication,
     vital,
 )
 from .demo import seed
+from .pathways import (
+    screen,
+    schedule_followup,
+    finish_followup,
+    refer,
+    receive_referral,
+    referral_consent,
+    export_referral,
+)
+from . import scales
 from .plans import add_task, approve_plan, assess, complete_task, quality
 from .records import LEVELS, iso_date
 from .residency import admit, archive, discharge, inquire, leave, renew, transfer
 
 
-__all__ = ["LEVELS", "apply", "seed"]
+__all__ = ["LEVELS", "apply", "seed", "scales"]
 
 _ACTIONS = {
+    "care.screen": screen,
+    "care.scheduleFollowup": schedule_followup,
+    "care.finishFollowup": finish_followup,
+    "care.refer": refer,
+    "care.receiveReferral": receive_referral,
+    "care.referralConsent": referral_consent,
+    "care.exportReferral": export_referral,
+    "care.publishDrugRule": publish_drug_rule,
+    "care.retireDrugRule": retire_drug_rule,
     "care.inquire": inquire,
     "care.admit": admit,
     "care.transfer": transfer,
