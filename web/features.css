@@ -41,8 +41,7 @@
 }
 .fx-module-mark,
 .fx-initial,
-.fx-ledger-icon,
-.fx-assistant-mark {
+.fx-ledger-icon {
   display: grid;
   place-items: center;
   flex: none;
@@ -154,8 +153,7 @@
 .fx-toolbar h2,
 .fx-timeline-head h3,
 .fx-section h3,
-.fx-identity h3,
-.fx-assistant h2 {
+.fx-identity h3 {
   margin: 0;
   font-size: 16px;
   font-weight: 690;
@@ -469,38 +467,6 @@
   gap: 6px;
   padding: 10px 13px;
 }
-.fx-assistants {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-.fx-assistant {
-  border: 1px solid var(--line);
-  border-top: 3px solid var(--accent, #254dba);
-  background: white;
-  border-radius: 5px;
-  padding: 15px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 9px;
-}
-.fx-assistant-mark {
-  width: 38px;
-  height: 38px;
-  background: #edf2fc;
-  color: var(--accent, #254dba);
-  border-radius: 5px;
-}
-.fx-assistant p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.55;
-}
-.fx-assistant .btn {
-  margin-top: auto;
-}
 .fx-bed-controls {
   display: flex;
   gap: 10px;
@@ -717,9 +683,6 @@
   .fx-table th,
   .fx-table td {
     padding: 8px 11px;
-  }
-  .fx-assistants {
-    grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
   }
 }
 @media (max-width: 600px) {

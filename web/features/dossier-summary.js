@@ -3,7 +3,11 @@ import { named, node, section, records } from './shared.js';
 export async function previewSummary(ctx, resident, openDocument) {
   let draft;
   try {
-    draft = await ctx.get('/api/residents/' + encodeURIComponent(resident.id) + '/summary-draft');
+    const response = await fetch('/api/residents/' + encodeURIComponent(resident.id) + '/summary-draft', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    draft = await response.json();
+    if (!response.ok) throw new Error(draft.error || '生成失败，请稍后再试');
   } catch (error) {
     ctx.toast(error.message);
     return;
@@ -20,6 +24,7 @@ export async function previewSummary(ctx, resident, openDocument) {
   const submit = node('button', 'btn btn-primary', '签认并保存摘要');
   submit.type = 'submit';
   form.append(
+    node('p', 'fx-muted', '云端根据护理等级和文书类别撰写核对提示。请对照院内原文补全病情，核对后再签认。'),
     section(
       '摘要依据',
       records(draft.evidence, (e) => {

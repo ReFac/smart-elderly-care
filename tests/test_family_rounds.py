@@ -18,6 +18,9 @@ class FamilyRoundTests(unittest.TestCase):
     password = "temporary-account-fixture"
 
     def setUp(self):
+        from provider_fixture import simulate_narration
+
+        simulate_narration(self)
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name) / "trial.sqlite"

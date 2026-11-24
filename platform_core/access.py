@@ -45,7 +45,7 @@ SESSION_LIFETIME = 12 * 60 * 60
 WINDOW = 15 * 60
 MAX_FAILURES = 8
 DUMMY_SALT = b"nh-account-dummy"
-DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_MODEL = "deepseek-flash"
 
 
 class LoginThrottled(PermissionError):

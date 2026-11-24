@@ -20,6 +20,9 @@ PASSWORD = "agent-test-local-417"
 
 class AgentRuntimeTests(unittest.TestCase):
     def setUp(self):
+        from provider_fixture import simulate_narration
+
+        simulate_narration(self)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.path = Path(temporary.name) / "agent.sqlite"
@@ -397,7 +400,7 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(request("GET", caps_path, None)[0], 401)
         code, caps = request("GET", caps_path, self.owner)
         self.assertEqual(code, 200)
-        self.assertEqual(caps["runtime"], "local-rules")
+        self.assertEqual(caps["runtime"], "deepseek-flash")
         self.assertEqual(
             {a["id"] for a in caps["adapters"]},
             {"mcp-tools", "a2a-delegate", "trace-export"},

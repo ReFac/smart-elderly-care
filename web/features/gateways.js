@@ -1,3 +1,4 @@
+import { staffNotices } from './assistant-actions.js';
 import { commentInput } from '../lib/change-review.js';
 import { voiceProposal } from './speech-input.js';
 import { roundsInbox } from './rounds-desk.js';
@@ -385,6 +386,10 @@ function inbox(ctx) {
   if (has(ctx, 'care') || has(ctx, 'clinical')) {
     metadata.rounds = ['care', '待核对的照护事项', null];
     views.push(['rounds', '巡查提醒', () => roundsInbox(ctx)]);
+  }
+  if (ctx.state.user.kind !== 'family') {
+    metadata.notices = ['bell', '全体员工可见', (ctx.state.staffNotices || []).length];
+    views.push(['notices', '全员通知', () => staffNotices(ctx)]);
   }
   let queue;
   if (views.length) {

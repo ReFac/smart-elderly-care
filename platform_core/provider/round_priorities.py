@@ -157,7 +157,7 @@ def generate(store, token, rid, data, *, transport=None):
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
         history.watch(db, "rounds.priorityResult")
-        db.execute(
+        receipt = db.execute(
             """UPDATE api_usage SET status=?,reason=?,charged=?,specialistIds=?
             WHERE actor=? AND request=? AND status='pending'""",
             (
@@ -169,6 +169,16 @@ def generate(store, token, rid, data, *, transport=None):
                 request,
             ),
         )
+        if not receipt.rowcount:
+            provider.late_usage(
+                db,
+                actor["id"],
+                request,
+                result.tokens,
+                store.now(),
+                confirmed_zero=result.reason == "provider_rejected",
+            )
+            result = deepseek.Outcome("closed", "reconciled")
         db.execute(
             "UPDATE rounds_priorities SET generated_at=?,result=? WHERE report=?",
             (

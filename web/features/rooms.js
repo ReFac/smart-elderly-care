@@ -1,3 +1,4 @@
+import { roomTasks } from './agent-runs.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import { active, canAct, node, page } from './shared.js';
 import { admit, profile } from './residency.js';
@@ -26,7 +27,7 @@ export async function goToRoom(ctx, id) {
 function scopedAgent(ctx, place, label) {
   return ctx.available('assistants') && ctx.startScopedAgent
     ? ctx.ui.button(
-        place.roomId ? '房间协作' : place.floorId ? '楼层协作' : '分院协作',
+        place.roomId ? '问问这个房间' : place.floorId ? '问问这一层' : '问问这个分院',
         () => ctx.startScopedAgent({ ...place, label }),
         'secondary',
         'spark'
@@ -305,6 +306,7 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
       node('h3', '', '床位明细'),
       room.beds.length ? people : statusText('尚未设置床位'),
     ]),
+    ctx.available('assistants') && canAct(ctx, 'gw.propose') ? roomTasks(ctx, room.id, room.number + ' 房') : null,
     node('div', 'room-room-actions', [
       canAct(ctx, 'care.completeTask')
         ? ctx.ui.button(

@@ -12,6 +12,9 @@ from platform_core.store import Conflict, Store, TIMEZONE
 
 class RoundsTests(unittest.TestCase):
     def setUp(self):
+        from provider_fixture import simulate_narration
+
+        simulate_narration(self)
         folder = TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.path = Path(folder.name) / "synthetic.sqlite3"
@@ -121,7 +124,7 @@ class RoundsTests(unittest.TestCase):
         self.assertEqual("inherit", self.read(self.base)["mode"])
         report = self.send(self.base + "/generate", {}, token)["latest"]
         self.assertIsNone(report["cough"])
-        self.assertEqual("local", report["source"])
+        self.assertEqual("deepseek", report["source"])
         self.assertTrue(
             all(
                 row["permission"] == "care"
@@ -211,6 +214,12 @@ class RoundsTests(unittest.TestCase):
             self.assertEqual(
                 0, db.execute("SELECT COUNT(*) FROM rounds_reports").fetchone()[0]
             )
+        # A process can die while waiting on DeepSeek; another worker must respect
+        # that lease before retrying and billing for the same resident.
+        self.assertEqual(
+            0, Store(self.path, lambda: self.now).rounds.tick()["generated"]
+        )
+        self.now += timedelta(minutes=5)
         self.assertEqual(
             1, Store(self.path, lambda: self.now).rounds.tick()["generated"]
         )

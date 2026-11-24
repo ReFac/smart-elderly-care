@@ -8,6 +8,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 ENDPOINT = "https://api.deepseek.com/chat/completions"
 MAX_REPLY_BYTES = 32 * 1024
+REJECTED_HTTP = frozenset((400, 401, 402, 403, 404, 405, 413, 415, 422, 429))
 
 # Match short domain phrases locally, including common aliases. Never splice user text
 # or institution records into a model prompt. New vocabulary is an explicit code change.
@@ -97,7 +98,7 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def send(key, body):
+def send(key, body, *, timeout=8):
     request = Request(
         ENDPOINT,
         method="POST",
@@ -108,7 +109,7 @@ def send(key, body):
             "Accept": "application/json",
         },
     )
-    with build_opener(NoRedirect()).open(request, timeout=8) as response:
+    with build_opener(NoRedirect()).open(request, timeout=timeout) as response:
         raw = response.read(MAX_REPLY_BYTES + 1)
         if len(raw) > MAX_REPLY_BYTES:
             raise ValueError("模型响应超出范围")
@@ -128,7 +129,7 @@ def complete(transport, key, body, allowed):
         result = transport(key, body)
     except HTTPError as err:
         err.close()
-        if err.code in (400, 401, 402, 403, 404, 422, 429):
+        if err.code in REJECTED_HTTP:
             return Outcome("closed", "provider_rejected")
         return Outcome("uncertain", "provider_unavailable")
     except (HTTPException, URLError, OSError, ValueError, RecursionError):

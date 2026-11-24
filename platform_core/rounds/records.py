@@ -1,7 +1,6 @@
 """Read and record changes to an individual resident's current stay."""
 
 from datetime import date, timedelta
-from hashlib import sha256
 import json
 from uuid import uuid4
 
@@ -104,6 +103,7 @@ def visible_report(report, user):
         ]
     if not clinical:
         output["cough"] = None
+        output.pop("clinicalReviewed", None)
     return output
 
 
@@ -140,17 +140,96 @@ def audit(db, now, action, summary, actor, state, rid, comment=""):
     return revision
 
 
-def make_report(db, state, person, now, actor, comment=""):
+def report_source(db, state, person, now, *, clinical):
+    from ..provider.generation import fingerprint
+
     data = build(db, state, person, now)
-    raw = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    digest = sha256(raw.encode()).hexdigest()
-    last = db.execute(
-        """SELECT fingerprint FROM rounds_reports WHERE resident=? AND bed=? AND day=?
-                         ORDER BY created_at DESC,rowid DESC LIMIT 1""",
+    digest = fingerprint(["deepseek-v1", data])
+    previous = db.execute(
+        """SELECT fingerprint,json_extract(payload,'$.clinicalReviewed')
+           FROM rounds_reports WHERE resident=? AND bed=? AND day=?
+           ORDER BY created_at DESC,rowid DESC LIMIT 1""",
         (person["id"], data["bedId"], data["day"]),
     ).fetchone()
-    if last and last[0] == digest:
+    return (
+        data,
+        digest,
+        bool(previous and previous[0] == digest and (not clinical or previous[1])),
+    )
+
+
+def interpret(store, data, digest, *, clinical):
+    from ..provider import generation
+
+    # Separate calls prevent clinical observations from appearing in the general-care text.
+    notes = {
+        "care": generation.summarize(
+            store,
+            "rounds-agent",
+            ["rounds", digest, "care"],
+            "今日照护执行情况",
+            data["today"],
+        )
+    }
+    if clinical:
+        codes = {
+            ref["kind"]
+            for item in data["suggestions"]
+            if item["permission"] == "clinical"
+            for ref in item["evidence"]
+        }
+        trend = data["cough"]
+        if codes or trend["status"] != "insufficient":
+            facts = {
+                "档案有风险提示": "resident" in codes,
+                "有体征待复核": "vital" in codes,
+                "咳嗽观察": {
+                    k: trend[k]
+                    for k in (
+                        "status",
+                        "observedMinutes",
+                        "historyDays",
+                        "rate",
+                        "baseline",
+                    )
+                },
+            }
+            notes["clinical"] = generation.summarize(
+                store,
+                "rounds-agent",
+                ["rounds", digest, "clinical"],
+                "近期已核对观察的变化。仅给出有依据的复核建议，不作诊断，不推荐治疗。",
+                facts,
+            )
+    return {"notes": notes, "clinical": clinical}
+
+
+def make_report(db, state, person, now, actor, prepared, comment="", *, clinical):
+    from ..store import Conflict
+    from ..provider import model_name
+
+    data, digest, already_saved = report_source(
+        db, state, person, now, clinical=clinical
+    )
+    if already_saved:
         return False
+    if (
+        not prepared
+        or prepared[0] != digest
+        or clinical
+        and not prepared[1]["clinical"]
+    ):
+        raise Conflict("巡查依据已变化，请按最新记录重新生成")
+    data["source"] = "deepseek"
+    data["model"] = model_name()
+    data["clinicalReviewed"] = clinical
+    for scope, note in prepared[1]["notes"].items():
+        if scope == "clinical" and not clinical:
+            continue
+        field = "changes" if scope == "care" else "suggestions"
+        data[field].insert(
+            0, {"text": note, "evidence": [], "permission": scope, "source": "deepseek"}
+        )
     history.watch(db, "rounds.generate")
     data.update(id=uuid4().hex, generatedAt=now.isoformat())
     db.execute(

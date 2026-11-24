@@ -200,11 +200,11 @@ class ProviderTests(unittest.TestCase):
         self.mock.assert_not_called()
         self.assertEqual(self.status()["tokensUsed"], 48)
 
-    def test_invalid_outcome_bills_reported_usage_and_falls_back_without_retry(self):
+    def test_invalid_outcome_bills_reported_usage_and_stops_without_retry(self):
         self.grant()
         self.mock.return_value = reply("finance", tokens=51)
         self.assertEqual(self.plan()["reason"], "invalid_output")
-        self.assertEqual(self.plan()["mode"], "local")
+        self.assertEqual(self.plan()["mode"], "unavailable")
         self.assertEqual(self.status()["tokensUsed"], 51)
         self.mock.assert_called_once()
         self.mock.side_effect = HTTPError(
@@ -218,7 +218,7 @@ class ProviderTests(unittest.TestCase):
         self.grant()
         self.mock.side_effect = TimeoutError("fixture uncertainty")
         self.assertEqual(self.plan()["reason"], "provider_unavailable")
-        self.assertEqual(self.plan()["mode"], "local")
+        self.assertEqual(self.plan()["mode"], "unavailable")
         self.mock.assert_called_once()
         hold = self.status()["tokensReserved"]
         self.assertGreater(hold, 0)

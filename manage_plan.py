@@ -29,7 +29,7 @@ def main():
     commands.add_parser("disable", help="停止接受新的付费规划")
     commands.add_parser("unsettled", help="查看待结算或结果未明的记录")
     reconcile = commands.add_parser(
-        "reconcile", help="按供应商对账结果结算一笔不明用量"
+        "reconcile", help="按供应商账单输入一笔请求的实际总用量，含迟到的回执"
     )
     reconcile.add_argument("--actor", required=True)
     reconcile.add_argument("--request", required=True)
@@ -110,9 +110,7 @@ def main():
                     )
                 ]
             elif args.command == "unsettled":
-                entries = db.execute("""SELECT planId,actor,request,model,status,allowance,createdAt FROM api_usage
-                    WHERE status IN ('pending','uncertain') ORDER BY createdAt""")
-                result = [dict(r) for r in entries]
+                result = provider.unsettled(db)
             else:
                 result = provider.status(
                     db,

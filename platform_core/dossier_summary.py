@@ -1,4 +1,4 @@
-"""Build a bounded, local chart summary on request and retain the signed source references."""
+"""Collect signed chart evidence and obtain a Flash review using structured, anonymous facts."""
 
 import hashlib
 import json
@@ -72,9 +72,40 @@ def summary_draft(db, state, user, resident_id):
     ).hexdigest()
     return {
         "residentId": resident_id,
+        "careLevel": resident.get("level", ""),
         "fingerprint": fingerprint,
         "evidence": evidence,
-        "summary": "\n".join(e["label"] + "：" + e["value"] for e in evidence),
+        "summary": next(
+            (
+                row["summary"]
+                for row in state.get("archives", ())
+                if row.get("draftFingerprint") == fingerprint
+                and row.get("residentId") == resident_id
+            ),
+            "",
+        ),
+    }
+
+
+def review_facts(draft):
+    """Medical quotes, names, free-text health fields and chart identifiers stay in the chart."""
+    from .dossier import CATEGORIES
+
+    evidence = draft["evidence"]
+    grade = (
+        draft["careLevel"]
+        if draft["careLevel"] in ("自理", "半失能", "失能")
+        else "其他或未登记"
+    )
+    return {
+        "登记护理等级": grade,
+        "已核实照护记录数": sum(e["source"] == "archives" for e in evidence),
+        "已核实文书类型": [
+            e["label"].split(" · ")[0]
+            for e in evidence
+            if e["source"] == "dossier_documents"
+            and e["label"].split(" · ")[0] in CATEGORIES
+        ],
     }
 
 

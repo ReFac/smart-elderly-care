@@ -17,6 +17,9 @@ from platform_core.agents import runtime
 
 class RegionRuns(unittest.TestCase):
     def setUp(self):
+        from provider_fixture import simulate_narration
+
+        simulate_narration(self)
         workspace = tempfile.TemporaryDirectory()
         self.addCleanup(workspace.cleanup)
         isolate_credentials(self, workspace.name)
@@ -53,8 +56,27 @@ class RegionRuns(unittest.TestCase):
             "region": {"roomId": self.room},
             **fields,
         }
+        from platform_core.agents import narrative
+
+        if body.get("region") is None:
+            body.pop("region", None)
+        actor = user or self.staff
+        check = agents.preflight(db, self.data, actor, body)
+        planning = None
+        if not check["prior"]:
+            artifacts, log = narrative.collect(
+                check, self.data, actor, self.now.date().isoformat()
+            )
+            planning = {
+                "mode": "deepseek",
+                "model": "deepseek-flash",
+                "actor": actor["id"],
+                "artifacts": artifacts,
+                "events": log.rows,
+                "region": check["resolved"],
+            }
         return agents.apply(
-            db, self.data, "agent.start", body, user or self.staff, self.now, 0
+            db, self.data, "agent.start", body, actor, self.now, 0, planning
         )[1]
 
     def test_filter_runs_and_domain_records_with_frozen_room_and_source_evidence(self):
@@ -110,15 +132,9 @@ class RegionRuns(unittest.TestCase):
         self,
     ):
         with closing(self.store.connect()) as db, db:
-            legacy = agents.apply(
-                db,
-                self.data,
-                "agent.start",
-                {"goal": "核对护理工单", "requestId": "institution"},
-                self.staff,
-                self.now,
-                0,
-            )[1]
+            legacy = self.start(
+                db, region=None, goal="核对护理工单", requestId="institution"
+            )
             wider = self.start(db, region={"floorId": "floor-1"})
             restricted = {**self.staff, "facilityScope": {"roomIds": [self.room]}}
             self.assertFalse(agents.region_visible(db, restricted, legacy))

@@ -166,7 +166,7 @@ def contract(user, available):
     ]
     return {
         "version": "1.0",
-        "runtime": "local-rules",
+        "runtime": "deepseek-flash",
         "coordinator": "coordinator",
         "maxSteps": len(SPECIALISTS),
         "tools": tools,

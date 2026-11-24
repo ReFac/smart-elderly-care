@@ -104,6 +104,9 @@ class Store:
             rounds_family.init(db)
             gateways.init(db)
             agents.init(db)
+            from .agents import chat
+
+            chat.init(db)
             provider.init(db)
             data = json.loads(
                 db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
@@ -191,6 +194,9 @@ class Store:
                 if r["status"] != archive_retention.EXPIRED
             ]
             data = access.project(db, state, user, self.facility_policy)
+            from .operations import dispatch
+
+            dispatch.project(db, state, user, data)
             if access.has(user, "finance"):
                 from .operations.charges import CATEGORIES, UNITS
 
@@ -308,6 +314,13 @@ class Store:
                     and (not t.get("executionBedId") or t["executionBedId"] in beds)
                 ]
             gateways.project(db, data, user, beds, people)
+            if user["kind"] in ("owner", "staff") and access.has(user, "voice"):
+                from .provider import speech
+
+                data["assistantVoice"] = {
+                    **speech.agent_capability(db, self.now()),
+                    "path": "/api/assistant/voice",
+                }
             if access.has(user, "assistants"):
                 data["agentRuns"] = agents.listing(db, user)
                 data["agentCapabilities"] = self.agent_capabilities(db, user)
@@ -457,17 +470,40 @@ class Store:
             campus_access.require_document(db, user, doc_id)
             return document_ocr.detail(db, user, doc_id)
 
-    def dossier_summary_draft(self, token, resident_id):
-        with closing(self.connect()) as db, db:
-            db.execute("BEGIN")
-            user = self.actor(db, token)
-            access.require(user, "medical")
-            access.require(user, "clinical")
-            state = json.loads(
-                db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
-            )
-            campus_access.require_resident(db, user, resident_id, state)
-            return dossier.summary_draft(db, state, user, resident_id)
+    def dossier_summary_draft(self, token, resident_id, *, generate=False):
+        from .dossier_summary import review_facts
+        from .provider.generation import summarize
+
+        def current():
+            with closing(self.connect()) as db, db:
+                db.execute("BEGIN")
+                user = self.actor(db, token)
+                access.require(user, "medical")
+                access.require(user, "clinical")
+                state = json.loads(
+                    db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+                )
+                campus_access.require_resident(db, user, resident_id, state)
+                return dossier.summary_draft(db, state, user, resident_id)
+
+        draft = current()
+        if not generate or draft["summary"]:
+            return draft
+        # A single verified evidence set shares one metered response across reviewers.
+        text = summarize(
+            self,
+            "dossier-summary",
+            draft["fingerprint"],
+            "根据护理等级、已复核的文书类型和照护记录数量，撰写简短的档案核对提示。"
+            "具体病情只在院内原文中，由签认人核对补写。",
+            review_facts(draft),
+        )
+        after = current()
+        if after["fingerprint"] != draft["fingerprint"]:
+            raise ValueError("摘要依据已经变化，请重新生成并核对")
+        if not after["summary"]:
+            after["summary"] = text
+        return after
 
     def portal_history(self, token, scope, offset, revision):
         from . import portal
@@ -595,7 +631,7 @@ class Store:
                     }
                 )
         result["businessCommandNames"] = access.allowed_actions(user)
-        result["planningModes"] = ["local", "platform"]
+        result["planningModes"] = ["platform"]
         return result
 
     def agent_resource(self, token, name, run_id=None):
@@ -649,43 +685,9 @@ class Store:
             return quote_bill(state, payload, self.now().date().isoformat())
 
     def plan_agent(self, payload, revision, token):
-        def inspect(db):
-            actor = self.actor(db, token)
-            row = db.execute(
-                "SELECT revision,data FROM workspace WHERE id=1"
-            ).fetchone()
-            if type(revision) is not int or revision != row["revision"]:
-                raise Conflict("数据已更新，请核对最新内容后重新提交")
-            return actor, agents.preflight(db, json.loads(row["data"]), actor, payload)
+        from .agents import narrative
 
-        with closing(self.connect()) as db, db:
-            db.execute("BEGIN")
-            _, check = inspect(db)
-        if check["prior"]:
-            return None
-        if check["args"]["scope"] != "auto":
-            return {
-                "mode": "local",
-                "reason": "explicit_scope",
-                "model": "",
-                "specialistIds": [],
-            }
-
-        def authorize(db):
-            actor, current = inspect(db)
-            if not current["prior"] and current["specs"] != check["specs"]:
-                raise PermissionError("协作范围或岗位授权已更新，请重新核对")
-            return actor
-
-        return provider.plan(
-            self.connect,
-            authorize,
-            check["args"]["goal"],
-            check["request"],
-            allowed_specs=check["specs"],
-            scope_key=check["fingerprintScope"],
-            now=self.now(),
-        )
+        return narrative.prepare(self, token, payload, revision)
 
     def execute(
         self, action, payload, revision, token, *, room_bound=False, comment=""
@@ -696,12 +698,15 @@ class Store:
 
             document_ocr.prepare(self, token, payload, revision)
         planning = None
-        if (
-            action == "agent.start"
-            and isinstance(payload, dict)
-            and payload.get("planning") == "platform"
-        ):
-            planning = self.plan_agent(payload, revision, token)
+        if isinstance(payload, dict) and action in ("agent.start", "ops.suggest"):
+            if action == "agent.start":
+                planning = self.plan_agent(payload, revision, token)
+            else:
+                from .agents import narrative
+
+                planning = narrative.prepare(
+                    self, token, payload, revision, suggestion=True
+                )
         with closing(self.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             user = self.actor(db, token)
@@ -738,6 +743,10 @@ class Store:
                     raise ValueError("未登记的区域工具")
                 payload = validate_proposal(db, data, user, payload, today)
             campus_access.authorize_command(db, user, action, payload, data)
+            if action in ("ops.publishNotice", "ops.supplyOrder", "care.addTask"):
+                from .operations.dispatch import verify_proposal
+
+                verify_proposal(self, db, token, user, action, payload)
             if action == "care.register":
                 visible = campus_access.projection(db, data, user)
                 name = payload.get("name")
@@ -786,6 +795,18 @@ class Store:
                     summary = handovers.accept(data, payload, user, now)
                 elif action == "care.withdrawHandover":
                     summary = handovers.withdraw(data, payload, user, now)
+                elif action in (
+                    "ops.publishNotice",
+                    "ops.supplyOrder",
+                    "ops.finishSupplyOrder",
+                ):
+                    from .operations import dispatch
+
+                    summary = dispatch.apply(db, data, action, payload, user, now)
+                elif action == "ops.suggest":
+                    suggestion = planning["artifacts"][0]
+                    data["suggestions"].insert(0, suggestion)
+                    summary = "已生成待人工核对的 DeepSeek 建议"
                 elif domain in ("ops", "care"):
                     fields = dict(payload)
                     if action in ("care.inquire", "care.register", "ops.shift"):
@@ -822,7 +843,13 @@ class Store:
                     if action in ("care.giveMedication", "care.addMedication"):
                         fields["nowLocal"] = now.strftime("%Y-%m-%dT%H:%M")
                     module = care if domain == "care" else operations
+                    if action == "care.addTask":
+                        from .operations.dispatch import source_reference
+
+                        source = source_reference(data, fields, user)
                     summary = module.apply(data, action, fields, today)
+                    if action == "care.addTask":
+                        data["tasks"][-1].update(source)
                 elif action == "ltci.record":
                     from . import long_care
 

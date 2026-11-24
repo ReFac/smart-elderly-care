@@ -34,6 +34,8 @@ OPERATIONS_COLLECTIONS = (
     "shifts",
     "reports",
     "suggestions",
+    "supplyOrders",
+    "staffNotices",
 )
 
 

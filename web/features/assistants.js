@@ -1,54 +1,5 @@
-import { agentDesk } from './agent-runs.js';
-import {
-  hasGrant,
-  tabs,
-  node,
-  page,
-  table,
-  select,
-  options,
-  memo,
-  residentField,
-  btn,
-  link,
-  named,
-  badge,
-  runForm,
-  facts,
-  section,
-  records,
-} from './shared.js';
-const assistants = [
-  {
-    name: '日常照护',
-    icon: 'heart',
-    summary: '根据长者最近的有效评估整理已确认的生活需求、服务项目、责任人和复评日。',
-  },
-  {
-    name: '物资管控',
-    icon: 'box',
-    summary: '核对库存下限，汇总需要补充的护理物品。',
-  },
-  {
-    name: '运营分析',
-    icon: 'chart',
-    summary: '归集未核销账单，整理应收余额与跟进事项。',
-  },
-];
-
-function generate(ctx, assistant) {
-  runForm(ctx, {
-    title: '生成' + assistant.name + '建议',
-    description: assistant.summary,
-    action: 'ops.suggest',
-    fields: assistant.name === '日常照护' ? [residentField(ctx)] : [],
-    map: (v) => ({
-      ...v,
-      category: assistant.name,
-    }),
-    submitLabel: '生成待审核建议',
-  });
-}
+import { priorReports } from './agent-runs.js';
+import { node, table, select, options, memo, link, named, badge, runForm, facts, section, records, btn } from './shared.js';
 
 function review(ctx, row) {
   runForm(ctx, {
@@ -67,29 +18,7 @@ function review(ctx, row) {
   });
 }
 
-export function assistantsPage(ctx) {
-  const grants = { 日常照护: 'care', 运营分析: 'finance', 物资管控: 'inventory' };
-  const accessible = assistants.filter((a) => hasGrant(ctx, grants[a.name]));
-  if (!accessible.length)
-    return page(
-      ctx,
-      'Agent 工作台',
-      '',
-      null,
-      ctx.ui.empty('此账号尚未分配可用于生成建议的业务权限。')
-    );
-  const cards = node(
-    'div',
-    'fx-assistants',
-    accessible.map((a) =>
-      node('article', 'fx-assistant', [
-        node('div', 'fx-assistant-mark', ctx.ui.icon(a.icon, 23)),
-        node('h2', '', a.name),
-        node('p', '', a.summary),
-        btn(ctx, a.name === '日常照护' ? '生成个体照护计划草稿' : '生成建议', () => generate(ctx, a)),
-      ])
-    )
-  );
+export function openPriorReports(ctx) {
   function inspect(row) {
     const evidence = (row.evidence || []).map((e) => {
       const details = node('details');
@@ -159,14 +88,5 @@ export function assistantsPage(ctx) {
       },
     ],
   });
-  return page(
-    ctx,
-    'Agent 工作台',
-    '委派照护、物资和经营任务，核对工具读取的单据，再发布协作结果。',
-    null,
-    tabs('assistants', [
-      ['runs', '多 Agent 协作', () => agentDesk(ctx)],
-      ['ledger', '专项建议台账', () => node('div', 'fx-page', [cards, list])],
-    ])
-  );
+  ctx.detail('历史业务简报', node('div', 'fx-page', [priorReports(ctx), list]));
 }

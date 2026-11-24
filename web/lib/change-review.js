@@ -2,6 +2,9 @@ import { button, el, icon } from './ui.js';
 import { detail } from './dialogs.js';
 
 const titles = {
+  'ops.supplyOrder': '发布物资工单',
+  'ops.publishNotice': '发布全员通知',
+  'ops.finishSupplyOrder': '完成物资工单',
   'care.inquire': '登记接待',
   'care.dateArchive':'凭证补登归档日期',
   'care.fileArchive':'封存历史档案',
@@ -67,10 +70,10 @@ const titles = {
   'gw.ingest': '登记设备信号',
   'gw.propose': '提交待确认的工单改动',
   'gw.review': '保存预警复核',
-  'media.agentVoice': 'Agent 语音转写',
-  'agent.start': '启动 Agent 任务',
-  'agent.publish': '发布 Agent 建议',
-  'agent.cancel': '取消 Agent 任务',
+  'media.agentVoice': '助理语音转写',
+  'agent.start': '整理业务简报',
+  'agent.publish': '发布业务简报',
+  'agent.cancel': '取消业务简报',
   'ops.stock': '登记库存流水',
   'ops.addItem': '新增物资',
   'ops.shift': '登记排班',
@@ -109,7 +112,7 @@ const labels = {
   floorId: '楼层',
   buildingId: '楼栋',
   proposalId: '申请编号',
-  runId: 'Agent 任务',
+  runId: '业务简报',
   requester: '申请人',
   scope: '范围',
   title: '名称',
@@ -285,7 +288,7 @@ export function confirmChange({
       }
       content.append(list);
     }
-    if(reviewDomain) content.append(el('p','fx-muted','保存时由院内审核 Agent 核对「'+reviewDomain+'」，结果可在最近改动中查看。'));
+    if(reviewDomain) content.append(el('p','fx-muted','保存时会校验「'+reviewDomain+'」，后续 AI 复核结果可在最近改动中查看。'));
     const comment = allowComment ? commentInput() : null;
     if (comment) content.append(comment.element);
     const footer = el('div', 'change-actions');

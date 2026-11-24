@@ -3,7 +3,7 @@
 import json
 from uuid import uuid4
 
-from . import region, runtime
+from . import region
 from .contracts import SPECIALISTS, contract
 from .. import access_policy as policy
 from ..activity import for_person
@@ -214,13 +214,10 @@ def preflight(db, state, user, payload):
 
 def apply(db, state, action, payload, user, now, revision, planning=None):
     at = now.isoformat(timespec="seconds")
-    today = now.date().isoformat()
     if action == "agent.start":
         check = preflight(db, state, user, payload)
         if check["prior"]:
             return "已登记同一协作任务", check["prior"]
-        record = check["args"]
-        goal, resident, scope = record["goal"], record["residentId"], record["scope"]
         resolved = check["resolved"]
         run_id = "run-" + uuid4().hex
         db.execute(
@@ -242,26 +239,21 @@ def apply(db, state, action, payload, user, now, revision, planning=None):
         if resolved:
             region.save(db, run_id, resolved)
             log.append("coordinator", "region.selected", resolved["label"])
-        if planning:
-            log.append(
-                "coordinator",
-                "planner.selected",
-                planning["model"]
-                if planning["mode"] == "deepseek"
-                else "本地规则 · " + planning["reason"],
+        if not planning or planning.get("mode") != "deepseek":
+            raise ValueError("请先生成云端业务简报")
+        if (
+            planning["actor"] != user["id"]
+            or planning["region"] != resolved
+            or any(
+                item["agent"] not in {spec.key for spec in check["specs"]}
+                for item in planning["artifacts"]
             )
-        outputs = runtime.execute(
-            goal,
-            check["specs"],
-            scope,
-            state,
-            resident,
-            today,
-            log,
-            provider_plan=planning,
-            member_ids=frozenset(resolved["residentIds"]) if resolved else None,
-            actor_id=user["id"],
-        )
+        ):
+            raise PermissionError("授权范围已变化，请重新生成")
+        log.append("coordinator", "planner.selected", planning["model"])
+        for event in planning["events"]:
+            log.append(*event)
+        outputs = planning["artifacts"]
         db.execute(
             "UPDATE agent_runs SET artifacts=? WHERE id=?",
             (json.dumps(outputs, ensure_ascii=False), run_id),

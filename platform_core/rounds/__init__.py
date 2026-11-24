@@ -1,4 +1,4 @@
-"""Public entry points for local rounding, audit and optional DeepSeek integration."""
+"""Public entry points for scheduled and on-demand DeepSeek care summaries."""
 
 from .records import audit, inbox_query, latest, locate, workspace
 from .scheduler import AGENT

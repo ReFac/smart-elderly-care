@@ -150,7 +150,7 @@ export function familyInbox(ctx, resident) {
       node(
         'small',
         'fx-muted',
-        '巡查 Agent 根据机构记录整理，可能有遗漏。照护及健康情况请以护理人员核实为准。',
+        '简报根据机构记录整理，可能有遗漏。照护及健康情况请以护理人员核实为准。',
       ),
     ]);
     if (!message.readAt)

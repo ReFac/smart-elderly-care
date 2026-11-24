@@ -13,6 +13,7 @@ import re
 from platform_core.secure_storage import OPERATIONAL_ERRORS
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from platform_core.agents import chat
 from platform_core.backups import exchange
 from platform_core import access, facility
 from platform_core.provider import round_priorities
@@ -121,6 +122,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(403, {"error": str(e)})
         except FileNotFoundError as e:
             self.send_json(404, {"error": str(e)})
+        except chat.Unavailable as e:
+            self.send_json(503, {"error": str(e)})
         except Conflict as e:
             self.send_json(409, {"error": str(e)})
         except InvalidMedia as e:
@@ -133,6 +136,18 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def read_resource(self, path):
+        if path == "/api/assistant/chat":
+            values = parse_qs(urlsplit(self.path).query, max_num_fields=4)
+            if set(values) - {"roomId", "floorId", "buildingId", "campusId"} or any(
+                len(v) != 1 for v in values.values()
+            ):
+                raise ValueError("聊天区域参数无效")
+            return self.send_json(
+                200,
+                chat.read(
+                    self.store, self.token(), {k: v[0] for k, v in values.items()}
+                ),
+            )
         if path == "/api/auth/channels":
             from platform_core import identity
 
@@ -381,6 +396,18 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, image, mime)
 
     def write_resource(self, path):
+        chart = re.fullmatch(r"/api/residents/([a-zA-Z0-9_-]+)/summary-draft", path)
+        if chart:
+            if self.read_json(SMALL_BODY) != {}:
+                raise ValueError("生成档案摘要无需额外参数")
+            return self.send_json(
+                200,
+                self.store.dossier_summary_draft(self.token(), chart[1], generate=True),
+            )
+        if path in ("/api/assistant/chat", "/api/assistant/chat/reset"):
+            request = self.read_json(SMALL_BODY)
+            operation = chat.reset if path.endswith("/reset") else chat.reply
+            return self.send_json(200, operation(self.store, self.token(), request))
         if path == "/api/billing/preview":
             body = self.read_json(SMALL_BODY)
             return self.send_json(
@@ -542,7 +569,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.store.backups.retry(self.token(), body.get("comment", ""))
             return self.send_json(200, result)
         asr = re.fullmatch(r"/api/media/asr/([a-zA-Z0-9_-]{1,100})", path)
-        agent_voice = path == "/api/agent/voice/transcriptions"
+        agent_voice = path in (
+            "/api/agent/voice/transcriptions",
+            "/api/assistant/voice",
+        )
         if asr or agent_voice:
             if not self.token():
                 raise SignedOut("请先登录")
@@ -564,7 +594,12 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("区域参数不能重复")
                 region = {key: items[0] for key, items in query.items()} or None
                 result = speech.recognize_agent(
-                    self.store, self.token(), region, raw, consent
+                    self.store,
+                    self.token(),
+                    region,
+                    raw,
+                    consent,
+                    conversation=path == "/api/assistant/voice",
                 )
             else:
                 result = self.store.transcribe(self.token(), asr[1], raw, consent)

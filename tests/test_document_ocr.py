@@ -291,6 +291,13 @@ class DocumentOcrTests(unittest.TestCase):
     def test_dynamic_summary_uses_only_signed_sources_and_is_read_only_until_confirmed(
         self,
     ):
+        with patch("platform_core.provider.generation.summarize", return_value="核对文书和护理等级。") as model:
+            generated = self.store.dossier_summary_draft(self.owner, self.rid, generate=True)
+            self.assertEqual(generated["summary"], "核对文书和护理等级。")
+            outbound = json.dumps(model.call_args.args[-1], ensure_ascii=False)
+            for private in (self.rid, self.resident()["name"], "原文乙"):
+                self.assertNotIn(private, outbound)
+
         def build():
             return self.store.dossier_summary_draft(self.owner, self.rid)
 
@@ -299,7 +306,7 @@ class DocumentOcrTests(unittest.TestCase):
         self.assertFalse(any(e["id"] == self.doc["id"] for e in draft["evidence"]))
         self.command("dossier.reviewDocument", self.review(method="手工描述"))
         after = build()
-        self.assertIn("已核对的原文", after["summary"])
+        self.assertTrue(any("已核对的原文" in row["value"] for row in after["evidence"]))
         self.assertEqual(self.resident()["summary"], baseline)
         payload = {
             "residentId": self.rid,

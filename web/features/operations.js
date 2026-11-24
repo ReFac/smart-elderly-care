@@ -23,6 +23,7 @@ import {
   today,
 } from './shared.js';
 import { downloadDocument, openDocumentButton } from './secure-documents.js';
+import { supplyOrders } from './assistant-actions.js';
 import { monthlyPanel } from './monthly.js';
 
 function addItem(ctx) {
@@ -152,6 +153,9 @@ export function inventory(ctx) {
               },
             ],
           }),
+      ],
+      [
+        'orders', '护理用具工单', () => supplyOrders(ctx),
       ],
       [
         'moves',

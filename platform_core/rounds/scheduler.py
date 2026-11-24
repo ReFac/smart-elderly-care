@@ -14,6 +14,8 @@ from .records import (
     current_stay,
     latest,
     make_report,
+    report_source,
+    interpret,
     mode,
     policy,
     workspace,
@@ -21,7 +23,7 @@ from .records import (
 
 AGENT = {
     "id": "rounds-agent",
-    "displayName": "定时巡查 Agent",
+    "displayName": "AI 助理定时巡查",
     "username": "rounds-agent",
 }
 LOG = logging.getLogger(__name__)
@@ -99,42 +101,68 @@ def tick(store, halt):
                 ).fetchone()
                 if not job:
                     break
+                lease = (now + timedelta(minutes=5)).isoformat()
+                db.execute(
+                    "UPDATE rounds_jobs SET retry_at=? WHERE resident=? AND day=?",
+                    (lease, job[0], job[1]),
+                )
+
+            def inputs():
                 state = business_state()
                 person = next(
                     (r for r in state["residents"] if r["id"] == job[0]), None
                 )
                 settings = policy(db)
                 selected = mode(db, job[0])
-                eligible = (
-                    selected == "auto"
-                    or selected == "inherit"
-                    and settings["defaultMode"] == "auto"
+                enabled = selected == "auto" or (
+                    selected == "inherit" and settings["defaultMode"] == "auto"
                 )
                 if (
-                    job[1] == now.date().isoformat()
-                    and settings["enabled"]
-                    and eligible
+                    settings["enabled"]
+                    and enabled
+                    and job[1] == store.now().date().isoformat()
                     and person
                     and active(person)
                 ):
-                    db.execute("SAVEPOINT one_resident")
-                    try:
-                        generated = make_report(
-                            db, state, current_stay(state, person), now, AGENT
+                    return state, current_stay(state, person)
+                return state, None
+
+            try:
+                prepared = None
+                with db:
+                    db.execute("BEGIN")
+                    state, person = inputs()
+                    if person:
+                        data, digest, unchanged = report_source(
+                            db, state, person, now, clinical=True
                         )
-                    except Exception:
-                        db.execute("ROLLBACK TO one_resident")
-                        db.execute("RELEASE one_resident")
-                        wait = timedelta(minutes=min(60, 2 ** min(job[2], 6)))
-                        db.execute(
-                            "UPDATE rounds_jobs SET attempts=attempts+1,retry_at=? WHERE resident=?",
-                            ((now + wait).isoformat(), job[0]),
-                        )
-                        LOG.error("一项长者巡查生成失败，将按退避间隔重试")
+                if person and not unchanged:
+                    prepared = (digest, interpret(store, data, digest, clinical=True))
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    owned = db.execute(
+                        "SELECT 1 FROM rounds_jobs WHERE resident=? AND day=? AND retry_at=?",
+                        (job[0], job[1], lease),
+                    ).fetchone()
+                    if not owned:
                         continue
-                    db.execute("RELEASE one_resident")
-                    completed += generated
-                db.execute("DELETE FROM rounds_jobs WHERE resident=?", (job[0],))
+                    state, person = inputs()
+                    if person:
+                        completed += make_report(
+                            db, state, person, now, AGENT, prepared, clinical=True
+                        )
+                    db.execute(
+                        "DELETE FROM rounds_jobs WHERE resident=? AND day=? AND retry_at=?",
+                        (job[0], job[1], lease),
+                    )
+            except Exception:
+                wait = timedelta(minutes=min(60, 2 ** min(job[2], 6)))
+                with db:
+                    db.execute(
+                        "UPDATE rounds_jobs SET attempts=attempts+1,retry_at=? WHERE resident=? AND day=? AND retry_at=?",
+                        ((now + wait).isoformat(), job[0], job[1], lease),
+                    )
+                LOG.error("一项长者巡查生成失败，将按退避间隔重试")
         if not halt.is_set():
             delivered = deliver_due(db, store.now, halt, business_state)
     return {"generated": completed, "delivered": delivered}

@@ -191,6 +191,33 @@ def agent_context(db, user, selected):
     ).hexdigest(), area
 
 
+def chat_voice_context(db, user, selected):
+    from .. import campus_access, facility
+    from ..agents import region
+
+    if user["kind"] not in ("owner", "staff"):
+        raise PermissionError("此账号没有语音输入权限")
+    access.require(user, "voice")
+    chosen = (
+        facility.scope(db, region.EMPTY_STATE, user, agent=True, **selected)
+        if selected
+        else None
+    )
+    assigned = campus_access.allowed_beds(db, user, include_rooms=True)
+    signature = json.dumps(
+        [
+            user["id"],
+            sorted(user["permissions"]),
+            user.get("facilityScope"),
+            sorted(assigned) if assigned is not None else None,
+            chosen and chosen["roomIds"],
+        ],
+        sort_keys=True,
+    ).encode()
+    selection = json.dumps(selected, sort_keys=True, separators=(",", ":"))
+    return "chat-voice:" + sha256(signature).hexdigest() + ":" + selection, chosen
+
+
 def can_read_agent_history(db, user, revision):
     from .. import agents
 
@@ -203,6 +230,14 @@ def can_read_agent_history(db, user, revision):
     ).fetchone()
     if not row:
         return False
+    if row[0].startswith("chat-voice:"):
+        try:
+            return (
+                chat_voice_context(db, user, json.loads(row[0].split(":", 2)[2]))[0]
+                == row[0]
+            )
+        except (ValueError, PermissionError, FileNotFoundError, IndexError):
+            return False
     parts = row[0].split(":")
     return (
         len(parts) == 3
@@ -211,14 +246,15 @@ def can_read_agent_history(db, user, revision):
     )
 
 
-def recognize_agent(store, token, selected, raw, consent):
+def recognize_agent(store, token, selected, raw, consent, *, conversation=False):
     from ..agents import region
 
     if consent is not True:
         raise ValueError("请确认提交这段录音给 DeepSeek 转写")
     selected = region.selection(selected) if selected is not None else None
+    context = chat_voice_context if conversation else agent_context
     with closing(store.connect()) as db:
-        reference, area = agent_context(db, store.actor(db, token), selected)
+        reference, area = context(db, store.actor(db, token), selected)
     audit_scope = {}
     if area:
         audit_scope = {"roomIds": area["roomIds"], "campusId": area["campusId"]}
@@ -227,9 +263,9 @@ def recognize_agent(store, token, selected, raw, consent):
 
     def authorize(db, session):
         user = store.actor(db, session)
-        current, _ = agent_context(db, user, selected)
+        current, _ = context(db, user, selected)
         if current != reference:
-            raise PermissionError("工作区域或专员权限已发生变化，请重新核对")
+            raise PermissionError("工作区域或语音权限已变化，请重新核对")
         return user
 
     return transcribe(store, token, reference, raw, authorize, audit_scope)

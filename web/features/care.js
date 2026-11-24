@@ -265,8 +265,10 @@ export function assessments(ctx) {
   );
 }
 
-export function taskForm(ctx) {
-  runForm(ctx, {
+export function taskForm(ctx, proposal = null) {
+  if (proposal && (ctx.state.tasks || []).some(row => row.assistantActionId === proposal.id && row.publisherId === ctx.state.user.id))
+    return ctx.toast('这项建议已经发布，请查看照护工单');
+  const config = {
     title: '新建照护任务',
     action: 'care.addTask',
     fields: [
@@ -290,6 +292,14 @@ export function taskForm(ctx) {
       }),
     ],
     submitLabel: '创建任务',
+  };
+  if (!proposal) return runForm(ctx, config);
+  const title = config.fields.find(f => f.name === 'title');
+  title.value = proposal.title;
+  return ctx.dialog({
+    title: '审核照护工单', fields: [...config.fields, memo('note', '执行说明', false, { value: proposal.description, maxLength: 500 })],
+    submitLabel: '确认发布',
+    onSubmit: values => ctx.command('care.addTask', { ...values, assistantActionId: proposal.id }, { confirmed: true }),
   });
 }
 

@@ -14,6 +14,9 @@ from provider_fixture import isolate_credentials
 
 class PriorityTests(unittest.TestCase):
     def setUp(self):
+        from provider_fixture import simulate_narration
+
+        simulate_narration(self)
         tmp = TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         isolate_credentials(self, tmp.name)

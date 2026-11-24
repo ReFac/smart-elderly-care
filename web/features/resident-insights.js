@@ -194,8 +194,8 @@ export function residentInsights(ctx, residentId) {
             'small',
             'fx-muted',
             report
-              ? '本地巡查 Agent · ' + localStamp(report.generatedAt) + ' 生成'
-              : '本地巡查 Agent · 待生成',
+              ? (report.source === 'deepseek' ? 'AI 助理' : '历史巡查记录') + ' · ' + localStamp(report.generatedAt)
+              : '尚未生成巡查简报',
           ),
         ]),
       ]),
@@ -215,7 +215,7 @@ export function residentInsights(ctx, residentId) {
                   target: name,
                   fields: [
                     ['依据', '最新照护工单及获授权的已复核观察'],
-                    ['执行', '院内计算，保存可追溯简报'],
+                    ['执行', '由 AI 助理生成简报，保留资料依据'],
                   ],
                 },
               ),

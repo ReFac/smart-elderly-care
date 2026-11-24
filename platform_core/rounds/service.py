@@ -16,6 +16,8 @@ from .records import (
     inbox_query,
     locate,
     make_report,
+    report_source,
+    interpret,
     mode,
     policy,
     staff,
@@ -102,6 +104,29 @@ class RoundService:
         from ..store import Conflict
 
         now = self.store.now()
+        prepared = None
+        if path.endswith("/generate"):
+            if not isinstance(body, dict) or type(body.get("revision")) is not int:
+                raise ValueError("请提供当前版本")
+            check_fields(body, ())
+            with closing(self.store.connect()) as db, db:
+                db.execute("BEGIN")
+                user = self.store.actor(db, token)
+                revision, state = workspace(db)
+                person = locate(db, state, user, path.split("/")[-2])
+                if not active(person):
+                    raise ValueError("仅可为有床位的在住长者执行巡查")
+                clinical = access.has(user, "clinical")
+                data, digest, unchanged = report_source(
+                    db, state, person, now, clinical=clinical
+                )
+                if not unchanged and revision != body["revision"]:
+                    raise Conflict("数据已更新，请刷新后重试")
+            if not unchanged:
+                prepared = (
+                    digest,
+                    interpret(self.store, data, digest, clinical=clinical),
+                )
         with closing(self.store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             user = self.store.actor(db, token)
@@ -124,7 +149,16 @@ class RoundService:
                     raise ValueError("仅可为有床位的在住长者执行巡查")
                 if action == "generate":
                     check_fields(body, ())
-                    changed = make_report(db, state, person, now, user, comment)
+                    changed = make_report(
+                        db,
+                        state,
+                        person,
+                        now,
+                        user,
+                        prepared,
+                        comment,
+                        clinical=access.has(user, "clinical"),
+                    )
                 elif action == "mode":
                     access.require(user, "care")
                     check_fields(body, ("mode",))
@@ -180,6 +214,9 @@ class RoundService:
             while not self.halt.is_set():
                 try:
                     self.tick()
+                    from ..agents import change_review
+
+                    change_review.process_pending(self.store, self.halt)
                 except Exception:
                     LOG.exception("定时巡查未完成，将在下一次检查时重试")
                 self.halt.wait(60)

@@ -11,7 +11,7 @@ python3 manage_plan.py --db .local/workspace.sqlite3 grant --name "机构 AI 套
 python3 manage_plan.py --db .local/workspace.sqlite3 status
 ```
 
-在「机构设置 → DeepSeek 识别工具」可以分别停用 OCR 和 ASR。新服务期的识别额度初始为零。同一期调整额度时可省略已配置的识别项目，保留原财务用量。两个工具均需要在有效期内有足额的对应服务。Agent 云规划使用单独的 token 额度。
+在「机构设置 → DeepSeek 识别工具」可以分别停用 OCR 和 ASR。新服务期的识别额度初始为零。同一期调整额度时可省略已配置的识别项目，保留原财务用量。两个工具均需要在有效期内有足额的对应服务。模型对话与分析使用单独的 token 额度。
 
 ## 文书原件与人工复核
 
@@ -19,13 +19,11 @@ python3 manage_plan.py --db .local/workspace.sqlite3 status
 
 `dossier.ocr` 接受 `residentId`、`documentId` 或 `imageHash` 及布尔值 `consent: true`。服务端以本人的医疗写入授权和长者所在分院核对原件。返回文字及供应商提供的位置框；无位置的文字按原文展示。失败时可以查看原图后手工录入。具备医疗查阅、医疗写入和临床权限的人员核对姓名、原文和待改字段，再签认一次性概括。再次查看、核对或读取已归档的结果均在本地完成。既有档案的原件、识别结果与签署来源继续可读。
 
-## Agent 工作台的语音输入
+## 在任一业务页说话
 
-工作台下方的输入栏可录音、重录、取消、选取已有音频或切换键盘。麦克风采集在本机进行，离开工作台会停止收音。授权发送后，DeepSeek 返回整段文字，经办人可编辑至 500 字内，再发送给所选区域的协调 Agent。简报包含来源和人工发布入口。选择平台规划会另计其用量，本地规划不消耗聊天额度。
+打开右上角「询问 AI 助理」，按住麦克风说话，松开后将本段录音提交 DeepSeek ASR。首次使用需在浏览器允许麦克风。在未勾选「语音转写后自动发送」时，可先编辑转写再按 Enter 发送；勾选后转写成功即发送。关闭对话会停止收音。语音只负责转写，工单与通知的发布另有业务审核窗。
 
-具备 `assistants`、`voice` 及至少一个业务专员权限的工作人员可读取 `GET /api/agent/capabilities` 中的 `voiceInput`。状态标明机构语音套餐、平台配置或权限是否可用。使用 `POST /api/agent/voice/transcriptions` 提交原始录音，明确提供 `X-DeepSeek-Consent: yes`，可通过查询串限定 `campusId`、`buildingId`、`floorId`、`roomId`。具备区域限制的账号必须选定获授权的区域。供应商仅收到去除文件标签的音频，服务端保留加密原件及回执，并分别记录送出和结算。相同账号在相同区域重试相同录音复用已成功的回执。
-
-`agent.start` 接受核对后的 `goal` 和可选 `voiceTranscriptId`，服务端核验回执所属账号、来源和区域，将简报编号 `runId` 返回给发起人。成功转写、编辑文字、离开页面均不会完成工单。
+已获语音权限的在岗员工可以使用 `POST /api/assistant/voice`。请求发送 WAV 或 Ogg Opus，并通过 `X-DeepSeek-Consent: yes` 记录用户本次操作。房间页发起的对话会同时传递所选区域。语音原件、回执和媒体用量沿用加密存储，账号或区域授权变化后须重新核对。原有独立业务语音接口供旧客户端继续使用。ASR 按音频秒数计量，转写文字发给对话后按模型实际 token 单独结算。[DeepSeek 语音转文字](https://api-docs.deepseek.com/guides/asr/)
 
 ## 录音与工单确认
 

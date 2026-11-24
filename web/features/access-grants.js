@@ -77,7 +77,7 @@ const commands = {
       review: '审核建议',
     },
   ],
-  agent: ['Agent 协作', { start: '发起协作', publish: '发布简报', cancel: '取消协作' }],
+  agent: ['业务简报', { start: '整理简报', publish: '发布简报', cancel: '取消协作' }],
   gw: [
     '设备与变更',
     {

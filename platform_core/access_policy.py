@@ -14,11 +14,12 @@ PERMISSIONS = {
     "finance": "财务、收款与结算",
     "longCare": "长护险参保、评估和待遇经办",
     "shifts": "工作排班",
+    "notices.publish": "向全体员工发布通知",
     "reports": "报送及经营视图",
-    "assistants": "运行 Agent 协作、生成与审核建议",
+    "assistants": "向 AI 助理询问已授权的业务",
     "gateway.simulate": "登记模拟设备事件",
     "alerts": "护士复核预警并记录处置",
-    "voice": "Agent 语音输入、发起语音变更申请",
+    "voice": "向 AI 助理语音提问、发起语音变更申请",
     "voice.confirm": "确认或退回语音变更",
     "audit": "查阅已授权业务的操作日志",
     "staff.manage": "在本人业务权限内管理员工账号",
@@ -31,6 +32,8 @@ PRESETS = {
         "inventory",
         "finance",
         "shifts",
+        "notices.publish",
+        "voice",
         "reports",
         "assistants",
         "gateway.simulate",
@@ -72,6 +75,7 @@ ROUTE_GRANTS = {
     "activity": ("audit",),
     "dossier": ("residents", "intake", "medical", "relatives"),
     "inbox": (
+        "notices.publish",
         "gateway.simulate",
         "alerts",
         "voice",
@@ -116,6 +120,8 @@ ACTION_GRANTS = {
     "care.publishDrugRule": "clinical.rules",
     "care.retireDrugRule": "clinical.rules",
     "ltci.record": "longCare",
+    "ops.supplyOrder": "inventory",
+    "ops.publishNotice": "notices.publish",
     "ops.stock": "inventory",
     "ops.addItem": "inventory",
     "ops.shift": "shifts",
@@ -241,6 +247,7 @@ def resolve_routes(user):
         or has(user, "clinical")
         or has(user, "alerts")
         or has(user, "gateway.simulate")
+        or has(user, "notices.publish")
     ):
         routes.remove("inbox")
     if manages_accounts(user):
@@ -256,6 +263,10 @@ def authorize(user, action, payload, state):
         raise PermissionError("请先登录")
     if not isinstance(action, str) or not isinstance(payload, dict):
         raise ValueError("业务操作格式无效")
+    if action == "ops.finishSupplyOrder":
+        if user["kind"] not in ("owner", "staff"):
+            raise PermissionError("仅在岗员工可以办理")
+        return
     if action == "account.changePassword":
         return
     if action == "family.consent":
@@ -335,6 +346,12 @@ def allowed_actions(user):
     actions = [
         action for action, permission in ACTION_GRANTS.items() if has(user, permission)
     ]
+    from .operations.dispatch import unrestricted
+
+    if not unrestricted(user):
+        actions = [a for a in actions if a not in ("ops.publishNotice", "ops.supplyOrder")]
+    if user["kind"] in ("owner", "staff"):
+        actions.append("ops.finishSupplyOrder")
     actions.append("account.changePassword")
     if user["kind"] == "family":
         actions.extend(

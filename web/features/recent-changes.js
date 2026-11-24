@@ -116,10 +116,16 @@ function inspector(ctx, change) {
     ),
   ]);
   const content = node('article', 'history-inspector', [head]);
-  if (change.agentReview) content.append(node('section','fx-section',[
-    node('h3','','审核 Agent · '+change.agentReview.domain),
-    node('ul','',change.agentReview.checks.map(check=>node('li','',check))),
-  ]));
+  if (change.agentReview) {
+    const { domain, status, text, checks } = change.agentReview;
+    const detail = status === 'reviewed' ? node('p', '', 'AI 复核意见：' + text) :
+      status === 'pending' ? node('small', 'fx-muted', '等待云端复核') : null;
+    content.append(node('section', 'fx-section', [
+      node('h3', '', '提交校验 · ' + domain),
+      node('ul', '', checks.map(check => node('li', '', check))),
+      detail,
+    ]));
+  }
   if (change.comment) content.append(node('blockquote', 'history-comment', change.comment));
   if (change.undoOf || change.undoneBy)
     content.append(

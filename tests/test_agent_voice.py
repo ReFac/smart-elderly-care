@@ -16,6 +16,9 @@ from platform_core.store import Store, TIMEZONE
 
 class AgentVoiceTests(unittest.TestCase):
     def setUp(self):
+        from provider_fixture import simulate_narration
+
+        simulate_narration(self)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         isolate_credentials(self, tmp.name)

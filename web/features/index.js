@@ -7,8 +7,6 @@ import { billing } from './billing.js';
 
 import { inventory, shifts, reports } from './operations.js';
 
-import { assistantsPage } from './assistants.js';
-
 import { renderAccess } from './access.js';
 import { accountCenter } from './account.js';
 import { renderDossier } from './dossier.js';
@@ -41,7 +39,6 @@ const features = {
   inventory,
   shifts,
   reports,
-  assistants: assistantsPage,
 };
 
 export function renderFeature(route, ctx) {

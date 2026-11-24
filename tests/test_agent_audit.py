@@ -14,6 +14,9 @@ class AgentAuditTests(unittest.TestCase):
     password = "local-audit-fixture!"
 
     def setUp(self):
+        from provider_fixture import simulate_narration
+
+        simulate_narration(self)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name) / "audit.sqlite"

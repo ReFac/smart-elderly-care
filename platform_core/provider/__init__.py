@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-import re
 import stat
 from contextlib import closing
 from datetime import date, datetime
@@ -12,7 +11,8 @@ from zoneinfo import ZoneInfo
 
 from .. import access_policy
 from ..agents import specialists
-from . import deepseek
+from . import deepseek, late_receipts
+from .late_receipts import late_usage as late_usage, unsettled as unsettled
 
 DEFAULT_MODEL = "deepseek-flash"
 ZONE = ZoneInfo("Asia/Shanghai")
@@ -20,7 +20,7 @@ PENDING_SECONDS = 90
 
 
 def init(db):
-    from . import media, round_priorities
+    from . import generation, media, round_priorities
 
     media.init(db)
     round_priorities.init(db)
@@ -34,6 +34,8 @@ def init(db):
         specialistIds TEXT NOT NULL DEFAULT '[]', reason TEXT NOT NULL DEFAULT '',
         PRIMARY KEY(actor,request))""")
     db.execute("CREATE INDEX IF NOT EXISTS api_usage_plan ON api_usage(planId)")
+    late_receipts.init(db)
+    generation.init(db)
 
 
 def local_time(now=None):
@@ -46,9 +48,11 @@ def latest(db):
 
 def usage(db, plan_id):
     row = db.execute(
-        """SELECT COALESCE(SUM(charged),0),COALESCE(SUM(
-                CASE WHEN status IN ('pending','uncertain') THEN allowance ELSE 0 END),0)
-            FROM api_usage WHERE planId=?""",
+        """SELECT COALESCE(SUM(u.charged + COALESCE(l.verified-l.original,0)),0),
+            COALESCE(SUM(CASE WHEN u.status IN ('pending','uncertain') THEN u.allowance
+                WHEN l.verified IS NULL AND l.reported>l.original THEN l.reported-l.original ELSE 0 END),0)
+            FROM api_usage u LEFT JOIN api_late_usage l ON l.actor=u.actor AND l.request=u.request
+            WHERE u.planId=?""",
         (plan_id,),
     ).fetchone()
     return row[0], row[1]
@@ -93,16 +97,23 @@ def reconcile(db, actor, request, actual, now=None):
     row = db.execute(
         "SELECT * FROM api_usage WHERE actor=? AND request=?", (actor, request)
     ).fetchone()
-    if not row or not (
+    if not row or type(actual) is not int or not 0 <= actual <= row["allowance"]:
+        raise ValueError("实际用量必须在已登记的本笔预留范围内")
+    settled = local_time(now)
+    if db.execute(
+        """UPDATE api_late_usage SET verified=?,verifiedAt=?
+          WHERE actor=? AND request=? AND verified IS NULL""",
+        (actual, int(settled.timestamp()), actor, request),
+    ).rowcount:
+        return
+    if not (
         row["status"] == "uncertain"
         or (
             row["status"] == "pending"
-            and row["createdAt"] + PENDING_SECONDS < local_time(now).timestamp()
+            and row["createdAt"] + PENDING_SECONDS < settled.timestamp()
         )
     ):
-        raise ValueError("只有结果不明或已超时的预留可结算")
-    if type(actual) is not int or not 0 <= actual <= row["allowance"]:
-        raise ValueError("实际用量必须在本笔预留范围内")
+        raise ValueError("仅结果不明、已超时或收到未核对的迟到回执时可结算")
     db.execute(
         "UPDATE api_usage SET status='closed',reason='reconciled',charged=? WHERE actor=? AND request=?",
         (actual, actor, request),
@@ -110,8 +121,7 @@ def reconcile(db, actor, request, actual, now=None):
 
 
 def model_name():
-    value = os.environ.get("NH_DEEPSEEK_MODEL", DEFAULT_MODEL)
-    return value if re.fullmatch(r"[A-Za-z0-9._-]{1,80}", value) else ""
+    return DEFAULT_MODEL
 
 
 def key_file():
@@ -244,7 +254,7 @@ def replay(row, allowed, fingerprint, now):
         raise PermissionError("此任务涉及的部分业务域授权已收回")
     if row["status"] == "ok":
         return decision("deepseek", "ready", row["model"], ids)
-    return decision("local", row["reason"] or "uncertain", row["model"])
+    return decision("unavailable", row["reason"] or "uncertain", row["model"])
 
 
 def plan(
@@ -286,14 +296,14 @@ def plan(
         cap = status(db, user, when)
         model = cap["model"]
         if not cap["available"]:
-            return decision("local", cap["state"], model)
+            return decision("unavailable", cap["state"], model)
         body = deepseek.request_body(model, goal, specs)
         if body is None:
-            return decision("local", "no_signal", model)
+            return decision("unavailable", "no_signal", model)
         try:
             key = read_key()
         except (OSError, ValueError):
-            return decision("local", "unconfigured", model)
+            return decision("unavailable", "unconfigured", model)
         entitlement = latest(db)
         # Each UTF-8 byte can represent at most one byte-fallback token.
         allowance = (
@@ -302,7 +312,7 @@ def plan(
             + 128
         )
         if sum(usage(db, entitlement["id"])) + allowance > entitlement["tokenLimit"]:
-            return decision("local", "exhausted", model)
+            return decision("unavailable", "exhausted", model)
         db.execute(
             """INSERT INTO api_usage
             (actor,request,planId,fingerprint,model,createdAt,status,allowance)
@@ -320,7 +330,7 @@ def plan(
     # The network call never holds a workspace transaction. Unknown billing keeps its reservation.
     outcome = deepseek.complete(transport or deepseek.send, key, body, allowed)
     with closing(connect()) as db, db:
-        db.execute(
+        receipt = db.execute(
             """UPDATE api_usage SET status=?,charged=?,specialistIds=?,reason=?
             WHERE actor=? AND request=? AND status='pending'""",
             (
@@ -332,6 +342,15 @@ def plan(
                 request_id,
             ),
         )
+        if not receipt.rowcount:
+            late_usage(
+                db,
+                uid,
+                request_id,
+                outcome.tokens,
+                when,
+                confirmed_zero=outcome.reason == "provider_rejected",
+            )
     with closing(connect()) as db, db:
         db.execute("BEGIN")
         current = authorize(db)

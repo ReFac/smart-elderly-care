@@ -546,7 +546,7 @@ function settings(ctx) {
   [brand, org, theme].forEach((control) => control.addEventListener('input', updatePreview));
   updatePreview();
   const routeChoices = ctx.state.user.routes
-    .filter((r) => !['overview', 'access', 'settings', 'family','rooms','intake'].includes(r))
+    .filter((r) => !['overview', 'access', 'settings', 'family','rooms','intake','assistants'].includes(r))
     .map((r) => [r, routes.get(r)?.label || r]);
   const visible = checkboxes(
     routeChoices,
@@ -614,7 +614,7 @@ function settings(ctx) {
     null,
     tabs('settings', [
       ['general', '界面与 AI 套餐', () => node('div', 'access-settings-grid', [appearance, deep])],
-      ['rounds', 'Agent 巡查', () => roundsSettings(ctx)],
+      ['rounds', '定时巡查', () => roundsSettings(ctx)],
       ['backups', '备份与恢复', () => backupPanel(ctx)],
     ]),
   );

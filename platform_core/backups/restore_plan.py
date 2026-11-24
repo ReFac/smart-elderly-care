@@ -46,6 +46,8 @@ PROTECTED = {
     "archives": "医疗归档",
     "assessments": "评估记录",
     "qualityChecks": "质检记录",
+    "supplyOrders": "已发布的物资工单",
+    "staffNotices": "已发布的全员通知",
 }
 LABELS = {
     **PROTECTED,

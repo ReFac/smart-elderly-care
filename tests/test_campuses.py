@@ -14,6 +14,9 @@ from platform_core.store import Store
 
 class CampusTests(unittest.TestCase):
     def setUp(self):
+        from provider_fixture import simulate_narration
+
+        simulate_narration(self)
         temp = TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.password = "unit-campus-accounts"

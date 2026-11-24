@@ -1,3 +1,5 @@
+import { chatLauncher, openChat, toggleChat, clearChat, checkChatUser } from './features/assistant-chat.js';
+import { hasNewNotice, quickDestinations, staffNotices, supplyOrders } from './features/assistant-actions.js';
 import { loginScreen } from './features/access.js';
 import * as ui from './lib/ui.js';
 import { changePreview, confirmChange } from './lib/change-review.js';
@@ -21,7 +23,6 @@ const root = document.getElementById('app');
 
 let state, revision, route;
 let branding = {};
-let agentRegion = null;
 let epoch = 0,
   refreshing = false;
 const seenAlerts = new Set();
@@ -40,9 +41,7 @@ function available(id) {
   return state?.user.routes.includes(canonical) && !state.uiSettings.hiddenRoutes.includes(canonical);
 }
 function landing() {
-  return available('assistants') && state.agentCapabilities?.tools.length
-    ? 'assistants'
-    : state.user.routes.find(available);
+  return available('overview') ? 'overview' : state.user.routes.find((id) => routes.has(id) && available(id));
 }
 function permitted(permission) {
   return state?.user.kind === 'owner' || state?.user.permissions.includes(permission);
@@ -50,7 +49,7 @@ function permitted(permission) {
 function signedOut() {
   epoch++;
   state = null;
-  agentRegion = null;
+  clearChat();
   revision = null;
   route = null;
   seenAlerts.clear();
@@ -105,6 +104,7 @@ function applySnapshot(snapshot) {
     audit: snapshot.audit,
     revision: snapshot.revision,
   };
+  checkChatUser(context());
   revision = snapshot.revision;
   branding = state.uiSettings;
   document.documentElement.dataset.theme = state.uiSettings.theme;
@@ -139,7 +139,7 @@ function applySnapshot(snapshot) {
   }
 }
 
-function go(destination, tab) {
+function go(destination, tab, onArrival) {
   if (!available(destination)) {
     toast('当前账号未开放此模块');
     return;
@@ -148,11 +148,24 @@ function go(destination, tab) {
   if (route === destination) {
     closeMenu();
     if (tab) render();
+    onArrival?.();
+  } else if (onArrival) {
+    document.querySelectorAll('dialog[open]').forEach((dialog) => dialog.close());
+    window.history.pushState(null, '', '#' + destination);
+    render();
+    window.scrollTo(0, 0);
+    onArrival();
   } else location.hash = destination;
 }
 
 function getRoute() {
   const original=location.hash.slice(1);
+  if (original === 'assistants') {
+    const home = landing();
+    window.history.replaceState(null, '', '#' + home);
+    requestAnimationFrame(() => { if (state) openChat(context); });
+    return home;
+  }
   if ((original==='rooms' && available('beds')) || (original==='intake' && available('residents'))) {
     const destination=original==='rooms'?'beds':'residents';
     selectTab(destination,original==='rooms'?'plan':'all');
@@ -267,9 +280,7 @@ async function submitChange({ action, url, payload, review = {} }) {
       const original = prior.voiceQueue?.find((r) => r.id === payload.proposalId);
       if (original?.taskId) focusIds.unshift(original.taskId);
       destination = ['care', 'completed'];
-    } else if (action === 'agent.publish' && available('assistants'))
-      destination = ['assistants', 'ledger'];
-    else if (action === 'history.undo') historyScope.revision = result.revision;
+    } else if (action === 'history.undo') historyScope.revision = result.revision;
     if (destination) {
       selectTab(...destination);
       if (route !== destination[0]) window.history.pushState(null, '', '#' + destination[0]);
@@ -289,11 +300,6 @@ async function submitChange({ action, url, payload, review = {} }) {
 }
 
 function context() {
-  const assignedCampuses = state.user?.facilityScope?.campusIds;
-  const campus =
-    assignedCampuses?.length === 1
-      ? state.campusOptions?.find((item) => item.id === assignedCampuses[0])
-      : null;
   return {
     state,
     get,
@@ -309,20 +315,7 @@ function context() {
       return stillHere;
     },
     available,
-    agentRegion: agentRegion || (campus ? { campusId: campus.id, label: campus.name } : null),
-    hasSelectedRegion: Boolean(agentRegion),
-    startScopedAgent(place) {
-      if (!available('assistants')) return;
-      const region = {};
-      for (const key of ['campusId', 'buildingId', 'floorId', 'roomId'])
-        if (place[key]) region[key] = place[key];
-      agentRegion = { ...region, label: place.label };
-      go('assistants', 'runs');
-    },
-    clearAgentRegion() {
-      agentRegion = null;
-      render();
-    },
+    startScopedAgent(place) { openChat(context, place); },
     permitted,
     go,
     command,
@@ -407,6 +400,10 @@ function searchDialog() {
   content.append(input, list);
   const modal = detail('全局搜索', content);
   const data = [
+    ...quickDestinations.filter(r => available(r.route) && (!r.grant || state.allowedActions.includes(r.grant))).map(r => ({
+      label: r.label, keywords: r.words, icon: routes.get(r.route).icon, meta: routes.get(r.route).label,
+      open: () => go(r.route, r.tab),
+    })),
     ...[...routes]
       .filter(([id]) => !['rooms','intake'].includes(id) && available(id))
       .map(([id, r]) => ({
@@ -518,6 +515,16 @@ function notices() {
       items.unshift(['待确认变更', state.voiceQueue.length, 'inbox', 'voice']);
   }
   const d = detail('待处理事项', list);
+  if (state.user.kind !== 'family') {
+    for (const [label, panel] of [
+      ['全员通知', staffNotices],
+      ...((state.supplyOrders || []).some(r => r.assigneeId === state.user.id && r.status === '待执行')
+        ? [['我的物资待办', ctx => supplyOrders(ctx, true)]] : []),
+    ]) {
+      const entry = button(label, () => { d.close(); detail(label, panel(context())); }, 'secondary', 'bell');
+      list.append(entry);
+    }
+  }
   for (const [label, value, destination, tab] of items) {
     if (!available(destination)) continue;
     const b = el('button', 'result');
@@ -616,6 +623,8 @@ function masthead() {
     const bell = button('', notices, 'icon', 'bell');
     bell.setAttribute('aria-label', '待处理事项');
     if (
+      hasNewNotice(context()) ||
+      state.supplyOrders?.some(row => row.assigneeId === state.user.id && row.status === '待执行') ||
       (available('inbox') && state.roundsNoticeCount > 0) ||
       (available('care') && myPendingHandovers().length) ||
       (state.gatewayAlerts || []).some((r) => r.status === '待复核') ||
@@ -626,6 +635,7 @@ function masthead() {
       bell.classList.add('has-notice');
     controls.append(search, bell);
   }
+  controls.prepend(chatLauncher(() => toggleChat(context)));
   const account = el('button', 'account-trigger');
   account.type = 'button';
   account.setAttribute('aria-label', '账号与退出登录');
@@ -666,7 +676,7 @@ function contextBar() {
 
 let editing = false;
 root.addEventListener('input', (e) => {
-  if (e.target.closest('.agent-compose, .access-settings')) editing = true;
+  if (e.target.closest('.access-settings')) editing = true;
 });
 
 function render() {
