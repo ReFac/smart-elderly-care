@@ -1,4 +1,7 @@
-import { allocate, historicInquiries, register, registry, statusLabel } from './admission.js';
+import {
+  allocate, billingSchedule, bindContractFields, contractFields, historicInquiries,
+  isTrial, register, registry, statusLabel,
+} from './admission.js';
 import { displayAmount } from './profile-controls.js';
 import { roomsPage } from './rooms.js';
 import { residentInsights } from './resident-insights.js';
@@ -34,6 +37,9 @@ import {
 } from './shared.js';
 import { openDossier } from './dossier.js';
 import { clinicalHistory } from './care-pathway.js';
+import { confirmStay, endTrial, trialList } from './trial-stays.js';
+import { trialFollowups } from './trial-followups.js';
+import { trialLength } from './trial-terms.js';
 
 import { bedCard, familyPreview, bedside } from './bedcard.js';
 
@@ -119,21 +125,19 @@ function leave(ctx, row) {
 }
 
 function renew(ctx, row) {
-  runForm(ctx, {
+  const min = nextDay(row.endDate > today(ctx) ? row.endDate : today(ctx));
+  const dialog = ctx.dialog({
     title: '续住登记',
-    action: 'care.renew',
-    fields: [
-      field('endDate', '新的合同到期日', {
-        type: 'date',
-        min: nextDay(row.endDate > today(ctx) ? row.endDate : today(ctx)),
-        value: nextDay(row.endDate > today(ctx) ? row.endDate : today(ctx))
-      })
-    ],
-    map: (v) => ({
-      ...v,
-      residentId: row.id
-    })
+    description: row.name + ' · 原合同到期日 ' + row.endDate,
+    fields: contractFields(min, min),
+    submitLabel: '核对续住',
+    onSubmit: ({ contractTerm, endDate }) =>
+      ctx.command('care.renew', { residentId: row.id, endDate: contractTerm === 'fixed' ? endDate : '' }, {
+        title: '确认续住', target: row.name,
+        fields: [['原合同到期日', row.endDate], ['续住合同期限', contractTerm === 'fixed' ? endDate : '无期限']],
+      }),
   });
+  bindContractFields(dialog);
 }
 
 export function profile(ctx, row) {
@@ -204,7 +208,16 @@ export function profile(ctx, row) {
       ],
       ['入住日期', row.admittedAt],
       ['床位', bedName(ctx, row.bedId)],
-      ['合同到期', row.endDate],
+      ...(row.admittedAt ? [
+        ['入住方式', row.stayType === 'trial' ? '试住' : '正式入住'],
+        ...(row.formalizedAt ? [['转正日期', row.formalizedAt]] : []),
+        ...(row.trialDays ? [['试住约定', trialLength(row.trialDays) + ' · 至 ' + row.trialEndsAt]] : []),
+        ...(row.trialPrice != null ? [['一次性试住费', money(row.trialPrice)]] : []),
+        ...(row.stayType !== 'trial' ? [
+          ['月付安排', billingSchedule(row)],
+          ['合同期限', row.endDate || '无期限'],
+        ] : []),
+      ] : []),
       ...('contact' in row ? [['联系方式', row.contact]] : [])
     ])
   );
@@ -237,9 +250,13 @@ export function profile(ctx, row) {
       actions.append(btn(ctx, '床头卡', () => bedCard(ctx, row)));
     if (canAct(ctx, 'care.archive')) actions.append(btn(ctx, '复核摘要', () => archive(ctx, row)));
     if (canAct(ctx, 'care.leave')) actions.append(btn(ctx, '登记请假', () => leave(ctx, row)));
-    if (canAct(ctx, 'care.renew')) actions.append(btn(ctx, '续住', () => renew(ctx, row)));
+    if (isTrial(row)) {
+      if (canAct(ctx, 'care.confirmStay')) actions.append(btn(ctx, '试住转正式', () => confirmStay(ctx, row)));
+      if (canAct(ctx, 'care.endTrial')) actions.append(btn(ctx, '未转正离院', () => endTrial(ctx, row)));
+    }
+    if (!isTrial(row) && row.endDate && canAct(ctx, 'care.renew')) actions.append(btn(ctx, '续住', () => renew(ctx, row)));
     if (canAct(ctx, 'care.transfer')) actions.append(btn(ctx, '转床', () => transfer(ctx, row)));
-    if (canAct(ctx, 'care.discharge')) actions.append(btn(ctx, '退住', () => discharge(ctx, row)));
+    if (!isTrial(row) && canAct(ctx, 'care.discharge')) actions.append(btn(ctx, '退住', () => discharge(ctx, row)));
     if (actions.childElementCount) summary.append(section('档案操作', actions));
   }
   const block = (title, key, grants, describe) => {
@@ -269,7 +286,7 @@ export function profile(ctx, row) {
       named(v.metric + ' ' + v.value + ' ' + (v.unit || ''), v.date + ' · ' + v.status)
     ),
     block('收费', 'bills', ['finance'], (b) =>
-      named(b.month + ' · ' + money(b.amount), b.status + ' · 待缴 ' + money(b.balance))
+      named(b.month + (b.kind === 'trial' ? ' · 一次性试住费' : ' · 月费') + ' · ' + money(b.amount), b.status + ' · 待缴 ' + money(b.balance))
     ),
     block('请假记录', 'leaves', ['finance', 'intake'], (l) =>
       named(l.startDate + ' 至 ' + l.endDate, l.reason)
@@ -306,7 +323,8 @@ export function intake(ctx) {
 
 export function residents(ctx) {
   const choices = [
-    ['all', '档案名册', () => node('div', 'fx-profile', [registry(ctx), historicInquiries(ctx)])]
+    ['all', '档案名册', () => node('div', 'fx-profile', [registry(ctx), historicInquiries(ctx)])],
+    ['trials', '试住管理', () => node('div', 'fx-page-stack', [trialList(ctx), trialFollowups(ctx)])],
   ];
   if (canAct(ctx, 'care.renew'))
     choices.push([
@@ -387,7 +405,8 @@ function allBeds(ctx) {
             node(
               'small',
               '',
-              person?.level || (available && canAct(ctx, 'care.admit') ? '可办理入住' : bed.status)
+              person && isTrial(person) ? ['试住中', person.level].filter(Boolean).join(' · ')
+                : person?.level || (available && canAct(ctx, 'care.admit') ? '可办理入住' : bed.status)
             )
           ]);
           button.type = 'button';
@@ -470,6 +489,6 @@ export function expiringContracts(residents, day) {
   cutoff.setUTCDate(cutoff.getUTCDate() + 30);
   const limit = cutoff.toISOString().slice(0, 10);
   return residents
-    .filter((r) => r.status === '在住' && r.endDate && r.endDate <= limit)
+    .filter((r) => r.status === '在住' && !isTrial(r) && r.endDate && r.endDate <= limit)
     .sort((a, b) => a.endDate.localeCompare(b.endDate));
 }

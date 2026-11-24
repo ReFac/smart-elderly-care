@@ -138,6 +138,8 @@ def projection(db, state, user):
 
 
 def authorize_command(db, user, action, payload, state):
+    if action in ("care.confirmStay", "care.endTrial", "care.renew") and user.get("facilityScope"):
+        require_resident(db, user, payload.get("residentId"), state)
     if action in ("care.register", "care.admit", "care.transfer") and user.get(
         "facilityScope"
     ):

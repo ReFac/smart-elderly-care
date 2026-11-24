@@ -1,5 +1,6 @@
 import {
   btn,
+  canAct,
   choose,
   facts,
   field,
@@ -18,6 +19,7 @@ import {
 } from './shared.js';
 
 import { checkoutAction } from './payment-qr.js';
+import { importExpenses } from './expense-import.js';
 
 const channels = ['微信支付', '支付宝'];
 const amount = (value, max) =>
@@ -33,7 +35,7 @@ export function channelOrders(ctx) {
     '收费账单',
     bills.map((b) => ({
       value: b.id,
-      label: residentName(ctx, b.residentId) + ' · ' + b.month + ' · 待缴 ' + money(b.balance),
+      label: residentName(ctx, b.residentId) + ' · ' + (b.billingDate || b.month) + (b.kind === 'trial' ? ' 试住费' : ' 月费') + ' · 待缴 ' + money(b.balance),
     }))
   );
   function issue() {
@@ -157,10 +159,12 @@ export function expensePanel(ctx) {
     rows,
     search: {
       placeholder: '搜索凭证、收款对象或用途',
-      value: (r) => [r.voucher, r.payee, r.note].join(' '),
+      value: (r) => [r.voucher, r.payee, r.note, r.invoiceNo, r.transactionId].join(' '),
     },
     filter: { value: (r) => r.category },
-    action: btn(ctx, '登记支出', () =>
+    action: choose(
+      canAct(ctx, 'ops.importExpenses') ? btn(ctx, '导入银行或电费凭证', () => importExpenses(ctx)) : null,
+      btn(ctx, '登记支出', () =>
       runForm(ctx, {
         title: '登记已发生支出',
         action: 'ops.expense',
@@ -173,13 +177,19 @@ export function expensePanel(ctx) {
           memo('note', '支出事由', true),
         ],
       })
-    ),
+    )),
     cols: [
       { label: '日期', view: (r) => r.date },
       { label: '收款对象', view: (r) => named(r.payee, r.category) },
       { label: '事由', view: (r) => r.note },
       { label: '金额', view: (r) => money(r.amount) },
-      { label: '凭证号', view: (r) => r.voucher },
+      { label: '凭证号', view: (r) => named(r.voucher, [r.invoiceNo, r.transactionId].filter((v) => v && v !== r.voucher).join(' · ')) },
+      { label: '原件', view: (r) => !r.evidenceFiles?.length ? '—' : choose(...r.evidenceFiles.map((source) => {
+        const a = node('a', 'btn btn-ghost', source.name);
+        a.href = '/api/finance/expense-import/files/' + encodeURIComponent(source.id);
+        a.download = source.name;
+        return a;
+      })) },
     ],
   });
 }

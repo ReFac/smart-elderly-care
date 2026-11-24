@@ -25,6 +25,8 @@ from .plans import add_task, approve_plan, assess, complete_task, quality
 from .records import LEVELS, iso_date
 from .residency import (
     admit,
+    confirm_stay,
+    end_trial,
     archive,
     discharge,
     date_archive,
@@ -54,6 +56,8 @@ _ACTIONS = {
     "care.fileArchive": file_archive,
     "care.dateArchive": date_archive,
     "care.admit": admit,
+    "care.confirmStay": confirm_stay,
+    "care.endTrial": end_trial,
     "care.transfer": transfer,
     "care.discharge": discharge,
     "care.renew": renew,

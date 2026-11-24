@@ -134,7 +134,7 @@ export function badge(ctx, value, tone) {
         ? 'green'
         : waiting.includes(value)
           ? 'amber'
-          : value === '待执行'
+          : ['待执行', '试住中'].includes(value)
             ? 'blue'
             : 'neutral')
   );

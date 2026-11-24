@@ -8,9 +8,11 @@ from threading import BoundedSemaphore
 from zoneinfo import ZoneInfo
 
 from .room_context import room_context, validate_proposal
+from .operations import expense_import
 from .care import timeline as care_timeline
-from . import protected_docs, secure_storage, storage_assets
+from . import protected_docs, secure_storage, staff_employment, storage_assets
 from .bootstrap import empty_workspace
+from .care import trial_followups
 from . import backups, history, rounds
 from .access_policy import can_record_scale
 from .care import archive_retention
@@ -88,6 +90,7 @@ class Store:
                 "CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, data TEXT NOT NULL)"
             )
             storage_assets.init(db)
+            expense_import.init(db)
             protected_docs.init(db)
             activity.init(db)
             if not db.execute("SELECT 1 FROM workspace WHERE id=1").fetchone():
@@ -199,10 +202,13 @@ class Store:
             from .operations import dispatch
 
             dispatch.project(db, state, user, data)
+            trial_followups.project(db, state, user, data)
             if access.has(user, "finance"):
                 from .operations.charges import CATEGORIES, UNITS
+                from .operations.billing_cycles import pending_periods
 
                 data["chargeCatalog"] = {"categories": CATEGORIES, "units": UNITS}
+                data["billingDue"] = pending_periods(data, today)
             if (
                 access.has(user, "intake")
                 or access.has(user, "residents")
@@ -388,6 +394,19 @@ class Store:
             db.execute("BEGIN")
             return activity.page(db, self.actor(db, token), **filters)
 
+    def trial_assignees(self, token, resident_id):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            user = self.actor(db, token)
+            state = json.loads(
+                db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+            )
+            return {
+                "recipients": trial_followups.recipients(
+                    db, state, user, resident_id, self.facility_policy
+                )
+            }
+
     def handover_recipients(self, token):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
@@ -450,6 +469,18 @@ class Store:
             user = self.actor(db, token)
             campus_access.require_document(db, user, doc_id)
             return dossier.photo(db, doc_id, user)
+
+    def inspect_pdf(self, token, resident_id, raw):
+        from . import pdf_original
+
+        with closing(self.connect()) as db:
+            user = self.actor(db, token)
+            access.require(user, "medical.write")
+            state = json.loads(db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0])
+            campus_access.require_resident(db, user, resident_id, state)
+            if not any(r["id"] == resident_id for r in state["residents"]):
+                raise FileNotFoundError("找不到长者档案")
+        return {"pageCount": pdf_original.pages(raw)}
 
     def voice_proposal(self, token, proposal_id):
         with closing(self.connect()) as db, db:
@@ -789,6 +820,22 @@ class Store:
             try:
                 if action == "care.timelineSettings":
                     summary = care_timeline.configure(db, data, user, payload)
+                elif action in ("access.staffContract", "access.staffPayday"):
+                    summary = staff_employment.apply(db, user, action, payload, now, self.facility_policy)
+                elif action == "care.endTrial":
+                    trial_followups.assign(
+                        db, data, user, payload, now, self.facility_policy
+                    )
+                    fields = {k: payload[k] for k in ("residentId", "reason")}
+                    summary = care.apply(data, action, fields, today)
+                elif action == "care.finishTrialFollowup":
+                    summary = trial_followups.complete(db, data, user, payload, now)
+                elif action == "care.reassignTrialFollowup":
+                    summary = trial_followups.reassign(
+                        db, data, user, payload, now, self.facility_policy
+                    )
+                elif action == "access.trialSettings":
+                    summary = trial_followups.configure(data, payload)
                 elif action == "care.handover":
                     summary = handovers.create(
                         db, data, payload, user, now, self.facility_policy
@@ -805,6 +852,10 @@ class Store:
                     from .operations import dispatch
 
                     summary = dispatch.apply(db, data, action, payload, user, now)
+                elif action == "ops.importExpenses":
+                    summary, changed = expense_import.apply(db, data, payload, user, now)
+                    if not changed:
+                        return {"revision": revision, "summary": "所选凭证已经登记"}
                 elif action == "ops.suggest":
                     suggestion = planning["artifacts"][0]
                     data["suggestions"].insert(0, suggestion)

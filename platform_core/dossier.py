@@ -11,7 +11,7 @@ import zlib
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from . import access, document_ocr, family_contacts, profile_fields
+from . import access, document_ocr, family_contacts, pdf_original, profile_fields
 from .dossier_summary import sign_summary, summary_draft as summary_draft
 from .care.clinical import refresh_medication_warnings
 from .care.records import append_record, lookup
@@ -298,18 +298,22 @@ def jpeg_dimensions(raw):
     raise ValueError("JPEG 文件结构不完整")
 
 
-def photo_payload(p):
+def photo_payload(p, *, allow_pdf=False):
     encoded = p.get("imageBase64", "")
     if not encoded:
         return None, None, None
     if not isinstance(encoded, str) or len(encoded) > 4 * ((MAX_IMAGE + 2) // 3):
-        raise ValueError("原件照片最大为 8 MiB")
+        raise ValueError("原件最大为 8 MiB")
     try:
         raw = base64.b64decode(encoded, validate=True)
     except (ValueError, binascii.Error) as err:
-        raise ValueError("照片编码无效") from err
+        raise ValueError("原件编码无效") from err
     if not 0 < len(raw) <= MAX_IMAGE:
-        raise ValueError("原件照片最大为 8 MiB")
+        raise ValueError("原件最大为 8 MiB")
+    if allow_pdf and raw.startswith(b"%PDF-"):
+        if p.get("mime", "application/pdf") != "application/pdf":
+            raise ValueError("PDF 格式和声明类型不一致")
+        return raw, "application/pdf", hashlib.sha256(raw).hexdigest()
     if raw.startswith(b"\x89PNG\r\n\x1a\n"):
         mime = "image/png"
         width, height = png_dimensions(raw)
@@ -317,7 +321,9 @@ def photo_payload(p):
         mime = "image/jpeg"
         width, height = jpeg_dimensions(raw)
     else:
-        raise ValueError("请上传 PNG 或 JPEG 原图")
+        raise ValueError(
+            "请上传 PDF、PNG 或 JPEG 原件" if allow_pdf else "请上传 PNG 或 JPEG 原图"
+        )
     if p.get("mime", mime) != mime:
         raise ValueError("照片格式和声明类型不一致")
     if (
@@ -349,9 +355,9 @@ def archive_document(db, state, p, user, today):
     if staging and description:
         raise ValueError("请先留存原件，识别后再核对文字")
     pending = text(p, "pending", 2000)
-    raw, mime, digest = photo_payload(p)
+    raw, mime, digest = photo_payload(p, allow_pdf=True)
     if not raw and (kind != "病史补录" or method != METHODS[0]):
-        raise ValueError("该类文书需要同时留存原件照片")
+        raise ValueError("该类文书需要同时留存原件")
     # 指纹按业务输入计算。登录人和重试日期不改变同一原件的一次性概括。
     fingerprint = hashlib.sha256(
         pack([kind, event_date, source, method, description, pending, digest]).encode()
@@ -384,6 +390,8 @@ def archive_document(db, state, p, user, today):
         "bytes": len(raw) if raw else 0,
         "filename": text(p, "filename", 200) if raw else "",
     }
+    if raw:
+        meta["pageCount"] = pdf_original.pages(raw) if mime == "application/pdf" else 1
     db.execute(
         """INSERT INTO dossier_documents
                (id,resident_id,request_id,fingerprint,event_date,recorded_date,metadata,mime,original,image_hash)
@@ -411,7 +419,7 @@ def archive_document(db, state, p, user, today):
 def review_document(db, state, p, user, today):
     for grant in ("medical.write", "medical", "clinical"):
         access.require(user, grant)
-    if set(p) != {
+    if set(p) - {"reviewedPages"} != {
         "residentId",
         "documentId",
         "verifiedName",
@@ -423,6 +431,15 @@ def review_document(db, state, p, user, today):
         raise ValueError("文书核对字段无效")
     did, raw_meta = document_ocr.source(db, p)
     meta = json.loads(raw_meta)
+    page_count = meta.get("pageCount", 1)
+    checked = p.get("reviewedPages", [1] if page_count == 1 else [])
+    if (
+        not isinstance(checked, list)
+        or len(checked) != page_count
+        or any(type(value) is not int for value in checked)
+        or sorted(checked) != list(range(1, page_count + 1))
+    ):
+        raise ValueError("请逐页核对全部原件")
     resident = lookup(state, "residents", p["residentId"])
     if text(p, "verifiedName", 60, True) != resident["name"]:
         raise ValueError("请核对原件姓名与当前长者")
@@ -462,14 +479,16 @@ def review_document(db, state, p, user, today):
         raise ValueError("原文识别姓名与档案不同，请先核实身份，本次仅可留存文书")
     recorded = {}
     for item in changes:
-        if not isinstance(item, dict) or set(item) != {
-            "field",
-            "value",
-            "previous",
-            "line",
-        }:
+        required = {"field", "value", "previous", "line"}
+        if not isinstance(item, dict) or set(item) not in (
+            required,
+            required | {"page"},
+        ):
             raise ValueError("请逐项确认回填值、原值和来源")
         key, line = item["field"], item["line"]
+        page = item.get("page", 1)
+        if type(page) is not int or not 1 <= page <= meta.get("pageCount", 1):
+            raise ValueError("原件页码无效")
         if (
             not isinstance(key, str)
             or key not in document_ocr.FIELDS
@@ -484,12 +503,12 @@ def review_document(db, state, p, user, today):
             type(line) is not int
             or method == "手工描述"
             or not any(
-                c["line"] == line and c["field"] == key
+                c["line"] == line and c.get("page", 1) == page and c["field"] == key
                 for c in ocr.get("candidates", [])
             )
         ):
             raise ValueError("候选字段的原文行号无效")
-        recorded[key] = {"before": previous, "after": value, "page": 1, "line": line}
+        recorded[key] = {"before": previous, "after": value, "page": page, "line": line}
     event = db.execute(
         "SELECT event_date FROM dossier_documents WHERE id=?", (did,)
     ).fetchone()[0]
@@ -507,6 +526,7 @@ def review_document(db, state, p, user, today):
     receipt = {
         "summary": reviewed,
         "changes": recorded,
+        "reviewedPages": sorted(checked),
         "identityMatch": not identity_mismatch,
         "reviewDate": today,
         "fingerprint": fingerprint,
@@ -612,6 +632,7 @@ def project(db, data, user, today=None):
                         summary=receipt["summary"],
                         reviewChanges=receipt["changes"],
                         reviewDate=receipt["reviewDate"],
+                        reviewedPages=receipt.get("reviewedPages", [1]),
                     )
                 data["medicalDocuments"].append(
                     {
@@ -620,6 +641,7 @@ def project(db, data, user, today=None):
                         "eventDate": event,
                         "recordedDate": recorded,
                         "hasImage": bool(mime),
+                        "mime": mime,
                         **metadata,
                     }
                 )

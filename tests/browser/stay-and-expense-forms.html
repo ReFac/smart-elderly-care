@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>入住约定与支出核对回归</title>
+<link rel="stylesheet" href="../../web/style.css">
+<output>运行中</output>
+<script type="module">
+  import { allocate } from '../../web/features/admission.js';
+  import { confirmStay } from '../../web/features/trial-stays.js';
+  import { importExpenses } from '../../web/features/expense-import.js';
+  import { formDialog, detail } from '../../web/lib/dialogs.js';
+  import * as ui from '../../web/lib/ui.js';
+
+  const check = (ok, message) => { if (!ok) throw new Error(message); };
+  const form = () => [...document.querySelectorAll('dialog[open] form')].at(-1);
+  const person = { id: 'test-res', name: '测试档案', status: '未入住', level: '自理' };
+  const commands = [];
+  const ctx = {
+    today: '2026-01-31', ui, dialog: formDialog, detail, toast(message) { throw Error(message); },
+    state: { beds: [{ id: 'test-bed', label: '01-A', ward: '东区', status: '空闲' }], trialSettings: { days: 3, fee: null } },
+    command(action, payload, review) { commands.push({ action, payload, review }); return true; },
+  };
+  const change = (control, value) => { control.value = value; control.dispatchEvent(new Event('change')); };
+  async function until(predicate) {
+    for (let i = 0; i < 100 && !predicate(); i++) await new Promise((r) => setTimeout(r, 10));
+    check(predicate(), '没有收到预期的界面结果');
+  }
+  try {
+    allocate(ctx, person);
+    let controls = form().elements;
+    check(controls.billingDay.value === '31' && controls.contractTerm.value === 'open', '默认月付日和无期限');
+    check(controls.endDate.disabled && controls.trialPrice.disabled, '隐藏不适用项');
+    change(controls.contractTerm, 'fixed');
+    check(!form().checkValidity(), '固定期限须填写日期');
+    controls.endDate.value = '2027-01-31';
+    change(controls.stayType, 'trial');
+    check(controls.billingDay.disabled && controls.endDate.disabled, '试住使用一次性约定');
+    check(controls.trialDays.value === '3' && controls.trialPrice.value === '' && !form().checkValidity(), '未配置价不能自动免费');
+    check(controls.trialDays.closest('label').textContent.includes('2026-02-02'), '三天两夜跨月结束日');
+    controls.trialPrice.value = '0';
+    form().requestSubmit();
+    const trial = commands.at(-1);
+    check(trial.action === 'care.admit' && trial.payload.trialPrice === 0 && !('billingDay' in trial.payload) && !('endDate' in trial.payload), '明确免费且不发送隐藏字段');
+    await until(() => !form());
+    confirmStay(ctx, { ...person, billingDay: null, trialEndsAt: '2026-02-02', bedId: 'test-bed' });
+    controls = form().elements;
+    check(controls.billingDay.value === '31' && controls.contractTerm.value === 'open', '转正默认约定');
+    change(controls.billingDay, '15');
+    form().requestSubmit();
+    const formal = commands.at(-1);
+    check(formal.action === 'care.confirmStay' && formal.payload.billingDay === 15 && formal.payload.endDate === '', '转正可自选账单日');
+    await until(() => !form());
+
+    const rows = ['ready','duplicate','review','excluded'].map((status, i) => ({
+      rowNumber: i+2, status, date:'2026-01-31', amount:10, payee:'演练', reason:status,
+    }));
+    let uploads = 0;
+    window.fetch = async (path, options) => {
+      const input = JSON.parse(options.body);
+      check(path === '/api/finance/expense-import/preview' && input.source === 'bank' && atob(input.contentBase64) === 'demo', '确切发送文件和来源');
+      uploads++;
+      return new Response(JSON.stringify({previewId:'test-preview',rows}));
+    };
+    importExpenses(ctx);
+    const dialog = document.querySelector('dialog[open]');
+    const file = dialog.querySelector('[type=file]');
+    const dt = new DataTransfer(); dt.items.add(new File(['demo'], 'statement.csv'));
+    file.files = dt.files; file.dispatchEvent(new Event('change'));
+    const button = (label) => [...dialog.querySelectorAll('button')].find(b => b.textContent.trim() === label);
+    button('预览文件').click();
+    await until(() => dialog.querySelectorAll('tbody tr').length === 4);
+    check(uploads === 1 && commands.length === 2, '预览只读');
+    check(dialog.querySelectorAll('[type=checkbox]').length === 1, '只可选已核对支出');
+    const row = dialog.querySelector('[type=checkbox]'); row.click();
+    check(button('核对入账').disabled, '未选择记录时不能提交');
+    row.click(); button('核对入账').click();
+    const imported = commands.at(-1);
+    check(imported.action === 'ops.importExpenses' && JSON.stringify(imported.payload) === '{"previewId":"test-preview","rowNumbers":[2]}', '只提交选中行');
+    document.querySelector('output').textContent = '试住、转正、固定期限及支出预览均通过';
+    document.documentElement.dataset.result = 'pass';
+  } catch (e) {
+    document.querySelector('output').textContent = e.stack; document.documentElement.dataset.result = 'fail';
+  }
+</script>
+</html>

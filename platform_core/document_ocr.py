@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 
-from . import access
+from . import access, pdf_original
 from .provider import media
 
 METHOD = "DeepSeek OCR"
@@ -59,24 +59,14 @@ REGION_TYPES = {
 }
 
 
-def parse_result(obj, width, height):
-    if (
-        obj["object"] != "ocr.result"
-        or obj["purpose"] != "text_recognition"
-        or obj["page_count"] != 1
-        or len(obj["pages"]) != 1
-    ):
-        raise ValueError("照片识别回执页数无效")
-    page = obj["pages"][0]
-    if page["index"] != 0 or not isinstance(page["text"], str):
-        raise ValueError("照片识别回执无效")
+def page_text(page, number, width, height):
     result, candidates = [], []
 
     def add_lines(value, box):
         for text in value.splitlines():
             if not (text := text.strip()):
                 continue
-            line = {"line": len(result) + 1, "page": 1, "text": text, "box": box}
+            line = {"line": len(result) + 1, "page": number, "text": text, "box": box}
             result.append(line)
             for field, pattern in PATTERNS.items():
                 if match := pattern.match(text):
@@ -85,6 +75,7 @@ def parse_result(obj, width, height):
                             "field": field,
                             "value": match[1].strip(),
                             "line": line["line"],
+                            "page": number,
                         }
                     )
                     break
@@ -93,7 +84,10 @@ def parse_result(obj, width, height):
     matches = list(MARKER.finditer(page["text"]))
     for i, m in enumerate(matches):
         add_lines(page["text"][last : m.start()], None)
-        regions = json.loads(m.group(2))
+        try:
+            regions = json.loads(m.group(2))
+        except (ValueError, RecursionError):
+            regions = None
         box = None
         if (
             isinstance(regions, list)
@@ -121,47 +115,96 @@ def parse_result(obj, width, height):
         else:
             add_lines(label, box)
     add_lines(page["text"][last:], None)
-    # Preserve a charged but unusable response as a terminal result, with manual review available.
+    return result, candidates
+
+
+def parse_result(obj, width, height, page_count=1):
     if (
-        not result
-        or page.get("finish_reason") != "stop"
-        or len(result) > 500
-        or sum(len(r["text"]) for r in result) > 16000
+        obj["object"] != "ocr.result"
+        or obj["purpose"] != "text_recognition"
+        or type(obj["page_count"]) is not int
+        or obj["page_count"] != page_count
+        or not isinstance(obj["pages"], list)
+        or len(obj["pages"]) != page_count
     ):
-        value = {
-            "state": "failed",
-            "engine": METHOD,
-            "error": "该页未得到完整可核对的文字，请按原件手工补录",
-            "lines": [],
-            "candidates": [],
-        }
-    else:
-        value = {
-            "state": "recognized",
-            "engine": METHOD,
-            "lines": result,
-            "candidates": candidates,
-        }
-    return value, 1, obj["id"]
+        raise ValueError("识别回执页数与原件不符")
+    records = {}
+    for page in obj["pages"]:
+        index = page["index"]
+        if (
+            type(index) is not int
+            or not 0 <= index < page_count
+            or index in records
+            or not isinstance(page["text"], str)
+            or page.get("finish_reason") not in ("stop", "length")
+        ):
+            raise ValueError("识别回执页码或内容无效")
+        records[index] = page
+    result = {
+        "engine": METHOD,
+        "pageCount": page_count,
+        "pages": [],
+        "lines": [],
+        "candidates": [],
+    }
+    for index in range(page_count):
+        page = records[index]
+        lines, candidates = page_text(page, index + 1, width, height)
+        state = (
+            "partial"
+            if page["finish_reason"] == "length"
+            else "complete"
+            if lines
+            else "blank"
+        )
+        result["pages"].append({"page": index + 1, "state": state})
+        result["lines"].extend(lines)
+        if state == "complete":
+            result["candidates"].extend(candidates)
+        else:
+            # An incomplete page can still identify a different resident.
+            result["candidates"].extend(c for c in candidates if c["field"] == "name")
+    result["state"] = "recognized" if result["lines"] else "failed"
+    if page_count == 1 and (
+        result["pages"][0]["state"] == "partial"
+        or len(result["lines"]) > 500
+        or sum(len(line["text"]) for line in result["lines"]) > 16000
+    ):
+        result.update(state="failed", lines=[], candidates=[])
+        result["error"] = "该页未得到完整可核对的文字，请按原件手工补录"
+    if result["state"] == "failed" and "error" not in result:
+        result["error"] = "未识别到可核对的文字，请按原件手工补录"
+    return result, page_count, obj["id"]
 
 
 def recognize(store, token, raw, authorize):
     from .dossier import jpeg_dimensions, png_dimensions
 
-    png = raw.startswith(b"\x89PNG")
-    width, height = png_dimensions(raw) if png else jpeg_dimensions(raw)
-    if width * height > 20_000_000:
-        raise RecognitionError("原件超出单页识别上限，可核对原图后手工补录")
+    if raw.startswith(b"%PDF-"):
+        page_count = pdf_original.pages(raw)
+        filename, mime = "document.pdf", "application/pdf"
+        width = height = (
+            1000  # PDF boxes stay in DeepSeek's normalized page coordinates.
+        )
+    else:
+        png = raw.startswith(b"\x89PNG")
+        width, height = png_dimensions(raw) if png else jpeg_dimensions(raw)
+        if width * height > 20_000_000:
+            raise RecognitionError("原件超出单页识别上限，可核对原图后手工补录")
+        page_count = 1
+        filename, mime = (
+            ("document.png", "image/png") if png else ("document.jpg", "image/jpeg")
+        )
     return media.execute(
         store,
         token,
         "ocr",
         raw,
-        1,
-        "document.png" if png else "document.jpg",
-        "image/png" if png else "image/jpeg",
+        page_count,
+        filename,
+        mime,
         authorize,
-        lambda obj: parse_result(obj, width, height),
+        lambda obj: parse_result(obj, width, height, page_count),
     )
 
 

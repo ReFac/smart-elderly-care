@@ -46,6 +46,7 @@ def move(state, resident, today, kind, old_bed=None, new_bed=None):
     rates = {"bedDailyRate": new_bed.get("dailyRate", 60)} if new_bed else {}
     if kind == "入住":
         rates["initialCareLevel"] = resident["level"]
+        rates["stayType"] = resident["stayType"]
     if old_bed:
         old_bed.update(residentId="", status="空闲")
     if new_bed:
@@ -161,8 +162,46 @@ def file_archive(state, p, today):
     return "封存历史档案 " + person["name"]
 
 
+def trial_days(value):
+    from ..operations.records import whole_number
+
+    days = whole_number(value, "试住天数")
+    if days > 365:
+        raise ValueError("请选择 1 至 365 天的试住时长。")
+    return days
+
+
+def monthly_billing_day(value, today):
+    from ..operations.records import whole_number
+
+    if value in (None, ""):
+        return int(today[-2:])
+    day = whole_number(value, "月付账单日")
+    if day > 31:
+        raise ValueError("月付账单日须为 1 至 31 日。")
+    return day
+
+
+def contract_end(value, today):
+    if value in (None, ""):
+        return ""
+    end = iso_date(value, "合同到期日")
+    if end < today:
+        raise ValueError("合同到期日不能早于今天。")
+    return end
+
+
 def admit(state, p, today):
-    if not p.get("residentId") or set(p) - {"residentId", "bedId", "level", "endDate"}:
+    if not p.get("residentId") or set(p) - {
+        "residentId",
+        "bedId",
+        "level",
+        "endDate",
+        "stayType",
+        "billingDay",
+        "trialDays",
+        "trialPrice",
+    }:
         raise ValueError("请先建立长者档案，办理入住时只选择已有未入住档案。")
     resident = lookup(state, "residents", p["residentId"])
     if resident["status"] != "未入住" or resident.get("bedId"):
@@ -171,17 +210,67 @@ def admit(state, p, today):
         )
     bed = vacant_bed(state, p.get("bedId"))
     level = care_level(p.get("level") or resident["level"])
-    end_date = iso_date(p.get("endDate") or offset_date(today, 365), "入住到期日")
-    if end_date < today:
-        raise ValueError("入住到期日不能早于今天。")
-    resident.update(status="在住", admittedAt=today, endDate=end_date, level=level)
+    stay_type = p.get("stayType", "formal")
+    if stay_type not in ("formal", "trial"):
+        raise ValueError("请选择正式入住或试住。")
+    terms = {}
+    if stay_type == "trial":
+        from ..operations.billing import record_trial_fee
+        from ..operations.records import currency_amount
+
+        defaults = (state.get("trialPolicies") or [{}])[0]
+        days = trial_days(p.get("trialDays", defaults.get("days", 3)))
+        price = p.get("trialPrice", defaults.get("fee"))
+        if price in (None, ""):
+            raise ValueError("请填写本次试住总价；免费试住请明确填写 0 元。")
+        terms.update(
+            trialDays=days,
+            trialEndsAt=offset_date(today, days - 1),
+            trialPrice=float(currency_amount(price, "试住总价")),
+        )
+    elif {"trialDays", "trialPrice"} & p.keys():
+        raise ValueError("正式入住请使用月付账期。")
+    if stay_type == "formal" or p.get("billingDay") not in (None, ""):
+        terms["billingDay"] = monthly_billing_day(p.get("billingDay"), today)
+    resident.update(
+        status="在住",
+        stayType=stay_type,
+        admittedAt=today,
+        endDate=contract_end(p.get("endDate"), today),
+        level=level,
+        **terms,
+    )
     move(state, resident, today, "入住", new_bed=bed)
     inquiry = next(
         (r for r in state["inquiries"] if r["id"] == resident.get("inquiryId")), None
     )
     if inquiry:
         inquiry["status"] = "已入住"
-    return f"为{resident['name']}办理入住，分配{bed['label']}"
+    if stay_type == "trial":
+        record_trial_fee(state, resident, today)
+        return (
+            f"为{resident['name']}办理{days}天试住，分配{bed['label']}，"
+            f"试住至{terms['trialEndsAt']}，整次费用 ¥{terms['trialPrice']:.2f}"
+        )
+    return f"为{resident['name']}办理正式入住，分配{bed['label']}，月付账单日为每月{terms['billingDay']}日"
+
+
+def confirm_stay(state, p, today):
+    if not p.get("residentId") or set(p) - {"residentId", "billingDay", "endDate"}:
+        raise ValueError("请从长者档案确认试住转正式入住。")
+    resident = get_resident(state, p["residentId"])
+    if resident.get("stayType") != "trial":
+        raise ValueError("仅可为当前试住的长者办理转正式入住。")
+    billing_day = monthly_billing_day(
+        p.get("billingDay", resident.get("billingDay")), today
+    )
+    resident.update(
+        stayType="formal",
+        formalizedAt=today,
+        billingDay=billing_day,
+        endDate=contract_end(p.get("endDate", resident.get("endDate")), today),
+    )
+    return f"为{resident['name']}办理试住转正式入住，月付账单日为每月{billing_day}日"
 
 
 def transfer(state, p, today):
@@ -196,7 +285,22 @@ def transfer(state, p, today):
 
 def discharge(state, p, today):
     resident = get_resident(state, p.get("residentId"))
+    if resident.get("stayType") == "trial":
+        raise ValueError("试住未转正式，请办理试住离院并指派回访。")
     note = text_field(p.get("note"), "退住说明")
+    return release_bed(state, resident, today, note)
+
+
+def end_trial(state, p, today):
+    resident = get_resident(state, p.get("residentId"))
+    if resident.get("stayType") != "trial":
+        raise ValueError("仅可办理在住试住长者的试住离院。")
+    reason = required_field(p, "reason", "试住未转正式原因")
+    release_bed(state, resident, today, reason)
+    return f"{resident['name']}试住未转正式，已退床归档并派发回访"
+
+
+def release_bed(state, resident, today, note):
     old_bed = lookup(state, "beds", resident["bedId"])
     move(state, resident, today, "退住", old_bed=old_bed)
     resident.update(
@@ -217,6 +321,13 @@ def discharge(state, p, today):
 
 def renew(state, p, today):
     resident = get_resident(state, p.get("residentId"))
+    if resident.get("stayType") == "trial":
+        raise ValueError("试住长者请在转正式时确定合同期限。")
+    if not resident.get("endDate"):
+        raise ValueError("当前合同为无期限，无需续住。")
+    if p.get("endDate") == "":
+        resident["endDate"] = ""
+        return f"将{resident['name']}的入住合同续为无期限"
     end_date = iso_date(p.get("endDate"), "续住到期日")
     if end_date <= max(today, resident["endDate"]):
         raise ValueError("续住到期日须晚于今天及当前到期日。")
@@ -228,7 +339,9 @@ def leave(state, p, today):
     resident = get_resident(state, p.get("residentId"))
     start = iso_date(p.get("startDate"), "请假开始日")
     end = iso_date(p.get("endDate"), "请假结束日")
-    if not resident["admittedAt"] <= start <= end <= resident["endDate"]:
+    if not resident["admittedAt"] <= start <= end or (
+        resident.get("endDate") and end > resident["endDate"]
+    ):
         raise ValueError("请假区间须在入住期限内，且结束日不早于开始日。")
     if any(
         x["residentId"] == resident["id"]

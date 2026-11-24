@@ -86,11 +86,14 @@ ROUTE_GRANTS = {
     "integrations": ("gateway.simulate", "alerts", "voice", "voice.confirm"),
 }
 ACTION_GRANTS = {
+    "care.reassignTrialFollowup": "intake",
     "care.inquire": "intake",
     "care.register": "intake",
     "care.fileArchive": "intake",
     "care.dateArchive": "intake",
     "care.admit": "intake",
+    "care.confirmStay": "intake",
+    "care.endTrial": "intake",
     "care.transfer": "intake",
     "care.renew": "intake",
     "care.discharge": "intake",
@@ -132,6 +135,7 @@ ACTION_GRANTS = {
     "ops.paymentOrder": "finance",
     "ops.remindBill": "finance",
     "ops.expense": "finance",
+    "ops.importExpenses": "finance",
     "ops.submitReport": "reports",
     "ops.reportReceipt": "reports",
     "ops.report": "reports",
@@ -215,7 +219,7 @@ def require(user, permission):
         raise PermissionError("此账号没有当前操作权限")
 
 
-STAFF_ACCOUNT_ACTIONS = ("access.create", "access.update")
+STAFF_ACCOUNT_ACTIONS = ("access.create", "access.update", "access.staffContract", "access.staffPayday")
 
 
 def can_record_scale(user):
@@ -269,6 +273,10 @@ def authorize(user, action, payload, state):
         return
     if action == "account.changePassword":
         return
+    if action == "care.finishTrialFollowup":
+        if user["kind"] in ("owner", "staff") and "residents" in user["routes"]:
+            return
+        raise PermissionError("此账号没有试住回访权限")
     if action == "family.consent":
         if user["kind"] == "family" and user.get("portalSelf"):
             return
@@ -349,10 +357,12 @@ def allowed_actions(user):
     from .operations.dispatch import unrestricted
 
     if not unrestricted(user):
-        actions = [a for a in actions if a not in ("ops.publishNotice", "ops.supplyOrder")]
+        actions = [a for a in actions if a not in ("ops.publishNotice", "ops.supplyOrder", "ops.importExpenses")]
     if user["kind"] in ("owner", "staff"):
         actions.append("ops.finishSupplyOrder")
     actions.append("account.changePassword")
+    if user["kind"] in ("owner", "staff") and "residents" in resolve_routes(user):
+        actions.append("care.finishTrialFollowup")
     if user["kind"] == "family":
         actions.extend(
             ["family.consent"]
@@ -388,6 +398,7 @@ def allowed_actions(user):
             *FACILITY_COMMANDS,
             "access.settings",
             "access.mediaSettings",
+            "access.trialSettings",
         ]
     from . import campus_access
 
@@ -495,6 +506,10 @@ def visible_data(state, user):
                     "gender",
                     "admittedAt",
                     "endDate",
+                    "stayType",
+                    "formalizedAt",
+                    "trialDays",
+                    "trialEndsAt",
                     "dischargedAt",
                     "archiveUntil",
                     "registeredAt",
@@ -504,6 +519,8 @@ def visible_data(state, user):
             )
         if any_grant("intake", "relatives"):
             basic.append("contact")
+        if any_grant("intake", "finance"):
+            basic.extend(["admittedAt", "dischargedAt", "billingDay", "stayType", "formalizedAt", "trialEndsAt", "trialPrice", "trialDays"])
         if any_grant("clinical", "medical"):
             basic.extend(["risk", "allergies", "summary"])
         data["residents"] = [select_fields(r, basic) for r in state["residents"]]

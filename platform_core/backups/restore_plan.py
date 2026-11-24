@@ -5,6 +5,7 @@ import json
 # Live identity, grants, payer callbacks, AI quotas and audit have their own authority.
 # Live originals may only be extended. These tables support replacement of mutable records.
 MUTABLE = {
+    "staff_paydays": "员工工资日",
     "facility_buildings": "楼栋",
     "facility_campuses": "分院",
     "facility_building_campus": "楼栋归属",
@@ -20,6 +21,8 @@ MUTABLE = {
     "rounds_policy": "机构巡查排程设置",
 }
 ORIGINALS = {
+    "staff_contract_originals": "劳动合同原件",
+    "staff_contract_versions": "员工合同留存版本",
     "dossier_documents": "医疗原件",
     "dossier_document_reviews": "文书签认",
     "storage_assets": "环境与历史原件",
@@ -29,6 +32,7 @@ ORIGINALS = {
 }
 # A point-in-time restore cannot retract external actions, recorded clinical observations or cash.
 PROTECTED = {
+    "trialFollowups": "试住回访及报告",
     "longCareEvents": "长护险办理凭证",
     "payments": "收款凭证",
     "bills": "账单",
@@ -101,6 +105,9 @@ def completed(rows):
 
 
 OPTIONAL_TABLES = {
+    "staff_paydays",
+    "staff_contract_originals",
+    "staff_contract_versions",
     "rounds_modes",
     "rounds_policy",
     "rounds_observations",

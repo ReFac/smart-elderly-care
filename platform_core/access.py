@@ -102,6 +102,9 @@ def init(db, initial_owner_password=None):
       enabled INTEGER NOT NULL DEFAULT 1, salt BLOB NOT NULL, password_hash BLOB NOT NULL,
       family_services INTEGER NOT NULL DEFAULT 0 CHECK(family_services IN (0,1)))""")
     identity.init(db)
+    from . import staff_employment
+
+    staff_employment.init(db)
     if "activation_pending" not in {
         r[1] for r in db.execute("PRAGMA table_info(accounts)")
     }:
@@ -702,10 +705,11 @@ def project(db, state, user, facility_policy=None):
             _public(row)
             for row in db.execute("SELECT * FROM accounts ORDER BY kind DESC,username")
         )
+        paydays = dict(db.execute("SELECT account_id,payday FROM staff_paydays"))
         owner = user["kind"] == "owner"
         filtered.update(
             accounts=[
-                {**a, "allowedActions": allowed_actions(a)}
+                {**a, "allowedActions": allowed_actions(a), **({"payday": paydays[a["id"]]} if a["id"] in paydays else {})}
                 for a in accounts
                 if _within_account_scope(user, a, assignable, area_check)
             ],

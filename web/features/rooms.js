@@ -2,6 +2,7 @@ import { roomTasks } from './agent-runs.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import { active, canAct, node, page } from './shared.js';
 import { admit, profile } from './residency.js';
+import { isTrial } from './admission.js';
 import { chooseAdmin } from './room-admin.js';
 import { openFacilityTour } from './room-tour.js';
 import { button, statusText, pathName, heading, lookup, failure } from './room-elements.js';
@@ -278,7 +279,10 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
       canRead && bed.residentName ? bed.residentName : allocatable ? '空闲 · 办理分配' : bed.status;
     const body = [
       ctx.ui.icon('bed', 18),
-      node('span', '', [node('small', '', bed.label + ' 床'), node('strong', '', name)]),
+      node('span', '', [
+        node('small', '', bed.label + ' 床' + (resident && isTrial(resident) ? ' · 试住中' : '')),
+        node('strong', '', name)
+      ]),
       resident || allocatable ? ctx.ui.icon('chevron', 14) : null,
     ];
     const row = resident

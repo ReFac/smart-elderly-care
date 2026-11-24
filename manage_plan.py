@@ -26,6 +26,8 @@ def main():
         "--expires", required=True, help="到期日 YYYY-MM-DD（上海时区，含当日）"
     )
     commands.add_parser("status", help="查看套餐与用量")
+    pages = commands.add_parser("ocr-quota", help="仅调整当前套餐的 OCR 总页数，保留其他额度和历史用量")
+    pages.add_argument("--pages", type=int, required=True)
     commands.add_parser("disable", help="停止接受新的付费规划")
     commands.add_parser("unsettled", help="查看待结算或结果未明的记录")
     reconcile = commands.add_parser(
@@ -84,6 +86,12 @@ def main():
                     change += f"，文书识别 {args.ocr_pages} 页"
                 if args.asr_seconds is not None:
                     change += f"，语音转写 {args.asr_seconds} 秒"
+            elif args.command == "ocr-quota":
+                plan = provider.latest(db)
+                if not plan:
+                    raise ValueError("此机构尚无可调整的套餐")
+                media.grant(db, plan["id"], "ocr", args.pages)
+                change = f"调整本期 OCR 总额度至 {args.pages} 页"
             elif args.command == "media-reconcile":
                 media.reconcile(db, args.call, args.units, provider.local_time())
                 change = f"媒体识别用量对账 {args.call}，结算 {args.units} 单位"

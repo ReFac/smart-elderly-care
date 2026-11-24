@@ -16,6 +16,8 @@ CARE_COLLECTIONS = (
     "bedMoves",
     "archives",
     "followups",
+    "trialFollowups",
+    "trialPolicies",
     "referrals",
     "drugRules",
     "longCareEvents",

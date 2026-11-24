@@ -144,30 +144,35 @@ def finance_suggestion(state, today):
     ]
     flagged = []
     for bill in state["bills"]:
-        amount, paid, balance, bed_rate, care_rate, package = (
-            Decimal(str(bill[k]))
-            for k in ("amount", "paid", "balance", "bedFee", "careFee", "packageFee")
-        )
-        expected = (
-            Decimal(str(bill.get("bedTotal", bed_rate * bill["serviceDays"])))
-            + Decimal(
-                str(
-                    bill.get(
-                        "careTotal",
-                        care_rate * (bill["serviceDays"] - bill["leaveDays"]),
-                    )
-                )
-            )
-            + package
+        amount, paid, balance = (
+            Decimal(str(bill[k])) for k in ("amount", "paid", "balance")
         )
         reasons = []
+        if bill.get("kind") == "trial":
+            expected = Decimal(str(bill["trialPrice"]))
+        else:
+            bed_rate, care_rate, package = (
+                Decimal(str(bill[k])) for k in ("bedFee", "careFee", "packageFee")
+            )
+            expected = (
+                Decimal(str(bill.get("bedTotal", bed_rate * bill["serviceDays"])))
+                + Decimal(
+                    str(
+                        bill.get(
+                            "careTotal",
+                            care_rate * (bill["serviceDays"] - bill["leaveDays"]),
+                        )
+                    )
+                )
+                + package
+            )
+            default_rate = CARE_RATES.get(bill["careLevel"])
+            if default_rate is not None and care_rate != default_rate:
+                reasons.append(
+                    f"护理日价 ¥{care_rate:.2f}，示例等级标准 ¥{default_rate:.2f}"
+                )
         if expected != amount or balance + paid != amount:
             reasons.append("计费拆分或核销余额与应收不符")
-        default_rate = CARE_RATES.get(bill["careLevel"])
-        if default_rate is not None and care_rate != default_rate:
-            reasons.append(
-                f"护理日价 ¥{care_rate:.2f}，示例等级标准 ¥{default_rate:.2f}"
-            )
         if reasons:
             flagged.append(bill)
             evidence.append(

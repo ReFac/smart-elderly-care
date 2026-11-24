@@ -6,6 +6,7 @@ import { contactBook } from './family-contacts.js';
 import { familyInbox, familyRecipients } from './family-rounds.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import { previewSummary } from './dossier-summary.js';
+import { originalViewer } from './document-original.js';
 import { pendingDocument, recognizeDocument, reviewReceipt } from './document-ocr.js';
 import {
   node,
@@ -281,11 +282,11 @@ function options(items) {
   return select;
 }
 
-function asBase64(file) {
+export function asBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result).split(',')[1]);
-    reader.onerror = () => reject(new Error('读取原图失败，请重新选择。'));
+    reader.onerror = () => reject(new Error('读取原件失败，请重新选择。'));
     reader.readAsDataURL(file);
   });
 }
@@ -318,25 +319,45 @@ function newDocument(ctx, resident) {
   pending.placeholder = '如字迹不清的日期、待补充的报告页';
   const pick = node('input');
   pick.type = 'file';
-  pick.accept = 'image/jpeg,image/png';
+  pick.accept = 'image/jpeg,image/png,application/pdf,.pdf';
   const camera = node('input');
   camera.type = 'file';
   camera.accept = 'image/jpeg,image/png';
   camera.setAttribute('capture', 'environment');
-  const chosen = node('span', 'fx-muted', '支持 JPEG、PNG，每张最多 8 MiB。');
-  [pick, camera].forEach((input, i) =>
-    input.addEventListener('change', () => {
-      if (input.files[0]) {
-        [camera, pick][i].value = '';
-        chosen.textContent =
-          '已选择 ' +
-          input.files[0].name +
-          ' · ' +
-          (input.files[0].size / 1024).toFixed(0) +
-          ' KiB';
+  const chosen = node('span', 'fx-muted', '支持 PDF、JPEG 和 PNG，每份最多 8 MiB。');
+  chosen.setAttribute('aria-live', 'polite');
+  let inspected = null, inspection;
+  const isPdf = (file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  async function inspect(file) {
+    inspection?.abort();
+    inspection = new AbortController();
+    inspected = null;
+    if (!file) { chosen.textContent = '请选择 PDF 或原件照片。'; return; }
+    if (!file.size || file.size > 8 * 1024 * 1024) {
+      chosen.textContent = '请选择 8 MiB 以内的非空原件。';
+      return;
+    }
+    const signal = inspection.signal;
+    try {
+      let pages = 1;
+      if (isPdf(file)) {
+        chosen.textContent = '正在本机核对 PDF 页数…';
+        const res = await fetch('/api/residents/' + encodeURIComponent(resident.id) + '/document-pages', {
+          method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: file, signal,
+        });
+        const info = await res.json();
+        if (!res.ok) throw Error(info.error || '无法核实 PDF 页数');
+        pages = info.pageCount;
       }
-    })
-  );
+      if (!signal.aborted) { inspected = { file, pages }; updateMethod(); }
+    } catch (error) {
+      if (!signal.aborted) chosen.textContent = error.message;
+    }
+  }
+  [pick, camera].forEach((input, i) => input.addEventListener('change', () => {
+    if (input.files[0]) [camera, pick][i].value = '';
+    inspect(pick.files[0] || camera.files[0]);
+  }));
   const err = node('div', 'form-error');
   err.setAttribute('role', 'alert');
   const submit = node('button', 'btn btn-primary', '确认原文并存档');
@@ -353,7 +374,7 @@ function newDocument(ctx, resident) {
       label('文书类型', kind, true),
       label('文书来源', source, true)
     ),
-    group('留存原件', label('选择原件照片', pick), label('使用相机拍照', camera), chosen),
+    group('留存原件', label('选择 PDF 或原件照片', pick), label('使用相机拍照', camera), chosen),
     group(
       '存档概括',
       label('文字来源', method, true),
@@ -361,7 +382,7 @@ function newDocument(ctx, resident) {
       label('原文事实与描述', description, true),
       label('待核实事项', pending)
     ),
-    node('p', 'fx-muted', '提交后保留原图与本次概括。仅手工病史补录可以省略照片。'),
+    node('p', 'fx-muted', '提交后保留原件与本次概括。手工补录病史时可省略原件。'),
     err,
     submit
   );
@@ -373,6 +394,8 @@ function newDocument(ctx, resident) {
     }
     consentField.hidden = !local;
     consent.required = local;
+    if (inspected) chosen.textContent = inspected.file.name + ' · ' + inspected.pages + ' 页'
+      + (local ? ' · 预计使用 ' + inspected.pages + ' 页 OCR 额度' : '');
     submit.textContent = local ? '留存原件并提交 DeepSeek OCR' : '确认原文并存档';
   };
   updateMethod();
@@ -390,8 +413,9 @@ function newDocument(ctx, resident) {
     try {
       const file = pick.files[0] || camera.files[0];
       if (!file && (kind.value !== '病史补录' || method.value !== '手工描述'))
-        throw new Error('请选择原件照片或拍照。');
-      if (file && file.size > 8 * 1024 * 1024) throw new Error('照片超过 8 MiB 上限。');
+        throw new Error('请选择 PDF、原件照片或拍照。');
+      if (file && inspected?.file !== file) throw new Error('请先完成原件页数核对。');
+      const pages = inspected?.pages;
       const payload = {
         residentId: resident.id,
         requestId: key,
@@ -404,7 +428,8 @@ function newDocument(ctx, resident) {
       };
       if (file) {
         payload.filename = file.name;
-        if (file.type) payload.mime = file.type;
+        if (isPdf(file)) payload.mime = 'application/pdf';
+        else if (file.type) payload.mime = file.type;
         payload.imageBase64 = await asBase64(file);
       }
       const imageHash =
@@ -424,7 +449,7 @@ function newDocument(ctx, resident) {
           ['来源', source.value],
           [
             '处理方式',
-            imageHash ? '先加密保存原图，随后将本页发送至 DeepSeek 识别。' : description.value,
+            imageHash ? '先加密保留完整原件，再发送至 DeepSeek 识别，预计使用 ' + pages + ' 页 OCR 额度。' : description.value,
           ],
         ],
         quiet: Boolean(imageHash),
@@ -440,7 +465,7 @@ function newDocument(ctx, resident) {
       submit.disabled = false;
     }
   });
-  ctx.detail('为' + resident.name + '存档医疗文书', form);
+  ctx.detail('为' + resident.name + '存档医疗文书', form).addEventListener('close', () => inspection?.abort(), { once: true });
 }
 
 function showDocument(ctx, doc) {
@@ -466,29 +491,8 @@ function showDocument(ctx, doc) {
   if (doc.reviewChanges && Object.keys(doc.reviewChanges).length)
     transcription.append(reviewReceipt(doc));
   view.append(sheet);
-  if (doc.hasImage) {
-    const image = node('img');
-    image.src = '/api/documents/' + encodeURIComponent(doc.id) + '/image';
-    image.alt = '归档原件 · ' + doc.category;
-    image.loading = 'lazy';
-    const original = node('a', 'btn btn-secondary', '打开原尺寸照片');
-    original.href = image.src;
-    original.target = '_blank';
-    original.rel = 'noopener noreferrer';
-    add(
-      sheet,
-      section(
-        '文书原件',
-        node('figure', 'fx-original', [
-          image,
-          node('figcaption', '', [
-            named(doc.filename, (doc.bytes / 1024).toFixed(0) + ' KiB'),
-            original
-          ])
-        ])
-      )
-    );
-  }
+  if (doc.hasImage) add(sheet, section('文书原件', originalViewer(doc).element));
+  if (doc.reviewedPages?.length) add(transcription, facts([['逐页核对', '已核对全部 ' + doc.reviewedPages.length + ' 页']]));
   ctx.detail('文书概括', view);
 }
 

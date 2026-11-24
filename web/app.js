@@ -449,6 +449,10 @@ function myPendingHandovers(data = state) {
   return data.handovers.filter((r) => r.status === '待签收' && r.assigneeId === data.user.id);
 }
 
+function myTrialFollowups() {
+  return (state.trialFollowups || []).filter(r => r.status === '待回访' && r.assigneeId === state.user.id);
+}
+
 function notices() {
   const list = el('div', 'notice-list');
   const items = [
@@ -501,6 +505,8 @@ function notices() {
   }
   if (permitted('care'))
     items.unshift(['待我签收的交班', myPendingHandovers().length, 'care', 'handover']);
+  if (myTrialFollowups().length)
+    items.unshift(['待我办理的试住回访', myTrialFollowups().length, 'residents', 'trials']);
   if (available('inbox')) {
     if (state.roundsNoticeCount)
       items.unshift(['今日巡查提醒', state.roundsNoticeCount, 'inbox', 'rounds']);
@@ -624,6 +630,7 @@ function masthead() {
     bell.setAttribute('aria-label', '待处理事项');
     if (
       hasNewNotice(context()) ||
+      myTrialFollowups().length ||
       state.supplyOrders?.some(row => row.assigneeId === state.user.id && row.status === '待执行') ||
       (available('inbox') && state.roundsNoticeCount > 0) ||
       (available('care') && myPendingHandovers().length) ||

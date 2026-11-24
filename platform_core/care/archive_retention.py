@@ -62,11 +62,26 @@ def clear_due(db, state, day, resident_id=None):
         for q in state["inquiries"]:
             if q.get("residentId") == rid or q["id"] == r.get("inquiryId"):
                 q.update(name="已到期档案", contact="", note="")
+        for task in state.get("trialFollowups", ()):
+            if task["residentId"] == rid:
+                task.pop("report", None)
+                task.pop("reason", None)
+                task["status"] = "归档到期"
         # Settlements, clinical originals and audit commits still refer to this ID.
         # Remove names, contact fields and all unrecognised mutable profile fields.
         historical = {
             k: r[k]
-            for k in ("id", "admittedAt", "dischargedAt", "endDate", "level")
+            for k in (
+                "id",
+                "admittedAt",
+                "dischargedAt",
+                "endDate",
+                "level",
+                "billingDay",
+                "formalizedAt",
+                "trialEndsAt",
+                "stayType",
+            )
             if k in r
         }
         r.clear()

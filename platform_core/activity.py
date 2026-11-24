@@ -28,6 +28,8 @@ def init(db):
 
 # Resolve audit context from the actual business target, never from unrelated form fields.
 RELATED = {
+    "care.reassignTrialFollowup": ("taskId", "trialFollowups"),
+    "care.finishTrialFollowup": ("taskId", "trialFollowups"),
     "care.approvePlan": ("planId", "plans"),
     "care.completeTask": ("taskId", "tasks"),
     "care.quality": ("taskId", "tasks"),
@@ -53,6 +55,8 @@ PERSON_ACTIONS = {
     "care.dateArchive",
     "ltci.record",
     "care.admit",
+    "care.confirmStay",
+    "care.endTrial",
     "care.transfer",
     "care.renew",
     "care.discharge",
@@ -105,7 +109,7 @@ def locate(db, data, action, payload, actor):
             }
     if action in RELATED:
         key, collection = RELATED[action]
-        target = next((r for r in data[collection] if r["id"] == payload.get(key)), {})
+        target = next((r for r in data.get(collection, ()) if r["id"] == payload.get(key)), {})
         return for_person(data, target.get("residentId"))
     if action in PERSON_ACTIONS or (
         action == "ops.suggest" and payload.get("category") == "日常照护"

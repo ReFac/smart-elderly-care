@@ -46,6 +46,8 @@ FIELDS = {
     "bills": (
         "id",
         "month",
+        "kind",
+        "trialPrice",
         "balance",
         "endDate",
         "amount",

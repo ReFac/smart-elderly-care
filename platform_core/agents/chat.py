@@ -204,7 +204,7 @@ def permitted_actions(user, routes, text, selected):
         + r"(?:打开|带我去|去|进入|跳转|定位|办理|创建|新建|登记|查看.{0,10}(?:界面|页面)|找.{0,10}(?:页面|界面))",
         text,
     ):
-        if "入住" in text and "床位" not in text:
+        if "入住" in text and "床位" not in text and "试住" not in text:
             return {"intake": "navigate"} if "intake" in routes else {}
         return {route: "navigate" for route in routes}
     return {}

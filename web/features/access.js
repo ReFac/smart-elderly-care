@@ -2,10 +2,12 @@ import { backupPanel } from './backups.js';
 import { roundsSettings } from './rounds-desk.js';
 import { passwordFlow } from './identity.js';
 import { openDossier } from './dossier.js';
+import { openEmployment } from './staff-employment.js';
 import { icon } from '../lib/ui.js';
 import { node, page, table, choose, btn, link, badge, named, section, facts, tabs } from './shared.js';
 import { routes } from '../lib/navigation.js';
 import { capabilitySummary, draftPreview, grantPicker } from './access-grants.js';
+import { trialSettings } from './trial-stays.js';
 
 function inputField(label, name, value = '', options = {}) {
   const control = node('input');
@@ -466,6 +468,7 @@ function accounts(ctx) {
           view: (r) =>
             node('div', 'access-account-roles', [
               node('span', r.kind === 'owner' ? 'access-role owner' : 'access-role', r.role),
+              r.payday ? node('small', 'fx-muted', '工资日：每月 ' + r.payday + ' 日') : null,
               r.kind === 'staff' && r.permissions.includes('staff.manage')
                 ? node('span', 'access-staff-manager', '受托管理')
                 : null,
@@ -501,6 +504,7 @@ function accounts(ctx) {
           view: (r) =>
             choose(
               r.kind === 'owner' ? null : link(ctx, '编辑', () => editAccount(ctx, r.kind, r)),
+              r.kind === 'staff' ? link(ctx, '合同与工资日', () => openEmployment(ctx, r)) : null,
 
               r.kind === 'owner'
                 ? null
@@ -615,6 +619,7 @@ function settings(ctx) {
     null,
     tabs('settings', [
       ['general', '界面与 AI 套餐', () => node('div', 'access-settings-grid', [appearance, deep])],
+      ['trials', '试住约定', () => trialSettings(ctx)],
       ['rounds', '定时巡查', () => roundsSettings(ctx)],
       ['backups', '备份与恢复', () => backupPanel(ctx)],
     ]),

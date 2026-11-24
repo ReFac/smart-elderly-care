@@ -25,42 +25,48 @@ import {
 import { chargesEditor, feeLedger, lineDescription } from './charge-lines.js';
 import { channelOrders, expensePanel, reminders } from './settlements.js';
 
-function generate(ctx) {
+function generate(ctx, selected) {
+  if (!ctx.state.allowedActions.includes('ops.bill')) return ctx.toast('当前账号无权核算账单');
+  const due = new Map((ctx.state.billingDue || []).map((r) => [r.residentId, r]));
+  const people = ctx.state.residents.filter((r) =>
+    r.admittedAt && r.stayType !== 'trial' && (!r.billingDay || due.has(r.id)));
+  if (!people.length) return ctx.toast('当前没有可核算的月付账期');
   const resident = select(
     'residentId',
     '长者',
-    ctx.state.residents.filter(r=>r.admittedAt).map((r) => ({
-      value: r.id,
-      label: r.name + ' · ' + r.status,
-    }))
+    people.map((r) => ({ value: r.id, label: r.name + ' · ' + r.status })),
   );
   const month = today(ctx).slice(0, 7);
-  const unbilled = ctx.state.residents.find(
+  const unbilled = people.find(
     (r) =>
       r.status === '在住' &&
-      !ctx.state.bills.some((b) => b.residentId === r.id && b.month === month)
+      !ctx.state.bills.some((b) => b.kind !== 'trial' && b.residentId === r.id && b.month === month)
   );
-  if (unbilled) resident.value = unbilled.id;
-  if (!ctx.state.allowedActions.includes('ops.bill')) return ctx.toast('当前账号无权核算账单');
+  resident.value = selected?.residentId || due.keys().next().value || unbilled?.id || people[0].id;
   const editor=chargesEditor(ctx);
-  ctx.dialog({
+  const schedule = node('p', 'fx-muted');
+  schedule.setAttribute('aria-live', 'polite');
+  const dialog = ctx.dialog({
     title:'核算月度账单',
-    content:editor.element,
+    content:node('div', 'fx-profile', [schedule, editor.element]),
     async onSubmit(values) {
       const payload=Object.fromEntries(Object.entries(values).filter(([,v])=>v!==''));
+      const cycle = due.get(payload.residentId);
+      if (cycle) Object.assign(payload, { month: cycle.month, billingDate: cycle.billingDate });
       payload.items=editor.read();
       const response=await fetch('/api/billing/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payload,revision:ctx.state.revision})});
       const quote=await response.json();
       if (!response.ok) throw new Error(quote.error||'无法核算');
       return ctx.command('ops.bill',payload,{title:'确认账单明细',target:residentName(ctx,payload.residentId)+' · '+quote.month,
-        fields:[...quote.lineItems.map(l=>[l.label,lineDescription(l)]),['应收合计',money(quote.amount)]]});
+        fields:[['账单日期',quote.billingDate || quote.month], ['计费区间',quote.startDate + ' 至 ' + quote.endDate],
+          ...quote.lineItems.map(l=>[l.label,lineDescription(l)]),['应收合计',money(quote.amount)]]});
     },
     description:
-      '已退住按退住日截断，在住按月末预估。留空的日费率和请假天数使用床位、照护等级及请假台账的默认值。',
+      '按长者约定的账期核算。日费率和请假天数留空时，使用相应床位、照护等级及请假记录。',
     submitLabel: '生成账单',
     fields: [
       resident,
-      field('month', '账期', {
+      field('month', '原自然月账期', {
         type: 'month',
         value: today(ctx).slice(0, 7),
         max: today(ctx).slice(0, 7),
@@ -94,6 +100,16 @@ function generate(ctx) {
       }),
     ],
   });
+  const form = dialog.querySelector('form');
+  function sync() {
+    const cycle = due.get(form.elements.residentId.value);
+    form.elements.month.closest('label').hidden = form.elements.month.disabled = Boolean(cycle);
+    schedule.textContent = cycle
+      ? '本次账单日 ' + cycle.billingDate + ' · 计费区间 ' + cycle.startDate + ' 至 ' + cycle.endDate
+      : '此档案沿用原自然月账期。请选择要核算的月份。';
+  }
+  form.elements.residentId.addEventListener('change', sync);
+  sync();
 }
 
 function deposit(ctx) {
@@ -138,23 +154,28 @@ function pay(ctx, bill) {
 }
 
 export function billDetail(ctx, bill) {
+  const trial = bill.kind === 'trial';
   const content = node('div', 'fx-profile', [
     facts([
       ['长者', residentName(ctx, bill.residentId)],
+      ['收费类型', trial ? '一次性试住费' : '月费'],
       ['账期', bill.month],
+      ...(bill.billingDate ? [['账单日期', bill.billingDate]] : []),
       ['计费区间', bill.startDate + ' 至 ' + bill.endDate],
-      ['计费天数', String(bill.serviceDays)],
-      ['期末等级快照', bill.careLevel],
-      ['期末床位日费', money(bill.bedFee)],
-      ['期末护理日费', money(bill.careFee)],
-      ['月度套餐', money(bill.packageFee)],
-      ['请假天数', String(bill.leaveDays)],
+      ...(!trial ? [
+        ['计费天数', String(bill.serviceDays)],
+        ['期末等级快照', bill.careLevel],
+        ['期末床位日费', money(bill.bedFee)],
+        ['期末护理日费', money(bill.careFee)],
+        ['月度套餐', money(bill.packageFee)],
+        ['请假天数', String(bill.leaveDays)],
+      ] : []),
       ['应收总额', money(bill.amount)],
       ['已收总额', money(bill.paid)],
       ['待缴余额', money(bill.balance)],
     ]),
     section('全部收费明细',feeLedger(bill)),
-    ...(bill.segments
+    ...(!trial && bill.segments
       ? [
           section(
             '分段计费依据',
@@ -235,7 +256,7 @@ export function billing(ctx) {
               },
               {
                 label: '账期',
-                view: (b) => b.month,
+                view: (b) => named(b.billingDate || b.month, b.kind === 'trial' ? '一次性试住费' : '月费'),
               },
               {
                 label: '应收金额',
@@ -257,6 +278,19 @@ export function billing(ctx) {
             ],
           }),
       ],
+      ['due', '待出月账单', () => table(ctx, {
+        title: '已到账单日的月付账期',
+        rows: ctx.state.billingDue || [],
+        empty: '当前没有已到期且尚未出账的约定月付账期。',
+        search: { placeholder: '搜索长者', value: (r) => residentName(ctx, r.residentId) },
+        cols: [
+          { label: '长者', view: (r) => residentName(ctx, r.residentId) },
+          { label: '本期账单日', view: (r) => r.billingDate },
+          { label: '计费区间', view: (r) => r.startDate + ' 至 ' + r.endDate },
+          { label: '操作', align: 'end', view: (r) => ctx.state.allowedActions.includes('ops.bill')
+            ? link(ctx, '核算本期', () => generate(ctx, r)) : null },
+        ],
+      })],
       ['orders', '渠道对账', () => channelOrders(ctx)],
       ['reminders', '欠费提醒', () => reminders(ctx)],
       ['expenses', '支出登记', () => expensePanel(ctx)],

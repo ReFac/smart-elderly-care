@@ -194,6 +194,10 @@ class ChatTests(unittest.TestCase):
     def test_how_to_links_to_real_pages_and_tabs_without_opening_a_form(self):
         cases = [
             ("在哪里办理老人入住？", "residents", "all"),
+            ("哪里办理试住？", "residents", "trials"),
+            ("我的试住回访入口在哪里？", "residents", "trials"),
+            ("试住默认价在哪里修改？", "settings", "trials"),
+            ("在哪里核算月付账单？", "billing", "due"),
             ("我想按平面图选床，该从哪里进入？", "beds", "plan"),
             ("我想查看机构的备份和恢复记录，入口在哪里？", "settings", "backups"),
             ("怎么进入长期护理保险的经办台账？", "longCare", None),

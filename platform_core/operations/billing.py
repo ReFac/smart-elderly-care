@@ -3,12 +3,12 @@
 from datetime import date
 from decimal import Decimal
 
-from .charges import invoice_lines
+from . import billing_cycles
+from .charges import invoice_lines, line
 from .records import (
     currency_amount,
     get_resident,
     lookup,
-    month_bounds,
     new_id,
     parse_day,
     whole_number,
@@ -53,7 +53,10 @@ def apply_deposit(state, account, today):
             for b in state["bills"]
             if b["residentId"] == account["residentId"] and b["balance"]
         ),
-        key=lambda b: b["month"],
+        key=lambda b: (
+            b.get("billingDate") or b.get("startDate") or b["month"],
+            b.get("kind") != "trial",
+        ),
     )
     for bill in debt:
         if not available:
@@ -106,24 +109,12 @@ def leave_dates(state, resident_id, begin, end):
 
 def quote_bill(state, payload, today):
     resident = get_resident(state, payload)
-    month = payload.get("month")
-    first, last = month_bounds(month, today)
-    if any(
-        b["residentId"] == resident["id"] and b["month"] == month
-        for b in state["bills"]
-    ):
-        raise ValueError("该长者本月已有账单")
-    if not resident.get("admittedAt"):
-        raise ValueError("该档案没有可计费的入住记录")
-    arrival = parse_day(resident["admittedAt"])
-    discharge = resident.get("dischargedAt")
-    if resident["status"] == "已退住" and not discharge:
-        raise ValueError("退住档案缺少退住日期")
-    begin = max(arrival, first)
-    end = min(parse_day(discharge), last) if discharge else last
+    cycle = billing_cycles.selected_period(resident, payload, today)
+    resident_bills = (b for b in state["bills"] if b["residentId"] == resident["id"])
+    if billing_cycles.billed(resident_bills, cycle):
+        raise ValueError("该长者本账期已有账单")
+    begin, end = parse_day(cycle["startDate"]), parse_day(cycle["endDate"])
     days = (end - begin).days + 1
-    if days < 1:
-        raise ValueError("该长者在此账期没有入住记录")
     parts, bed_total, care_total, leave = charge_segments(
         state, resident, payload, begin, end
     )
@@ -134,8 +125,8 @@ def quote_bill(state, payload, today):
         sum(Decimal(str(item["amount"])) for item in lines), "账单合计"
     )
     bill = dict(
-        residentId=resident["id"],
-        month=month,
+        **cycle,
+        kind="monthly",
         bedFee=last_part["bedFee"],
         careFee=last_part["careFee"],
         bedTotal=float(bed_total),
@@ -148,8 +139,6 @@ def quote_bill(state, payload, today):
         serviceDays=days,
         bedId=last_part["bedId"],
         careLevel=last_part["level"],
-        startDate=begin.isoformat(),
-        endDate=end.isoformat(),
         amount=float(amount),
         paid=0,
         balance=float(amount),
@@ -166,6 +155,35 @@ def generate_bill(state, payload, today):
     state["bills"].insert(0, bill)
     apply_deposit(state, get_account(state, resident["id"]), today)
     return f"生成{resident['name']} {bill['month']} 账单 ¥{bill['amount']:.2f}，待缴 ¥{bill['balance']:.2f}"
+
+
+def record_trial_fee(state, resident, today):
+    """Post the agreed package once, within the trial admission transaction."""
+    if any(
+        b["residentId"] == resident["id"] and b.get("kind") == "trial"
+        for b in state["bills"]
+    ):
+        raise ValueError("本次试住已登记一次性费用")
+    price = currency_amount(resident["trialPrice"], "一次性试住费用")
+    fee = float(price)
+    bill = dict(
+        id=new_id("bill"),
+        kind="trial",
+        residentId=resident["id"],
+        month=today[:7],
+        billingDate=today,
+        date=today,
+        startDate=resident["admittedAt"],
+        endDate=resident["trialEndsAt"],
+        trialPrice=fee,
+        amount=fee,
+        paid=0,
+        balance=fee,
+        status="待缴费" if fee else "已结清",
+        lineItems=[line("trial", "一次性试住费", "次", 1, price)],
+    )
+    state["bills"].insert(0, bill)
+    apply_deposit(state, get_account(state, resident["id"]), today)
 
 
 def charge_segments(state, resident, p, begin, end):

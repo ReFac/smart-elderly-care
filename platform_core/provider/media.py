@@ -129,9 +129,10 @@ def invoke(kind, raw, filename, mime, key):
         method="POST",
     )
     try:
+        limit = (32 if kind == "ocr" else 4) * 1024 * 1024
         with build_opener(NoRedirect()).open(req, timeout=185) as reply:
-            body = reply.read(4 * 1024 * 1024 + 1)
-        if len(body) > 4 * 1024 * 1024:
+            body = reply.read(limit + 1)
+        if len(body) > limit:
             raise MediaError("识别回复超过上限，请核对渠道用量", uncertain=True)
         obj = json.loads(body)
         if not isinstance(obj, dict):
@@ -207,12 +208,15 @@ def execute(
         digest = sha256(identity + raw).hexdigest()
         prior = db.execute(
             """SELECT id,state,result FROM media_usage WHERE kind=? AND fingerprint=?
-             AND state IN ('complete','pending','uncertain') ORDER BY rowid DESC LIMIT 1""",
+             AND (state IN ('complete','pending','uncertain') OR
+                  (kind='ocr' AND state='reconciled' AND charged>0)) ORDER BY rowid DESC LIMIT 1""",
             (kind, digest),
         ).fetchone()
         if prior:
             if prior["state"] == "complete":
                 return json.loads(prior["result"])
+            if prior["state"] == "reconciled":
+                raise ValueError("该原件已对账扣费，请按保留的原件人工核对")
             raise ValueError("识别正在处理或待平台核对，请稍后查看")
         plan = latest(db)
         day = local_time(now).date().isoformat()

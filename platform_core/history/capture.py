@@ -14,6 +14,8 @@ PREFIXES = {
         "institution_settings",
         "media_policy",
         "family_round_preferences",
+        "staff_contract_versions",
+        "staff_paydays",
     ),
     "family": ("family_round_",),
     "account": ("accounts",),

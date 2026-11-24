@@ -1,4 +1,5 @@
 import { btn, facts, hasGrant, node, section } from './shared.js';
+import { originalViewer } from './document-original.js';
 
 const fields = { summary: '病史摘要', allergies: '过敏史', risk: '高危要点' };
 const names = { name: '原件姓名', ...fields };
@@ -17,75 +18,50 @@ export async function reviewOcr(ctx, doc) {
   const resident = ctx.state.residents.find((r) => r.id === doc.residentId);
   const recognized = doc.ocr.state === 'recognized';
   const form = node('form', 'fx-profile fx-document');
-  const image = node('img');
-  image.src = '/api/documents/' + encodeURIComponent(doc.id) + '/image';
-  image.alt = doc.source + ' · ' + doc.category + '原件';
-  const original = node('a', 'btn btn-secondary', '放大原件');
-  original.href = image.src;
-  original.target = '_blank';
-  original.rel = 'noopener';
-  const svgNS = 'http://www.w3.org/2000/svg';
-  const canvas = document.createElementNS(svgNS, 'svg');
-  const paper = document.createElementNS(svgNS, 'image');
-  const marker = document.createElementNS(svgNS, 'rect');
-  canvas.setAttribute('width', '100%');
-  canvas.setAttribute('aria-label', '原件及所选识别行的位置');
-  marker.setAttribute('fill', '#ffd567');
-  marker.setAttribute('fill-opacity', '.30');
-  marker.setAttribute('stroke', '#946100');
-  marker.setAttribute('stroke-width', '3');
-  paper.setAttribute('href', image.src);
-  const layout = () => {
-    if (!image.naturalWidth) return;
-    canvas.setAttribute('viewBox', '0 0 ' + image.naturalWidth + ' ' + image.naturalHeight);
-    paper.setAttribute('width', image.naturalWidth);
-    paper.setAttribute('height', image.naturalHeight);
-  };
-  image.addEventListener('load', layout);
-  layout();
-  canvas.append(paper, marker);
-  const highlight = (line) => {
-    if (!line?.box) {
-      marker.removeAttribute('width');
-      return;
-    }
-    ['x', 'y', 'width', 'height'].forEach((k, i) => marker.setAttribute(k, line.box[i]));
-  };
-  const preview = node('figure', 'fx-original', [canvas, original]);
+  const totalPages = doc.pageCount || 1;
+  const checked = new Set();
+  const pageCheck = node('input');
+  pageCheck.type = 'checkbox';
+  const pageLabel = node('span');
+  const count = node('p', 'fx-muted');
   const lines = node('ol', 'fx-profile');
+  const provenance = node('p', 'fx-muted');
+  const byPage = new Map();
   for (const line of doc.ocr.lines) {
-    lines.append(
-      node('li', '', [
-        btn(ctx, line.text, () => highlight(line), 'text'),
-        node(
-          'small',
-          'fx-muted',
-          '  第 ' +
-            line.page +
-            ' 页 · 第 ' +
-            line.line +
-            ' 行' +
-            (line.confidence == null
-              ? ''
-              : ' · 置信度 ' +
-                line.confidence +
-                '%' +
-                (line.confidence < 80 ? ' · 请重点核对' : ''))
-        )
-      ])
-    );
+    if (!byPage.has(line.page)) byPage.set(line.page, []);
+    byPage.get(line.page).push(line);
   }
-  form.append(
-    node('div', 'fx-document-sheet', [
-      preview,
-      recognized
-        ? node('details', '', [
-            node('summary', '', '核对识别原文（' + doc.ocr.lines.length + ' 行）'),
-            lines
-          ])
-        : node('p', 'fx-muted', doc.ocr.error || '原件已保存，可按原图手工核对。')
-    ])
-  );
+  const issues = new Map((doc.ocr.pages || []).map(p => [p.page, p.state]));
+  function showPage(page) {
+    pageCheck.checked = checked.has(page);
+    pageLabel.textContent = '已核对原件第 ' + page + ' 页';
+    count.textContent = '已核对 ' + checked.size + ' / ' + totalPages + ' 页';
+    const state = issues.get(page);
+    provenance.textContent = state === 'partial' ? '本页识别内容不完整，请对照原件补录。'
+      : state === 'blank' ? '本页未识别到文字。' : '';
+    lines.replaceChildren(...(byPage.get(page) || []).map(line => node('li', '', [
+      btn(ctx, line.text, () => viewer.highlight(line), 'text'),
+      node('small', 'fx-muted', ' 第 ' + line.page + ' 页 · 第 ' + line.line + ' 行'
+        + (line.confidence == null ? '' : ' · 置信度 ' + line.confidence + '%'
+          + (line.confidence < 80 ? ' · 请重点核对' : ''))),
+    ])));
+  }
+  const viewer = originalViewer(doc, showPage);
+  const pageRecheck = node('label', 'access-check', [pageCheck, pageLabel]);
+  pageCheck.addEventListener('change', () => {
+    if (pageCheck.checked) checked.add(viewer.page);
+    else checked.delete(viewer.page);
+    showPage(viewer.page);
+  });
+  form.append(node('div', 'fx-document-sheet', [
+    viewer.element,
+    node('div', 'fx-profile', [
+      recognized ? node('details', '', [node('summary', '', '核对当前页识别原文'), lines])
+        : node('p', 'fx-muted', doc.ocr.error || '原件已保存，可以手工核对。'),
+      provenance,
+      totalPages > 1 ? pageRecheck : null, totalPages > 1 ? count : null,
+    ]),
+  ]));
   const identity = node('input');
   identity.required = true;
   identity.maxLength = 60;
@@ -144,14 +120,17 @@ export async function reviewOcr(ctx, doc) {
       const origin = node('select');
       origin.disabled = true;
       for (const c of candidates)
-        origin.add(new Option('第 1 页 · 第 ' + c.line + ' 行 · ' + c.value, String(c.line)));
-      origin.add(new Option('人工摘录原件', ''));
+        origin.add(new Option('第 ' + (c.page || 1) + ' 页 · 第 ' + c.line + ' 行 · ' + c.value, (c.page || 1) + ':' + c.line));
+      for (let page = 1; page <= totalPages; page++)
+        origin.add(new Option('人工摘录原件第 ' + page + ' 页', page + ':'));
       const setValue = () => {
-        value.value = candidates.find((c) => String(c.line) === origin.value)?.value || '';
+        value.value = candidates.find((c) => (c.page || 1) + ':' + c.line === origin.value)?.value || '';
       };
       origin.addEventListener('change', () => {
         setValue();
-        highlight(doc.ocr.lines.find((l) => String(l.line) === origin.value));
+        const [page, line] = origin.value.split(':');
+        viewer.selectPage(Number(page));
+        viewer.highlight((byPage.get(Number(page)) || []).find((l) => l.line === Number(line)));
       });
       setValue();
       check.addEventListener('change', () => {
@@ -186,6 +165,12 @@ export async function reviewOcr(ctx, doc) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (submit.disabled) return;
+    if (totalPages > 1 && checked.size !== totalPages) {
+      const missing = Array.from({ length: totalPages }, (_, i) => i + 1).find(p => !checked.has(p));
+      viewer.selectPage(missing);
+      pageCheck.focus();
+      return ctx.toast('请先核对原件的每一页。');
+    }
     submit.disabled = true;
     try {
       const changes = controls
@@ -194,7 +179,8 @@ export async function reviewOcr(ctx, doc) {
           field: c.key,
           previous: resident[c.key] || '',
           value: c.value.value,
-          line: c.origin.value ? Number(c.origin.value) : null
+          page: Number(c.origin.value.split(':')[0]),
+          line: Number(c.origin.value.split(':')[1]) || null
         }));
       await ctx.command('dossier.reviewDocument', {
         residentId: resident.id,
@@ -207,7 +193,8 @@ export async function reviewOcr(ctx, doc) {
             ? 'DeepSeek OCR 人工核对'
             : '院内 OCR 人工核对'
           : '手工描述',
-        changes
+        changes,
+        ...(totalPages > 1 ? { reviewedPages: [...checked].sort((a, b) => a - b) } : {}),
       });
     } finally {
       submit.disabled = false;
@@ -245,10 +232,7 @@ export function pendingDocument(ctx, doc) {
     ])
   ]);
   if (doc.ocr.error) body.append(node('p', 'fx-muted', doc.ocr.error));
-  const image = node('img');
-  image.src = '/api/documents/' + doc.id + '/image';
-  image.alt = '已归档原件';
-  body.append(node('figure', 'fx-original', image));
+  body.append(originalViewer(doc).element);
   if (hasGrant(ctx, 'medical.write') && ctx.state.residents.some(r=>r.id===doc.residentId && r.status==='在住')) {
     if (['queued', 'failed'].includes(doc.ocr.state))
       body.append(
@@ -258,11 +242,11 @@ export function pendingDocument(ctx, doc) {
           () =>
             ctx.dialog({
               title: '确认发送文书原件',
-              description: '这张照片将提交 DeepSeek OCR，并按成功识别页数使用机构额度。',
+              description: '此原件共 ' + (doc.pageCount || 1) + ' 页，预计使用 ' + (doc.pageCount || 1) + ' 页 OCR 额度。',
               fields: [],
               submitLabel: '确认并发送',
               onSubmit: async () => {
-                await recognizeDocument(ctx, doc.residentId, { documentId: doc.id });
+                await recognizeDocument(ctx, doc.residentId, { documentId: doc.id }, true);
                 return true;
               }
             }),
@@ -289,7 +273,7 @@ export function reviewReceipt(doc) {
           ' → ' +
           entry.after +
           ' · ' +
-          (entry.line ? '原件第 1 页第 ' + entry.line + ' 行' : '人工摘录原件')
+          (entry.line ? '原件第 ' + (entry.page || 1) + ' 页第 ' + entry.line + ' 行' : '人工摘录原件第 ' + (entry.page || 1) + ' 页')
       ])
     )
   );

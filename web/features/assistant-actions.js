@@ -17,6 +17,8 @@ export const quickDestinations = [
     route: 'beds',
     tab: 'plan',
   },
+  { label: '试住管理', words: '办理试住 试住转正式 试住回访', route: 'residents', tab: 'trials' },
+  { label: '待出月账单', words: '月付账单 核算月费 账单日', route: 'billing', tab: 'due' },
   { label: '护理用具库存', words: '护理用品 物资情况 仓库盘点', route: 'inventory', tab: 'stock' },
   { label: '护理用具工单', words: '物资工单 物资任务 补货', route: 'inventory', tab: 'orders' },
 ];

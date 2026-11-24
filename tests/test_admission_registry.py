@@ -123,6 +123,24 @@ class AdmissionRegistryTests(unittest.TestCase):
                 db.execute("SELECT revision FROM workspace").fetchone()[0], before + 1
             )
 
+    def test_early_trial_conversion_keeps_financial_start_after_archive_expiry(self):
+        from platform_core.operations.billing_cycles import monthly_start
+
+        rid = self.register()
+        bed = next(b["id"] for b in self.current()["beds"] if not b["residentId"])
+        self.write("care.admit", residentId=rid, bedId=bed, stayType="trial", trialPrice=100)
+        self.write("care.confirmStay", residentId=rid)
+        self.now += timedelta(days=6)
+        self.token, _ = self.store.login("owner", "fixture-register-only")
+        self.write("care.discharge", residentId=rid)
+        self.now += timedelta(days=365)
+        archive_retention.maintain(self.store)
+        with closing(self.store.connect()) as db:
+            state = json.loads(db.execute("SELECT data FROM workspace").fetchone()[0])
+        person = next(row for row in state["residents"] if row["id"] == rid)
+        self.assertEqual(person["status"], "归档到期")
+        self.assertEqual(monthly_start(person), "2026-11-26")
+
     def test_scoped_new_files_are_only_visible_to_the_registering_campus(self):
         self.write("facility.addCampus", name="第二分院")
         east = self.current()["campusOptions"][-1]["id"]

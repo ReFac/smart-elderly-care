@@ -8,6 +8,8 @@ from decimal import Decimal
 DOMAINS = {
     "care.register": "档案与床位",
     "care.admit": "档案与床位",
+    "care.confirmStay": "档案与床位",
+    "care.endTrial": "原件归档",
     "care.transfer": "档案与床位",
     "care.discharge": "原件归档",
     "dossier.profile": "档案填写",

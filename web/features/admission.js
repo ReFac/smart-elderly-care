@@ -9,12 +9,55 @@ import {
   table,
   today,
   canAct,
+  money,
 } from './shared.js';
 import { profile } from './residency.js';
+import { trialLength, trialLastDay, trialTermFields } from './trial-terms.js';
 
 const statuses = { 未入住: '未入住', 在住: '在住', 已退住: '归档老人' };
-export const statusLabel = (row) => statuses[row.status] || row.status;
+export const isTrial = (row) => row.status === '在住' && row.stayType === 'trial';
+export const statusLabel = (row) => isTrial(row) ? '试住中' : statuses[row.status] || row.status;
 const archived = (row) => row.status === '已退住';
+
+const stayTypes = [
+  { value: 'formal', label: '正式入住' },
+  { value: 'trial', label: '试住' },
+];
+
+export function contractFields(day, endDate = '') {
+  return [
+    select('contractTerm', '合同期限', [
+      { value: 'open', label: '无期限' },
+      { value: 'fixed', label: '固定期限' },
+    ], { value: endDate ? 'fixed' : 'open' }),
+    field('endDate', '合同到期日', { type: 'date', min: day, value: endDate }),
+  ];
+}
+
+export function bindContractFields(dialog) {
+  const { contractTerm, endDate } = dialog.querySelector('form').elements;
+  const update = () => {
+    const fixed = contractTerm.value === 'fixed';
+    endDate.disabled = !fixed;
+    endDate.required = fixed;
+    endDate.closest('label').hidden = !fixed;
+  };
+  contractTerm.addEventListener('change', update);
+  update();
+}
+
+export const billingSchedule = (resident) => resident.billingDay
+  ? '月付 · 每月 ' + resident.billingDay + ' 日'
+  : '月付 · 原自然月账期';
+
+export function monthlyDayField(day, defaultDay, eventName) {
+  const anchor = Number(day.slice(-2));
+  return select('billingDay', '月付账单日',
+    Array.from({ length: 31 }, (_, i) => ({
+      value: String(i + 1),
+      label: '每月 ' + (i + 1) + ' 日' + (i + 1 === anchor ? '（' + eventName + '）' : ''),
+    })), { value: String(defaultDay || anchor) });
+}
 
 export function register(ctx, inquiry) {
   const notify = node('div', 'admission-match');
@@ -113,9 +156,9 @@ function bedLabel(ctx, id) {
   return bed ? [...(place || [bed.ward]), bed.label].filter(Boolean).join(' / ') : '—';
 }
 
-export function allocate(ctx, person, targetBed) {
+export function allocate(ctx, person, targetBed, stayType = 'formal') {
   if (!person) {
-    ctx.detail('选择长者档案', registry(ctx, { bed: targetBed }));
+    ctx.detail('选择长者档案', registry(ctx, { bed: targetBed, stayType }));
     return;
   }
   if (archived(person)) {
@@ -129,13 +172,14 @@ export function allocate(ctx, person, targetBed) {
     return;
   }
   const action = transfer ? 'care.transfer' : 'care.admit';
-  ctx.dialog({
+  const day = today(ctx);
+  const dialog = ctx.dialog({
     title: transfer ? '转移床位' : '从档案办理入住',
     description:
       person.name +
       ' · 档案 ' +
       person.id +
-      (transfer ? ' · 当前床位 ' + bedLabel(ctx, person.bedId) : ''),
+      (transfer ? ' · 当前床位 ' + bedLabel(ctx, person.bedId) : ' · 入住日期 ' + day),
     fields: [
       select(
         'bedId',
@@ -145,18 +189,26 @@ export function allocate(ctx, person, targetBed) {
       ),
       ...(!transfer
         ? [
+            select('stayType', '入住方式', stayTypes, { value: stayType }),
             select('level', '照护等级', options(['自理', '半失能', '失能']), {
               value: person.level,
             }),
-            field('endDate', '合同到期日', { type: 'date', min: today(ctx), required: false }),
+            ...trialTermFields(ctx.state.trialSettings),
+            monthlyDayField(day, null, '入住日'),
+            ...contractFields(day),
           ]
         : []),
     ],
     submitLabel: transfer ? '核对转床' : '核对入住',
     onSubmit: (values) => {
-      const payload = { residentId: person.id, ...values };
+      const { contractTerm, ...terms } = values;
+      const payload = { residentId: person.id, ...terms };
       if (transfer) payload.fromBedId = person.bedId;
-      if (!values.endDate) delete payload.endDate;
+      else if (payload.stayType === 'trial') {
+        payload.trialDays = Number(values.trialDays);
+        payload.trialPrice = Number(values.trialPrice);
+      } else payload.billingDay = Number(values.billingDay);
+      if (contractTerm !== 'fixed') delete payload.endDate;
       const fields = transfer
         ? [
             ['原床位', bedLabel(ctx, person.bedId)],
@@ -165,21 +217,50 @@ export function allocate(ctx, person, targetBed) {
           ]
         : [
             ['长者档案', person.name + ' · ' + person.id],
+            ['入住方式', payload.stayType === 'trial' ? '试住' : '正式入住'],
             ['入住床位', bedLabel(ctx, payload.bedId)],
             ['照护等级', payload.level],
-            ['合同到期', payload.endDate || '入住日起 365 天'],
+            ...(payload.stayType === 'trial'
+              ? [
+                ['约定试住', trialLength(payload.trialDays) + ' · 至 ' + trialLastDay(day, payload.trialDays)],
+                ['一次性试住费', money(payload.trialPrice)],
+              ]
+              : [['收费约定', billingSchedule(payload)], ['合同期限', payload.endDate || '无期限']]),
           ];
       return ctx.command(action, payload, {
         title: transfer ? '确认将' + person.name + '从原床位转至新床位？' : '确认从档案办理入住',
         target: person.name,
         fields,
-        confirmLabel: transfer ? '确认转床' : '确认入住',
+        confirmLabel: transfer ? '确认转床' : payload.stayType === 'trial' ? '确认试住' : '确认入住',
       });
     },
   });
+  if (!transfer) {
+    bindContractFields(dialog);
+    const form = dialog.querySelector('form');
+    const controls = form.elements;
+    const hint = node('small', 'fx-muted', '遇短月时按当月最后一天出账。');
+    controls.billingDay.closest('label').append(hint);
+    const dates = node('small', 'fx-muted');
+    dates.setAttribute('aria-live', 'polite');
+    controls.trialDays.closest('label').append(dates);
+    const sync = () => {
+      const trial = controls.stayType.value === 'trial';
+      for (const input of [controls.trialDays, controls.trialPrice])
+        input.closest('label').hidden = input.disabled = !trial;
+      for (const input of [controls.billingDay, controls.contractTerm, controls.endDate]) {
+        const hidden = trial || (input === controls.endDate && controls.contractTerm.value !== 'fixed');
+        input.closest('label').hidden = input.disabled = hidden;
+      }
+      dates.textContent = '预计试住结束日 ' + trialLastDay(day, controls.trialDays.value);
+    };
+    controls.stayType.addEventListener('change', sync);
+    controls.trialDays.addEventListener('change', sync);
+    sync();
+  }
 }
 
-export function registry(ctx, { bed = null } = {}) {
+export function registry(ctx, { bed = null, stayType = 'formal' } = {}) {
   const panel = node('div', 'admission-registry');
   const search = node('input', 'fx-input');
   search.type = 'search';
@@ -230,8 +311,8 @@ export function registry(ctx, { bed = null } = {}) {
                 !archived(r) && canAct(ctx, r.status === '在住' ? 'care.transfer' : 'care.admit')
                   ? btn(
                       ctx,
-                      r.status === '在住' ? '转床' : '办理入住',
-                      () => allocate(ctx, r, bed),
+                      r.status === '在住' ? '转床' : stayType === 'trial' ? '办理试住' : '办理入住',
+                      () => allocate(ctx, r, bed, stayType),
                       'ghost'
                     )
                   : null,

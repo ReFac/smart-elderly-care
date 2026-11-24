@@ -1,4 +1,5 @@
 import { groups } from '../lib/navigation.js';
+import { openEmployment } from './staff-employment.js';
 import { bindFlow, passwordFlow } from './identity.js';
 import { canAct, node, page } from './shared.js';
 
@@ -31,6 +32,8 @@ function identity(ctx) {
   if (canAct(ctx, passwordAction))
     card.append(ctx.ui.button('修改密码', () => passwordFlow({username:user.username, locked:true}), 'secondary', 'shield'));
   card.append(ctx.ui.button('验证联系方式',()=>bindFlow(ctx),'secondary'));
+  if (user.kind === 'staff')
+    card.append(ctx.ui.button('我的劳动合同与工资日', () => openEmployment(ctx, user), 'secondary'));
   const channels=(ctx.state.identityContacts||[]).map(c=>c.masked+(c.verified?'（已核实）':'（待激活）'));
   card.querySelector('dl').append(node('div','',[node('dt','','恢复方式'),node('dd','',channels.join('、')||'待绑定')]));
   return card;

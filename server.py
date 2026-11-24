@@ -14,6 +14,7 @@ from platform_core.secure_storage import OPERATIONAL_ERRORS
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from platform_core.agents import chat
+from platform_core.operations import expense_import
 from platform_core.backups import exchange
 from platform_core import access, facility
 from platform_core.provider import round_priorities
@@ -35,12 +36,14 @@ class Handler(BaseHTTPRequestHandler):
         # Do not include staff names or room filters from the query string in access logs.
         self.log_message("%s %s %s", self.command, self.path.partition("?")[0], code)
 
-    def respond(self, status, content, mime, cookie=None):
+    def respond(self, status, content, mime, cookie=None, *, attachment=None):
         self.send_response(status)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        if attachment:
+            self.send_header("Content-Disposition", f'attachment; filename="{attachment}"')
         self.send_header("Referrer-Policy", "no-referrer")
         media = " ".join(facility.media_origins())
         self.send_header(
@@ -136,6 +139,10 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def read_resource(self, path):
+        expense_file = re.fullmatch(r"/api/finance/expense-import/files/([a-f0-9]{64})", path)
+        if expense_file:
+            raw = expense_import.original(self.store, self.token(), expense_file[1])
+            return self.respond(200, raw, "application/octet-stream")
         if path == "/api/assistant/chat":
             values = parse_qs(urlsplit(self.path).query, max_num_fields=4)
             if set(values) - {"roomId", "floorId", "buildingId", "campusId"} or any(
@@ -233,6 +240,11 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/facility":
             return self.send_json(200, self.store.facility_resource(token, "directory"))
+        if path == "/api/care/trial-assignees":
+            query = parse_qs(urlsplit(self.path).query, max_num_fields=1)
+            if set(query) != {"residentId"}:
+                raise ValueError("请选择试住长者档案")
+            return self.send_json(200, self.store.trial_assignees(token, query["residentId"][0]))
         if path == "/api/care/handover-recipients":
             return self.send_json(200, self.store.handover_recipients(token))
         if path == "/api/care/handover-draft":
@@ -359,6 +371,14 @@ class Handler(BaseHTTPRequestHandler):
         match = re.fullmatch(r"/api/integrations/([a-zA-Z0-9._-]+)", path)
         if match:
             return self.send_json(200, self.store.capabilities(token, match[1]))
+        match = re.fullmatch(r"/api/staff/([a-zA-Z0-9_-]+)/employment(?:/([a-zA-Z0-9_-]+)/original)?", path)
+        if match:
+            from platform_core import staff_employment
+
+            result = staff_employment.read(self.store, token, match[1], match[2])
+            if match[2]:
+                return self.respond(200, *result)
+            return self.send_json(200, result)
         match = re.fullmatch(r"/api/documents/([a-zA-Z0-9_-]+)/ocr", path)
         if match:
             return self.send_json(200, self.store.document_ocr_detail(token, match[1]))
@@ -374,10 +394,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(
                 200, self.store.report_version(token, match[1], int(match[2]))
             )
+        match = re.fullmatch(r"/api/documents/([a-zA-Z0-9_-]+)/pages/([1-9][0-9]{0,3})", path)
+        if match:
+            from platform_core import pdf_original
+
+            original, mime = self.store.photo(token, match[1])
+            if mime != "application/pdf":
+                raise ValueError("请选择 PDF 原件")
+            return self.respond(200, pdf_original.render_page(original, int(match[2])), "image/png")
         match = re.fullmatch(r"/api/documents/([a-zA-Z0-9_-]+)/image", path)
         if match:
             image, mime = self.store.photo(token, match[1])
-            return self.respond(200, image, mime)
+            return self.respond(200, image, mime, attachment="document.pdf" if mime == "application/pdf" else None)
         target = (WEB / (path.lstrip("/") or "index.html")).resolve()
         if (
             not target.is_relative_to(WEB)
@@ -396,6 +424,13 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, image, mime)
 
     def write_resource(self, path):
+        inspection = re.fullmatch(r"/api/residents/([a-zA-Z0-9_-]+)/document-pages", path)
+        if inspection:
+            if self.headers.get_content_type() != "application/pdf":
+                raise InvalidMedia("请选择 PDF 原件")
+            return self.send_json(200, self.store.inspect_pdf(
+                self.token(), inspection[1], self.read_body(8 * 1024 * 1024)
+            ))
         if path == "/api/assistant/network/probe":
             from platform_core.agents import network
 
@@ -422,6 +457,10 @@ class Handler(BaseHTTPRequestHandler):
                     self.token(), body.get("payload"), body.get("revision")
                 ),
             )
+        if path == "/api/finance/expense-import/preview":
+            return self.send_json(200, expense_import.preview(
+                self.store, self.token(), self.read_json(2 * expense_import.FILE_LIMIT)
+            ))
         if path in ("/api/auth/code", "/api/auth/verify"):
             from platform_core import identity
 
@@ -686,7 +725,7 @@ class Handler(BaseHTTPRequestHandler):
             ):
                 raise ValueError("请登记本人激活账号的验证渠道；登录密码由账号本人设置")
             if (
-                body.get("action") != "dossier.document"
+                body.get("action") not in ("dossier.document", "access.staffContract")
                 and int(self.headers["Content-Length"]) > SMALL_BODY
             ):
                 raise ValueError("普通表单上限为 64 KiB")

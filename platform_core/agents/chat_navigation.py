@@ -35,6 +35,7 @@ PAGES = (
         "intake",
     ),
     Page("residents", "到期续住", ("续住", "续签入住"), "renew", "intake"),
+    Page("residents", "试住管理", ("试住", "试住入住", "试住回访", "试住转正式"), "trials"),
     Page("beds", "床位管理", ("病房管理", "床位")),
     Page("beds", "全部床位", ("床位列表", "床位名册"), "all"),
     Page("beds", "楼层平面图", ("平面图", "房间工作台"), "plan"),
@@ -58,6 +59,7 @@ PAGES = (
     Page("inventory", "出入库流水", ("物资流水",), "moves"),
     Page("billing", "财务结算", ("费用结算", "收费管理")),
     Page("billing", "收费账单", ("收费明细", "账单明细"), "bills"),
+    Page("billing", "待出月账单", ("月付账单", "待出月付账单"), "due"),
     Page("billing", "渠道对账", ("支付对账",), "orders"),
     Page("billing", "欠费提醒", ("催缴提醒",), "reminders"),
     Page("billing", "支出登记", ("费用支出",), "expenses"),
@@ -83,6 +85,7 @@ PAGES = (
     Page("settings", "机构设置", ("系统设置",)),
     Page("settings", "界面与 AI 套餐", ("AI 套餐", "界面设置"), "general"),
     Page("settings", "定时巡查", ("巡查设置",), "rounds"),
+    Page("settings", "试住约定", ("试住设置", "试住默认价", "试住默认天数"), "trials"),
     Page("settings", "备份与恢复", ("备份", "快照", "恢复备份"), "backups"),
     Page("account", "个人中心", ("我的账户", "我的账号")),
     Page("tour", "环境导览", ("院内环境", "养老院环境", "院区环境", "全景导览")),
@@ -90,7 +93,7 @@ PAGES = (
 )
 
 WAYFINDING = re.compile(
-    r"入口|页面|界面|模块|菜单|页签|工作台|哪里|哪儿|在哪|何处|怎么|如何|打开|点开|前往|进入|进去|跳转|带我去|办理入住"
+    r"入口|页面|界面|模块|菜单|页签|工作台|哪里|哪儿|在哪|何处|怎么|如何|打开|点开|前往|进入|进去|跳转|带我去|办理入住|办理试住"
 )
 RECOMMENDATION = re.compile(
     r"点击|点开|进入|打开|前往|跳转|切换|选择|找到|访问|查看|参看|核对|可在|可以在|请在|入口|页签|菜单|页面|界面|左侧|侧栏|侧边栏|右上角|导航栏|下方"
@@ -122,6 +125,7 @@ def directory(pages):
     names = {p.route: p.title for p in pages if not p.tab}
     content = {title: [] for title in names.values()}
     notes = {
+        ("residents", "trials"): "试住管理（可选择档案办理试住、转正式，或结束试住并安排回访；指定员工在此填写报告）",
         (
             "longCare",
             "",
