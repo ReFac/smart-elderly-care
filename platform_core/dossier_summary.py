@@ -15,6 +15,9 @@ def excerpt(value, size=220):
 
 
 def summary_draft(db, state, user, resident_id):
+    from .care.archive_retention import require_ai_eligible
+
+    require_ai_eligible(state, resident_id)
     access.require(user, "medical")
     access.require(user, "clinical")
     resident = lookup(state, "residents", resident_id)

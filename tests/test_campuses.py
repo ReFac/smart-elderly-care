@@ -36,8 +36,9 @@ class CampusTests(unittest.TestCase):
             bedCount=1,
         )
         self.east_bed = self.store.snapshot(self.owner)["data"]["beds"][-1]["id"]
-        self.cmd(self.owner, "care.admit", bedId=self.east_bed, name="分院长者")
+        self.cmd(self.owner, "care.register", campusId=self.east, name="分院长者")
         self.rid = self.store.snapshot(self.owner)["data"]["residents"][-1]["id"]
+        self.cmd(self.owner, "care.admit", bedId=self.east_bed, residentId=self.rid)
         self.staff, self.employee = self.create("east-nurse", self.east)
         self.main = facility.HOME_CAMPUS
 

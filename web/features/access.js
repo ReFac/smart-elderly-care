@@ -1,5 +1,7 @@
 import { backupPanel } from './backups.js';
 import { roundsSettings } from './rounds-desk.js';
+import { passwordFlow } from './identity.js';
+import { openDossier } from './dossier.js';
 import { icon } from '../lib/ui.js';
 import { node, page, table, choose, btn, link, badge, named, section, facts, tabs } from './shared.js';
 import { routes } from '../lib/navigation.js';
@@ -160,9 +162,11 @@ export function loginScreen(onLogin, branding = {}) {
   });
   const help = node('p', 'access-login-help', [
     icon('info', 16),
-    node('span', '', '使用机构分配的账号。忘记密码可联系账号管理员重设。'),
+    node('span', '', '账号使用已登记的邮箱或手机验证身份。'),
   ]);
-  panel.append(form, help);
+  const recover = node('button','btn btn-ghost','首次设置 / 找回密码');
+  recover.type='button'; recover.onclick=()=>passwordFlow({username:name.value.trim()});
+  panel.append(form, recover, help);
   entry.append(panel);
   main.append(hero, entry);
   return main;
@@ -175,7 +179,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
   const [nameRow, name] = inputField('姓名', 'displayName', target?.displayName || '', { max: 60 });
   const identity = node('div', 'access-field-pair', nameRow);
   form.append(identity);
-  let username, password, resident, familyServices, portalIdentity;
+  let username, inviteChannel, inviteAddress, duties, resident, familyServices, portalIdentity;
   const scopeControls = new Map();
   if (!target) {
     let row;
@@ -187,14 +191,18 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
     });
     username.pattern = '[A-Za-z0-9][A-Za-z0-9_.\\-]{2,39}';
     identity.append(row);
-    [row, password] = inputField('初始密码', 'password', '', {
-      type: 'password',
-      min: 10,
-      autocomplete: 'new-password',
-      placeholder: '至少 10 个字符',
-    });
-    form.append(row);
-  } else
+  }
+  if (!target || target.activationPending) {
+    let row,channelRow;
+    [channelRow, inviteChannel] = selectField('本人验证渠道', [['email','邮箱'],['sms','手机']]);
+    [row, inviteAddress] = inputField('激活联系方式','destination','',{type:'email',max:254});
+    inviteAddress.required = !target;
+    if(target) inviteAddress.placeholder='如需更正首次邀请，请填写新地址';
+    const adapt = () => {inviteAddress.type=inviteChannel.value==='email'?'email':'tel';};
+    inviteChannel.onchange=adapt;
+    form.append(channelRow,row,node('p','fx-muted','请本人核对联系方式。创建后，由本人在登录页接收验证码并设置密码。未接通的渠道须待机构完成配置后使用。'));
+  }
+  if(target)
     identity.append(
       node('div', 'access-fixed-login', [
         node('span', '', '登录名'),
@@ -277,9 +285,11 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       target?.permissions || state.rolePresets[preset] || [],
     );
     role.addEventListener('change', () => grants.write(state.rolePresets[role.value] || []));
+    duties = checkboxes(state.accessManagement.staffDuties.map(v=>[v,v]),target?.staffDuties||[]);
     form.append(
       roleRow,
       campusRow,
+      section('岗位职责', duties.element),
       section('授权项目', grants.element),
       draftPreview(ctx, form, () => ({
         ...(target ? { id: target.id } : {}),
@@ -292,10 +302,13 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
   }
   saveForm(form, target ? '保存变更' : '创建账号', () => {
     const payload = { displayName: name.value };
-    if (target) payload.id = target.id;
-    else Object.assign(payload, { kind, username: username.value, password: password.value });
+    if (target) {
+      payload.id = target.id;
+      if(target.activationPending && inviteAddress.value.trim()) payload.invitation={channel:inviteChannel.value,destination:inviteAddress.value.trim()};
+    }
+    else Object.assign(payload, { kind, username: username.value, invitation:{channel:inviteChannel.value,destination:inviteAddress.value.trim()} });
     if (!family)
-      Object.assign(payload, { role: role.value, permissions: grants.read(), campusId: campus.value });
+      Object.assign(payload, { staffDuties:duties.read(), role: role.value, permissions: grants.read(), campusId: campus.value });
     else {
       payload.familyServices = familyServices.checked;
       payload.portalScopes = [...scopeControls]
@@ -311,27 +324,6 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
   });
   const dialog = ctx.detail(target ? '编辑账号' : family ? '绑定亲属账号' : '新增员工账号', form);
   if (target) dialog.dataset.managedAccountId = target.id;
-}
-
-function resetPassword(ctx, row) {
-  const fields = [];
-  if (row.kind === 'owner')
-    fields.push({ name: 'currentPassword', label: '当前密码', type: 'password', required: true });
-  fields.push({
-    name: 'password',
-    label: '新密码（10–128 个字符）',
-    type: 'password',
-    required: true,
-    maxLength: 128,
-  });
-  const dialog = ctx.dialog({
-    title: '重设 ' + row.username + ' 的密码',
-    description: '保存后该账号在各端的旧会话会立即结束。',
-    fields,
-    submitLabel: '重设密码',
-    onSubmit: (values) => ctx.command('access.password', { id: row.id, ...values }),
-  });
-  dialog.dataset.managedAccountId = row.id;
 }
 
 function status(ctx, row) {
@@ -393,7 +385,8 @@ function roleTemplates(ctx) {
 function accounts(ctx) {
   const state = ctx.state;
   const isOwner = state.accessManagement.scope === 'institution';
-  const kinds = { owner: '总管理员', staff: '员工', family: '亲属' };
+  const identityLabel = r => r.kind==='family' ? (r.portalSelf?'入住长者':'亲属') : (r.kind==='owner'?'总管理员':'员工');
+  const boundPerson = r => state.residents.find(p=>p.id===r.residentId);
   function showPermissions(account) {
     const grants =
       account.kind === 'staff'
@@ -432,6 +425,8 @@ function accounts(ctx) {
             ['医嘱与给药', account.portalScopes.includes('medication') ? '可查阅' : '未开通查阅'],
           ])
         : null,
+      account.kind==='staff' ? facts([['岗位职责',account.staffDuties.join('、') || '待登记']]) : null,
+      account.kind==='family' && boundPerson(account) && ctx.available('dossier') ? link(ctx,'查看绑定长者档案',()=>openDossier(ctx,boundPerson(account))) : null,
       capabilitySummary(ctx, account),
       grants,
     ]);
@@ -455,14 +450,14 @@ function accounts(ctx) {
       rows: state.accounts,
       empty: '没有符合条件的账号',
       search: {
-        placeholder: '搜索姓名、岗位或账号',
-        value: (r) => [r.displayName, r.username, r.role].join(' '),
+        placeholder: '搜索姓名、登录名、职责或绑定长者',
+        value: (r) => [r.displayName, r.username, r.role, ...(r.staffDuties||[]), boundPerson(r)?.name].join(' '),
       },
       filter: {
         label: '账号筛选',
         all: '全部账号',
-        options: [...(isOwner ? Object.values(kinds) : []), '已启用', '已停用'],
-        matches: (r, key) => kinds[r.kind] === key || (r.enabled ? '已启用' : '已停用') === key,
+        options: [...(isOwner ? ['总管理员','员工','入住长者','亲属'] : []), '已启用', '已停用', '待激活'],
+        matches: (r, key) => identityLabel(r) === key || (key==='待激活' && r.activationPending && r.enabled) || (r.enabled ? '已启用' : '已停用') === key,
       },
       cols: [
         { label: '姓名 / 登录名', view: (r) => named(r.displayName, r.username) },
@@ -480,7 +475,7 @@ function accounts(ctx) {
           label: '工作分院',
           view: (row) =>
             row.kind === 'family'
-              ? '随绑定长者'
+              ? (boundPerson(row)?.name || '随绑定长者')
               : (state.campusOptions || []).find((c) => c.id === row.facilityScope?.campusIds?.[0])?.name || '全机构',
         },
         {
@@ -491,14 +486,14 @@ function accounts(ctx) {
               r.kind === 'owner'
                 ? '全部权限'
                 : r.kind === 'family'
-                  ? '亲属权限'
+                  ? '门户权限'
                   : r.permissions.length + ' 项授权',
               () => showPermissions(r),
             ),
         },
         {
           label: '状态',
-          view: (r) => badge(ctx, r.enabled ? '已启用' : '已停用', r.enabled ? 'green' : 'neutral'),
+          view: (r) => badge(ctx, !r.enabled ? '已停用' : r.activationPending ? '待激活':'已启用', r.enabled ? (r.activationPending?'amber':'green') : 'neutral'),
         },
         {
           label: '操作',
@@ -506,7 +501,7 @@ function accounts(ctx) {
           view: (r) =>
             choose(
               r.kind === 'owner' ? null : link(ctx, '编辑', () => editAccount(ctx, r.kind, r)),
-              link(ctx, '重设密码', () => resetPassword(ctx, r)),
+
               r.kind === 'owner'
                 ? null
                 : link(ctx, r.enabled ? '停用' : '恢复', () => status(ctx, r)),
@@ -551,7 +546,7 @@ function settings(ctx) {
   [brand, org, theme].forEach((control) => control.addEventListener('input', updatePreview));
   updatePreview();
   const routeChoices = ctx.state.user.routes
-    .filter((r) => !['overview', 'access', 'settings', 'family'].includes(r))
+    .filter((r) => !['overview', 'access', 'settings', 'family','rooms','intake'].includes(r))
     .map((r) => [r, routes.get(r)?.label || r]);
   const visible = checkboxes(
     routeChoices,

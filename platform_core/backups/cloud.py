@@ -110,7 +110,7 @@ def upload(path, remote, name):
     if not OBJECT.fullmatch(name):
         raise TransferError("云端对象编号无效")
     with path.open("rb") as stream:
-        if stream.read(len(secure_storage.MAGIC)) != secure_storage.MAGIC:
+        if stream.read(len(secure_storage.MAGIC)) not in secure_storage.SNAPSHOT_FORMATS:
             raise TransferError("只可发送本系统加密快照")
     expected = name[-70:-6]
     if hash_file(path) != expected:

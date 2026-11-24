@@ -56,3 +56,10 @@
 .family-round-inbox p {
   margin: 0;
 }
+
+.dossier-form { display:grid; gap:14px }
+.dossier-form-group { margin:0; min-width:0; border:1px solid var(--line); border-radius:8px; padding:12px }
+.dossier-form-group legend { color:var(--ink); font-weight:650; padding:0 4px }
+.dossier-form-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:10px }
+.dossier-form-grid .field { min-width:0 }
+.dossier-form-group .fx-muted {margin:0 0 7px}

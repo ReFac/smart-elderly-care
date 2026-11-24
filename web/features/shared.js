@@ -65,6 +65,19 @@ export const bedName = (ctx, id) => ctx.state.beds.find((row) => row.id === id)?
 
 export const active = (ctx) => ctx.state.residents.filter((row) => row.status === '在住');
 
+export function staffField(ctx, name, label, extra = {}) {
+  const labels = new Set([
+    ctx.state.user?.displayName,
+    ...(ctx.state.shifts || []).map(row=>row.staff),
+    ...(ctx.state.accounts || []).filter(a=>a.kind==='staff' && a.enabled).map(a=>a.displayName),
+    extra.value,
+  ].filter(Boolean));
+  return select(name, label, [
+    {value:'',label:extra.required===false?'按业务默认安排':'请选择人员'},
+    ...[...labels].sort((a,b)=>a.localeCompare(b,'zh-CN')).map(value=>({value,label:value})),
+  ], {...extra, allowCustom:true});
+}
+
 export const residentField = (ctx, extra = {}) =>
   select(
     'residentId',

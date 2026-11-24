@@ -49,6 +49,10 @@ RELATED = {
     "ops.review": ("id", "suggestions"),
 }
 PERSON_ACTIONS = {
+    "care.fileArchive",
+    "care.dateArchive",
+    "ltci.record",
+    "care.admit",
     "care.transfer",
     "care.renew",
     "care.discharge",
@@ -163,7 +167,7 @@ def page(db, user, room="", actor="", before=None, limit=50):
             db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
         )
         permitted = campus_access.resident_ids(
-            state, campus_access.allowed_beds(db, user)
+            state, campus_access.allowed_beds(db, user), user
         )
         filters.append(
             "(a.residentId IN (SELECT value FROM json_each(?)) OR a.action LIKE 'agent.%')"

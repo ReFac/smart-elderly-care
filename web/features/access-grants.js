@@ -4,13 +4,14 @@ import { btn, node } from './shared.js';
 const grantGroups = [
   ['入住与照护', ['residents', 'intake', 'care', 'clinical', 'clinical.rules']],
   ['医疗档案与亲属', ['medical', 'medical.write', 'relatives', 'family.share']],
-  ['机构运营', ['inventory', 'finance', 'shifts', 'reports']],
+  ['机构运营', ['inventory', 'finance', 'longCare', 'shifts', 'reports']],
   ['智能协作与设备', ['assistants', 'gateway.simulate', 'alerts', 'voice', 'voice.confirm']],
   ['人员与审计', ['staff.manage', 'audit']],
 ];
 
 // Labels describe the action IDs returned by the server for this account.
 const commands = {
+  ltci: ['长期护理保险', { record: '登记长护险办理凭证' }],
   care: [
     '照护业务',
     {
@@ -105,7 +106,6 @@ const commands = {
     {
       create: '创建账号',
       update: '调整账号与授权',
-      password: '重设密码',
       settings: '设置机构界面',
     },
   ],

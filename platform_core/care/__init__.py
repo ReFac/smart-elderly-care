@@ -23,7 +23,18 @@ from .pathways import (
 from . import scales
 from .plans import add_task, approve_plan, assess, complete_task, quality
 from .records import LEVELS, iso_date
-from .residency import admit, archive, discharge, inquire, leave, renew, transfer
+from .residency import (
+    admit,
+    archive,
+    discharge,
+    date_archive,
+    file_archive,
+    inquire,
+    leave,
+    register,
+    renew,
+    transfer,
+)
 
 
 __all__ = ["LEVELS", "apply", "seed", "scales"]
@@ -39,6 +50,9 @@ _ACTIONS = {
     "care.publishDrugRule": publish_drug_rule,
     "care.retireDrugRule": retire_drug_rule,
     "care.inquire": inquire,
+    "care.register": register,
+    "care.fileArchive": file_archive,
+    "care.dateArchive": date_archive,
     "care.admit": admit,
     "care.transfer": transfer,
     "care.discharge": discharge,

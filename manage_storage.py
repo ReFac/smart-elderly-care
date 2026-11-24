@@ -11,10 +11,10 @@ from platform_core import secure_storage as vault, storage_assets
 from platform_core.store import Store
 
 
-def seal_legacy_bootstrap(db, path):
-    from platform_core.access import _digest
+def discard_legacy_bootstrap(db, path):
     import hmac
     import stat
+    from platform_core.access import _digest
 
     old = path.parent / ".owner-password"
     if not old.exists():
@@ -28,23 +28,19 @@ def seal_legacy_bootstrap(db, path):
             os.name == "posix" and (info.st_uid != os.geteuid() or info.st_mode & 0o077)
         ):
             raise ValueError("旧首次凭据文件权限不符，已保留原件")
-        password = secret.read(1024).decode().strip()
+        candidate = secret.read(1024).decode().strip()
         row = db.execute(
             "SELECT salt,password_hash FROM accounts WHERE kind='owner'"
         ).fetchone()
         if not row or not hmac.compare_digest(
-            _digest(password, row["salt"]), row["password_hash"]
+            _digest(candidate, row["salt"]), row["password_hash"]
         ):
             return "unmatched_existing_file"
-        with db:
-            db.execute(
-                "INSERT OR REPLACE INTO storage_bootstrap VALUES(1,?)", (password,)
-            )
         if not os.path.samestat(info, old.lstat()):
             raise ValueError("旧凭据文件已变化")
         old.unlink()
         vault.sync_dir(old.parent)
-        return "sealed"
+        return "removed"
 
 
 def main():
@@ -55,9 +51,10 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("migrate", help="停止旧服务后，把原工作库转换为加密存储")
     commands.add_parser("verify", help="完整核验加密页面和业务库结构")
-    commands.add_parser(
-        "owner-password", help="在本机终端查看尚未更改的系统首次生成凭据"
+    first = commands.add_parser(
+        "enroll-owner", help="为尚未绑定恢复渠道的总管理员验证本人邮箱或手机"
     )
+    first.add_argument("--channel", choices=("email", "sms"), default="email")
     snap = commands.add_parser("snapshot", help="创建完整的加密时间点快照")
     snap.add_argument("file", type=Path)
     restore = commands.add_parser("restore", help="从加密快照恢复到新路径")
@@ -103,20 +100,37 @@ def main():
                 if args.command == "migrate":
                     result = {
                         **vault.verify(db),
-                        "initialPassword": seal_legacy_bootstrap(db, dbpath),
+                        "initialPassword": discard_legacy_bootstrap(db, dbpath),
                     }
                 elif args.command == "verify":
                     result = vault.verify(db)
-                elif args.command == "owner-password":
-                    if not sys.stdout.isatty():
-                        raise ValueError("请直接在本机交互终端查看首次凭据")
-                    row = db.execute(
-                        "SELECT password FROM storage_bootstrap WHERE id=1"
-                    ).fetchone()
-                    if not row:
-                        raise ValueError("已更改首次密码或初始化时已由部署方指定")
-                    print(row[0])
-                    return
+                elif args.command == "enroll-owner":
+                    from getpass import getpass
+                    from platform_core import identity
+
+                    if not sys.stdin.isatty():
+                        raise ValueError("请在本机终端完成总管理员的首次联系方式核验")
+                    address = input("请输入总管理员本人的验证地址：").strip()
+                    challenge = identity.request_code(
+                        store,
+                        {
+                            "purpose": "bind",
+                            "channel": args.channel,
+                            "destination": address,
+                        },
+                        host_owner=True,
+                    )
+                    reply = getpass("请输入实际收到的验证码：")
+                    identity.finish(
+                        store,
+                        {
+                            "purpose": "bind",
+                            "challenge": challenge["challenge"],
+                            "code": reply,
+                        },
+                        host_owner=True,
+                    )
+                    result = {"bound": True, "next": "从登录页使用验证码设置本人密码"}
                 else:
                     with db:
                         if args.command == "export-file":

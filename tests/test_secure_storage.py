@@ -311,12 +311,13 @@ class EncryptedStorageTests(unittest.TestCase):
             f.write(self.password.encode())
         with closing(self.store.connect()) as db:
             self.assertEqual(
-                manage_storage.seal_legacy_bootstrap(db, self.path), "sealed"
+                manage_storage.discard_legacy_bootstrap(db, self.path), "removed"
             )
             self.assertFalse(old.exists())
-            self.assertEqual(
-                db.execute("SELECT password FROM storage_bootstrap").fetchone()[0],
-                self.password,
+            self.assertIsNone(
+                db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='storage_bootstrap'"
+                ).fetchone()
             )
         wrapped, recovered = self.root / "key.akkey", self.root / "recovered-key"
         vault.wrap_recovery_key(self.key, wrapped, "test-only-offline-password")

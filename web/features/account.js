@@ -1,34 +1,8 @@
 import { groups } from '../lib/navigation.js';
-import { canAct, field, node, page } from './shared.js';
+import { bindFlow, passwordFlow } from './identity.js';
+import { canAct, node, page } from './shared.js';
 
 const passwordAction = 'account.changePassword';
-
-function changePassword(ctx) {
-  const dialog = ctx.dialog({
-    title: '修改我的密码',
-    description: '新密码须为 10 至 128 个字符。保存后，所有设备都需使用新密码重新登录。',
-    fields: [
-      field('currentPassword', '当前密码', { type: 'password', maxLength: 128 }),
-      field('newPassword', '新密码', { type: 'password', maxLength: 128 }),
-      field('confirmation', '再次输入新密码', { type: 'password', maxLength: 128 }),
-    ],
-    submitLabel: '保存新密码',
-    onSubmit: async ({ currentPassword, newPassword, confirmation }) => {
-      if ([...newPassword].length < 10) throw new Error('新密码至少需要 10 个字符。');
-      if (newPassword === currentPassword) throw new Error('新密码须与当前密码不同。');
-      if (newPassword !== confirmation) throw new Error('两次输入的新密码不一致。');
-      const saved = await ctx.command(passwordAction, { currentPassword, newPassword });
-      if (saved) ctx.toast('密码已更新，请使用新密码重新登录。');
-      return saved;
-    },
-  });
-  const controls = dialog.querySelector('form').elements;
-  controls.currentPassword.autocomplete = 'current-password';
-  for (const name of ['newPassword', 'confirmation']) {
-    controls[name].autocomplete = 'new-password';
-    controls[name].minLength = 10;
-  }
-}
 
 function identity(ctx) {
   const { user, uiSettings, residents } = ctx.state;
@@ -55,7 +29,10 @@ function identity(ctx) {
     ]),
   ]);
   if (canAct(ctx, passwordAction))
-    card.append(ctx.ui.button('修改密码', () => changePassword(ctx), 'secondary', 'shield'));
+    card.append(ctx.ui.button('修改密码', () => passwordFlow({username:user.username, locked:true}), 'secondary', 'shield'));
+  card.append(ctx.ui.button('验证联系方式',()=>bindFlow(ctx),'secondary'));
+  const channels=(ctx.state.identityContacts||[]).map(c=>c.masked+(c.verified?'（已核实）':'（待激活）'));
+  card.querySelector('dl').append(node('div','',[node('dt','','恢复方式'),node('dd','',channels.join('、')||'待绑定')]));
   return card;
 }
 

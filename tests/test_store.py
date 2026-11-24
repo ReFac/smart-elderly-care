@@ -19,14 +19,11 @@ class WorkspaceTransactions(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.path = Path(temp.name) / "workspace.sqlite3"
         self.date = datetime(2026, 11, 24, 10, tzinfo=TIMEZONE)
-        environment = patch.dict("os.environ", {"NH_OWNER_PASSWORD": ""})
+        bootstrap = "synthetic-store-password"
+        environment = patch.dict("os.environ", {"NH_OWNER_PASSWORD": bootstrap})
         environment.start()
         self.addCleanup(environment.stop)
         self.store = Store(self.path, lambda: self.date)
-        with closing(self.store.connect()) as db:
-            bootstrap = db.execute(
-                "SELECT password FROM storage_bootstrap WHERE id=1"
-            ).fetchone()[0]
         self.token, _ = self.store.login("owner", bootstrap)
 
     def execute(self, action, payload, revision):

@@ -1,4 +1,4 @@
-"""Mandatory half-day full backups with a separate delivery queue for each location."""
+"""Daily full backups with a separate delivery queue for each location."""
 
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone
@@ -15,7 +15,7 @@ from uuid import uuid4
 from . import cloud
 from .. import activity, history, secure_storage
 
-PERIOD = 12 * 60 * 60
+PERIOD = 24 * 60 * 60
 SHANGHAI_OFFSET = 8 * 3600
 LEASE = 2 * 60 * 60
 
@@ -36,6 +36,10 @@ def init(db):
         state TEXT NOT NULL, owner TEXT NOT NULL DEFAULT '', lease TEXT, retry INTEGER NOT NULL DEFAULT 0,
         attempts INTEGER NOT NULL DEFAULT 0, revision INTEGER, bytes INTEGER, digest TEXT,
         captured INTEGER, error TEXT NOT NULL DEFAULT '')""")
+    if "source_bytes" not in {
+        r[1] for r in db.execute("PRAGMA table_info(backup_points)")
+    }:
+        db.execute("ALTER TABLE backup_points ADD COLUMN source_bytes INTEGER")
     db.execute("""CREATE TABLE IF NOT EXISTS backup_locations(
         provider TEXT PRIMARY KEY, signature TEXT NOT NULL, linked INTEGER NOT NULL)""")
     db.execute("""CREATE TABLE IF NOT EXISTS backup_deliveries(
@@ -212,7 +216,7 @@ class BackupService:
             points = [
                 dict(r)
                 for r in db.execute(
-                    """SELECT rowid AS cursor,id,created,state,revision,bytes,captured,error,
+                    """SELECT rowid AS cursor,id,created,state,revision,bytes,source_bytes AS sourceBytes,captured,error,
                  CASE WHEN request LIKE 'import:%' THEN 'import' WHEN request LIKE 'protection:%' THEN 'protection' WHEN owner='' THEN 'automatic' ELSE 'manual' END AS kind FROM backup_points
                  WHERE (?=0 OR rowid<?) ORDER BY rowid DESC LIMIT 51""",
                     (before, before),
@@ -254,7 +258,7 @@ class BackupService:
                     {"id": k, "label": label, "state": state, "available": k in remotes}
                 )
             return {
-                "intervalHours": 12,
+                "intervalHours": PERIOD // 3600,
                 "policy": policy(db),
                 "nextAutomatic": slot_for(now) + PERIOD,
                 "locations": locations,
@@ -395,12 +399,13 @@ class BackupService:
                 ).fetchone():
                     return False
                 db.execute(
-                    "UPDATE backup_points SET state='ready',digest=?,bytes=?,revision=?,captured=?,lease=NULL,retry=0 WHERE id=?",
+                    "UPDATE backup_points SET state='ready',digest=?,bytes=?,revision=?,captured=?,source_bytes=?,lease=NULL,retry=0 WHERE id=?",
                     (
                         result["sha256"],
                         result["size"],
                         result["revision"],
                         captured,
+                        result.get("sourceBytes"),
                         point,
                     ),
                 )

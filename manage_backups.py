@@ -81,7 +81,7 @@ def install_timer(db_path, environment=None):
         + " --db "
         + unit_arg(db_path.resolve())
         + " run-due\n",
-        "timer": "[Unit]\nDescription=Ankang mandatory twelve-hour backup clock\n[Timer]\nOnCalendar=*-*-* 00,12:00:00 Asia/Shanghai\nOnStartupSec=2min\nOnUnitInactiveSec=15min\nAccuracySec=1s\nPersistent=true\n[Install]\nWantedBy=timers.target\n",
+        "timer": "[Unit]\nDescription=Ankang daily backup clock\n[Timer]\nOnCalendar=*-*-* 00:00:00 Asia/Shanghai\nOnStartupSec=2min\nOnUnitInactiveSec=15min\nAccuracySec=1s\nPersistent=true\n[Install]\nWantedBy=timers.target\n",
     }
     for suffix, content in spec.items():
         file = config / (name + "." + suffix)

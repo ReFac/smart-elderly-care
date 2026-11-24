@@ -35,10 +35,10 @@ class AccountPermissions(unittest.TestCase):
         access.apply(self.db, self.state, "access.create", values, self.owner)
         return access.login(self.db, name, PASSWORD)
 
-    def test_bootstrap_secret_encrypted_and_password_change_removes_it(self):
+    def test_removes_reversible_legacy_credentials_and_preserves_current_login(self):
         with (
             tempfile.TemporaryDirectory() as d,
-            patch.dict(os.environ, {"NH_OWNER_PASSWORD": ""}),
+            patch.dict(os.environ, {"NH_OWNER_PASSWORD": PASSWORD}),
         ):
             store = Store(Path(d) / "workspace.sqlite3")
             db = store.connect()
@@ -48,21 +48,25 @@ class AccountPermissions(unittest.TestCase):
                 self.assertEqual(
                     stat.S_IMODE(store.storage_key_file.stat().st_mode), 0o600
                 )
-            first = db.execute("SELECT password FROM storage_bootstrap").fetchone()[0]
-            token, user = access.login(db, "owner", first)
-            access.apply(
-                db,
-                self.state,
-                "access.password",
-                {"id": user["id"], "currentPassword": first, "password": PASSWORD},
-                user,
+            db.execute(
+                "CREATE TABLE storage_bootstrap(id INTEGER PRIMARY KEY,password TEXT)"
             )
+            db.execute("INSERT INTO storage_bootstrap VALUES(1,?)", (PASSWORD,))
             access.init(db)
-            self.assertIsNone(db.execute("SELECT * FROM storage_bootstrap").fetchone())
-            self.assertIsNone(access.authenticate(db, token))
+            self.assertIsNone(
+                db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='storage_bootstrap'"
+                ).fetchone()
+            )
+            _, user = access.login(db, "owner", PASSWORD)
             with self.assertRaises(PermissionError):
-                access.login(db, "owner", first)
-            self.assertEqual(access.login(db, "owner", PASSWORD)[1]["id"], user["id"])
+                access.apply(
+                    db,
+                    self.state,
+                    "access.password",
+                    {"id": user["id"], "password": PASSWORD},
+                    user,
+                )
 
     def test_live_revocation_independent_sessions_and_disabled_cannot_login(self):
         token, user = self.create()

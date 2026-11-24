@@ -18,6 +18,7 @@ CARE_COLLECTIONS = (
     "followups",
     "referrals",
     "drugRules",
+    "longCareEvents",
 )
 
 OPERATIONS_COLLECTIONS = (

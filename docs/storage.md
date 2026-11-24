@@ -24,11 +24,7 @@ python3 manage_storage.py --db .local/workspace.sqlite3 migrate
 python3 manage_storage.py --db .local/workspace.sqlite3 verify
 ```
 
-旧版 `.owner-password` 与当前账号密码哈希吻合时，迁移将首次凭据存入加密库，再移除旧文件。原账号和口令仍有效。若已改密且旧文件不匹配，迁移结果为 `unmatched_existing_file`，服务端保留它供宿主机管理员核对。系统自动生成且尚未更改的口令可通过本机交互终端查看。通过环境变量显式指定的初始口令由设置人持有。
-
-```bash
-python3 manage_storage.py --db .local/workspace.sqlite3 owner-password
-```
+迁移会依据现有账号摘要核对旧版 `.owner-password`，匹配后删除旧凭据文件。未匹配的同目录文件可能属于另一机构，由宿主机管理员核实归属。新版账号库仅保存加盐摘要。已有账号持原密码登录，或按已验证渠道改密。[账号找回与灾备后的绑定](access.md)
 
 3. 按文件逐个导入旧版同源图片和历史附件。命令拒绝符号链接，按 SHA-256 回读复核已提交内容。同名同内容可重试，修改内容使用新编号。以下路径是操作示例。图片需与扩展名匹配，最大 32 MiB。
 

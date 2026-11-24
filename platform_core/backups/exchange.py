@@ -218,7 +218,7 @@ def restored(svc, packet):
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 )
             }
-        isolated = Store(path, initial_data="empty")
+        isolated = Store(path, now=svc.store.now, initial_data="empty")
         # A feature introduced after this snapshot has no historical settings or evidence.
         # Remove only its migration-generated defaults in this temporary import projection.
         with closing(isolated.connect()) as db, db:
@@ -248,7 +248,7 @@ def preview_file(svc, token, stream, length):
                     if not chunk:
                         raise ValueError("没有收到完整备份")
                     if remaining == length and not chunk.startswith(
-                        secure_storage.MAGIC
+                        secure_storage.SNAPSHOT_FORMATS
                     ):
                         raise ValueError("请选择安康 .akbak 加密备份")
                     dest.write(chunk)
@@ -475,6 +475,9 @@ def apply_point(svc, token, point, payload):
             raise Conflict("受保护数据已变化，请重新预览")
         history.watch(db, "backup.apply")
         restore_plan.apply(db)
+        from ..care import archive_retention
+
+        archive_retention.after_restore(db, svc.store.now())
         audit(
             db,
             svc.store,

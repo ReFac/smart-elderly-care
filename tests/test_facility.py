@@ -134,7 +134,13 @@ class FacilityTests(unittest.TestCase):
         new = facility.room(self.db, self.s, NURSE, r["roomId"])
         bid = new["beds"][0]["id"]
         self.assertNotEqual(new["beds"][0]["label"], "101-01")
-        care.apply(self.s, "care.admit", {"name": "扩建验收", "bedId": bid}, DAY)
+        care.apply(self.s, "care.register", {"name": "扩建验收"}, DAY)
+        care.apply(
+            self.s,
+            "care.admit",
+            {"residentId": self.s["residents"][-1]["id"], "bedId": bid},
+            DAY,
+        )
         self.assertEqual(self.search("验收")[0]["roomId"], new["id"])
         self.command("addBeds", roomId=new["id"], count=2, dailyRate=75.50)
         self.assertEqual(

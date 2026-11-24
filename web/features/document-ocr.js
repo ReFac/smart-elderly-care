@@ -249,7 +249,7 @@ export function pendingDocument(ctx, doc) {
   image.src = '/api/documents/' + doc.id + '/image';
   image.alt = '已归档原件';
   body.append(node('figure', 'fx-original', image));
-  if (hasGrant(ctx, 'medical.write')) {
+  if (hasGrant(ctx, 'medical.write') && ctx.state.residents.some(r=>r.id===doc.residentId && r.status==='在住')) {
     if (['queued', 'failed'].includes(doc.ocr.state))
       body.append(
         btn(

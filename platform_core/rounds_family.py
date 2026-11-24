@@ -79,6 +79,12 @@ def _set_consent(db, rid, aid, p, user, timestamp):
 
 def apply(db, state, action, p, user, now):
     rid = text(p, "residentId", 80, required=True)
+    if (
+        action in ("family.consent", "family.subscribe")
+        and p.get("enabled") is True
+        and lookup(state, "residents", rid)["status"] != "在住"
+    ):
+        raise ValueError("仅在住长者可启用每日巡查分享")
     if user["kind"] == "family" and user["residentId"] != rid:
         raise PermissionError("仅可管理本人绑定的长者")
     lookup(state, "residents", rid)

@@ -9,7 +9,7 @@ import secrets
 import time
 from uuid import uuid4
 
-from . import campus_access, portal, staff_scope
+from . import campus_access, identity, portal, staff_scope
 from .secure_storage import INTEGRITY_ERRORS
 
 from .access_policy import (
@@ -68,30 +68,50 @@ def _token_hash(token):
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
-def _owner_password(db):
-    configured = os.environ.get("NH_OWNER_PASSWORD")
-    if configured:
-        return _password(configured)
-    filename = db.execute("PRAGMA database_list").fetchone()[2]
-    secret = secrets.token_urlsafe(24)
-    if filename:
-        if not db.execute("PRAGMA cipher_version").fetchone():
-            raise ValueError("首次凭据须保存在加密的机构数据库")
-        db.execute("INSERT INTO storage_bootstrap VALUES(1,?)", (secret,))
-    return secret
+DUTIES = (
+    "入住接待",
+    "日常照护",
+    "临床护理",
+    "康复支持",
+    "财务结算",
+    "后勤物资",
+    "运营管理",
+    "家属联络",
+)
 
 
-def init(db):
-    """Initialize inside the caller's write transaction. No default shared password."""
-    db.execute(
-        "CREATE TABLE IF NOT EXISTS storage_bootstrap(id INTEGER PRIMARY KEY CHECK(id=1), password TEXT NOT NULL)"
-    )
+def _duties(payload, kind, current=()):
+    values = payload.get("staffDuties", list(current))
+    if (
+        not isinstance(values, list)
+        or any(v not in DUTIES for v in values)
+        or (kind != "staff" and values)
+    ):
+        raise ValueError("请选择员工职责")
+    return [v for v in DUTIES if v in values]
+
+
+def init(db, initial_owner_password=None):
+    """Existing credentials retain only their salted scrypt verifier."""
+    db.execute("PRAGMA secure_delete=ON")
+    db.execute("DROP TABLE IF EXISTS storage_bootstrap")
     db.execute("""CREATE TABLE IF NOT EXISTS accounts (
       id TEXT PRIMARY KEY, username TEXT UNIQUE COLLATE NOCASE NOT NULL,
       display_name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('owner','staff','family')),
       role TEXT NOT NULL, permissions TEXT NOT NULL DEFAULT '[]', resident_id TEXT NOT NULL DEFAULT '',
       enabled INTEGER NOT NULL DEFAULT 1, salt BLOB NOT NULL, password_hash BLOB NOT NULL,
       family_services INTEGER NOT NULL DEFAULT 0 CHECK(family_services IN (0,1)))""")
+    identity.init(db)
+    if "activation_pending" not in {
+        r[1] for r in db.execute("PRAGMA table_info(accounts)")
+    }:
+        db.execute(
+            "ALTER TABLE accounts ADD COLUMN activation_pending INTEGER NOT NULL DEFAULT 0"
+        )
+    if "staff_duties" not in {r[1] for r in db.execute("PRAGMA table_info(accounts)")}:
+        db.execute(
+            "ALTER TABLE accounts ADD COLUMN staff_duties TEXT NOT NULL DEFAULT '[]'"
+        )
     if "family_services" not in {
         r[1] for r in db.execute("PRAGMA table_info(accounts)")
     }:
@@ -132,7 +152,14 @@ def init(db):
                 "owner",
                 "总管理员",
                 salt,
-                _digest(_owner_password(db), salt),
+                _digest(
+                    _password(
+                        initial_owner_password
+                        or os.environ.get("NH_OWNER_PASSWORD")
+                        or secrets.token_urlsafe(32)
+                    ),
+                    salt,
+                ),
             ),
         )
 
@@ -159,10 +186,13 @@ def _public(row):
         "role": row["role"],
         "residentId": row["resident_id"],
         "enabled": bool(row["enabled"]),
+        "activationPending": bool(row["activation_pending"]),
         "permissions": list(PERMISSIONS)
         if row["kind"] == "owner"
         else json.loads(row["permissions"]),
     }
+    if row["kind"] == "staff":
+        user["staffDuties"] = json.loads(row["staff_duties"])
     if row["kind"] == "staff" and row["campus_id"]:
         user["facilityScope"] = {"campusIds": [row["campus_id"]]}
     user["routes"] = resolve_routes(user)
@@ -396,7 +426,21 @@ def _create(db, state, p, user, area_check):
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,39}", username):
         raise ValueError("登录名须为 3–40 位字母、数字、点、下划线或短横线")
     display = _required(p.get("displayName"), "姓名")
-    password = _password(p.get("password"))
+    invitation = p.get("invitation")
+    if invitation is not None:
+        if (
+            "password" in p
+            or not isinstance(invitation, dict)
+            or set(invitation) != {"channel", "destination"}
+        ):
+            raise ValueError("请指定本人激活账号的验证方式")
+        invite_to = identity.destination(
+            invitation["channel"], invitation["destination"]
+        )
+        password = secrets.token_urlsafe(32)
+    else:
+        password = _password(p.get("password"))
+    duties = _duties(p, kind)
     resident_id = ""
     if kind == "family":
         resident_id = p.get("residentId")
@@ -426,6 +470,18 @@ def _create(db, state, p, user, area_check):
                     campus or None,
                 ),
             )
+            db.execute(
+                "UPDATE accounts SET staff_duties=? WHERE id=?",
+                (json.dumps(duties), account_id),
+            )
+            if invitation:
+                db.execute(
+                    "UPDATE accounts SET activation_pending=1 WHERE id=?", (account_id,)
+                )
+                db.execute(
+                    "INSERT INTO identity_contacts VALUES(?,?,?,0)",
+                    (account_id, invitation["channel"], invite_to),
+                )
     except INTEGRITY_ERRORS as error:
         raise ValueError("此登录名已被使用") from error
     return (
@@ -443,6 +499,8 @@ def _update(db, p, target, user):
         "permissions",
         "enabled",
         "familyServices",
+        "staffDuties",
+        "invitation",
         "portalScopes",
         "campusId",
     }:
@@ -473,9 +531,36 @@ def _update(db, p, target, user):
             target["id"],
         ),
     )
+    duties = _duties(p, target["kind"], target.get("staffDuties", ()))
+    db.execute(
+        "UPDATE accounts SET staff_duties=? WHERE id=?",
+        (json.dumps(duties), target["id"]),
+    )
+    if "invitation" in p:
+        invitation = p["invitation"]
+        if (
+            not target["activationPending"]
+            or not isinstance(invitation, dict)
+            or set(invitation) != {"channel", "destination"}
+        ):
+            raise PermissionError("仅待首次激活的账号可由账号管理人员更正邀请地址")
+        address = identity.destination(invitation["channel"], invitation["destination"])
+        db.execute("DELETE FROM identity_contacts WHERE account_id=?", (target["id"],))
+        db.execute(
+            "DELETE FROM identity_challenges WHERE account_id=?", (target["id"],)
+        )
+        db.execute(
+            "INSERT INTO identity_contacts VALUES(?,?,?,0)",
+            (target["id"], invitation["channel"], address),
+        )
     if not enabled:
+        db.execute(
+            "DELETE FROM identity_challenges WHERE account_id=?", (target["id"],)
+        )
         db.execute("DELETE FROM sessions WHERE account_id=?", (target["id"],))
-    changes = []
+    changes = ["已更新待激活邀请渠道"] if "invitation" in p else []
+    if duties != target.get("staffDuties", []):
+        changes.append("已更新岗位职责")
     if (target.get("facilityScope", {}).get("campusIds") or [""])[0] != campus:
         changes.append(
             "分院授权调整为"
@@ -507,25 +592,6 @@ def _update(db, p, target, user):
             ("授予" if family_services else "收回") + "已完成服务记录查阅权限"
         )
     return f"更新账号 {target['username']}：" + "，".join(changes or ["保存当前配置"])
-
-
-def _change_password(db, p, target):
-    new_password = _password(p.get("password"))
-    if target["kind"] == "owner":
-        current = p.get("currentPassword")
-        row = db.execute(
-            "SELECT salt,password_hash FROM accounts WHERE id=?", (target["id"],)
-        ).fetchone()
-        if (
-            not isinstance(current, str)
-            or len(current) > 128
-            or not hmac.compare_digest(
-                _digest(current, row["salt"]), row["password_hash"]
-            )
-        ):
-            raise ValueError("当前总管理员密码不正确")
-    _replace_password(db, target, new_password)
-    return f"重设 {target['username']} 的密码并结束旧会话"
 
 
 def _settings(db, p):
@@ -567,7 +633,7 @@ def apply(db, state, action, payload, user, facility_policy=None):
         ):
             return _update(db, payload, target, user)
     if action == "access.password":
-        return _change_password(db, payload, _target(db, payload, user, area_check))
+        raise PermissionError("密码须由账号本人通过验证码设置")
     if action == "access.settings":
         return _settings(db, payload)
     raise ValueError("未登记的账号管理操作")
@@ -653,34 +719,17 @@ def project(db, state, user, facility_policy=None):
             accessManagement={
                 "scope": "institution" if owner else "staff",
                 "canBindFamily": owner,
+                "staffDuties": list(DUTIES),
             },
         )
     return filtered
 
 
 def change_own_password(db, user, payload):
-    if set(payload) != {"currentPassword", "newPassword"}:
-        raise ValueError("请提交本人当前密码和新密码")
-    new_password = _password(payload["newPassword"])
-    current = payload["currentPassword"]
-    row = db.execute(
-        "SELECT salt,password_hash FROM accounts WHERE id=?", (user["id"],)
-    ).fetchone()
-    if (
-        not isinstance(current, str)
-        or len(current) > 128
-        or not hmac.compare_digest(_digest(current, row["salt"]), row["password_hash"])
-    ):
-        raise ValueError("当前密码不正确")
-    if new_password == current:
-        raise ValueError("新密码须与当前密码不同")
-    _replace_password(db, user, new_password)
-    return f"{user['username']}修改了本人密码并结束所有登录会话"
+    raise ValueError("请通过本人已绑定的邮箱或手机验证码修改密码")
 
 
 def _replace_password(db, target, new_password):
-    if target["kind"] == "owner":
-        db.execute("DELETE FROM storage_bootstrap")
     salt = secrets.token_bytes(16)
     db.execute(
         "UPDATE accounts SET salt=?,password_hash=? WHERE id=?",

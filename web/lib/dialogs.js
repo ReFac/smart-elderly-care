@@ -90,6 +90,25 @@ export function formDialog({
     controls.push(input);
     label.append(caption, input);
     form.append(label);
+    if (field.type === 'select' && field.allowCustom) {
+      const custom = el('input');
+      custom.type = 'text';
+      custom.maxLength = field.maxLength || 40;
+      const otherValue = '__ankang_enter_label__';
+      input.add(new Option('其他人员或班组…', otherValue));
+      const row = el('label', 'field');
+      row.append(el('span', '', '其他人员或班组名称'), custom);
+      const sync = () => {
+        const active = input.value === otherValue;
+        row.hidden = custom.disabled = !active;
+        custom.required = active;
+        custom.name = active ? field.name : '';
+        input.name = active ? '' : field.name;
+      };
+      input.addEventListener('change', sync);
+      sync();
+      form.append(row);
+    }
   }
   const error = el('div', 'form-error');
   error.setAttribute('role', 'alert');

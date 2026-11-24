@@ -166,6 +166,9 @@ class RoundService:
             return {"revision": revision, "changed": changed, **response}
 
     def tick(self):
+        from ..care import archive_retention
+
+        archive_retention.maintain(self.store)
         return scheduler.tick(self.store, self.halt)
 
     def start(self):

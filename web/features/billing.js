@@ -22,13 +22,14 @@ import {
   money,
 } from './shared.js';
 
+import { chargesEditor, feeLedger, lineDescription } from './charge-lines.js';
 import { channelOrders, expensePanel, reminders } from './settlements.js';
 
 function generate(ctx) {
   const resident = select(
     'residentId',
     '长者',
-    ctx.state.residents.map((r) => ({
+    ctx.state.residents.filter(r=>r.admittedAt).map((r) => ({
       value: r.id,
       label: r.name + ' · ' + r.status,
     }))
@@ -40,9 +41,20 @@ function generate(ctx) {
       !ctx.state.bills.some((b) => b.residentId === r.id && b.month === month)
   );
   if (unbilled) resident.value = unbilled.id;
-  runForm(ctx, {
-    title: '核算月度账单',
-    action: 'ops.bill',
+  if (!ctx.state.allowedActions.includes('ops.bill')) return ctx.toast('当前账号无权核算账单');
+  const editor=chargesEditor(ctx);
+  ctx.dialog({
+    title:'核算月度账单',
+    content:editor.element,
+    async onSubmit(values) {
+      const payload=Object.fromEntries(Object.entries(values).filter(([,v])=>v!==''));
+      payload.items=editor.read();
+      const response=await fetch('/api/billing/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payload,revision:ctx.state.revision})});
+      const quote=await response.json();
+      if (!response.ok) throw new Error(quote.error||'无法核算');
+      return ctx.command('ops.bill',payload,{title:'确认账单明细',target:residentName(ctx,payload.residentId)+' · '+quote.month,
+        fields:[...quote.lineItems.map(l=>[l.label,lineDescription(l)]),['应收合计',money(quote.amount)]]});
+    },
     description:
       '已退住按退住日截断，在住按月末预估。留空的日费率和请假天数使用床位、照护等级及请假台账的默认值。',
     submitLabel: '生成账单',
@@ -125,7 +137,7 @@ function pay(ctx, bill) {
   });
 }
 
-function billDetail(ctx, bill) {
+export function billDetail(ctx, bill) {
   const content = node('div', 'fx-profile', [
     facts([
       ['长者', residentName(ctx, bill.residentId)],
@@ -141,6 +153,7 @@ function billDetail(ctx, bill) {
       ['已收总额', money(bill.paid)],
       ['待缴余额', money(bill.balance)],
     ]),
+    section('全部收费明细',feeLedger(bill)),
     ...(bill.segments
       ? [
           section(
@@ -190,7 +203,7 @@ export function billing(ctx) {
   return page(
     ctx,
     '财务管理',
-    '核算床位、护理与套餐费用，跟进欠费和预交金冲抵。',
+    '按项核算房间床位、饮食、护理及约定费用，核对欠费和预交金。',
     choose(
       btn(ctx, '登记预交金', () => deposit(ctx)),
       btn(ctx, '核算账单', () => generate(ctx), 'primary')

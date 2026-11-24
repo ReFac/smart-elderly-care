@@ -97,7 +97,7 @@ export function settings(panel, data, labels) {
   );
   wrapper.append(
     facts([
-      ['自动备份', '北京时间 00:00、12:00'],
+      ['自动备份', '北京时间 00:00'],
       ['变更回溯', '60 天'],
     ]),
     field('本机完整快照保留期', keep),

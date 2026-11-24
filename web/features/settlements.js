@@ -140,7 +140,14 @@ export function channelOrders(ctx) {
       },
     ],
   });
-  return node('div', 'fx-page', [orders, receipts]);
+  const channelGuide=node('details','fx-disclosure',[
+    node('summary','fx-disclosure-head','收款码与顾客付款码'),
+    node('div','fx-disclosure-body',[
+      node('p','','已配置商户签约资料时，可在待支付订单中显示商户收款码。顾客在自己的微信或支付宝中扫码付款。'),
+      node('p','','如需前台扫描顾客手机付款码，可签约微信付款码支付或支付宝当面付。该收银方式待机构开通及联调。'),
+    ]),
+  ]);
+  return node('div', 'fx-page', [orders,receipts,channelGuide]);
 }
 
 export function expensePanel(ctx) {

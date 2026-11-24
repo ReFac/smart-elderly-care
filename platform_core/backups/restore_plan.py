@@ -29,6 +29,7 @@ ORIGINALS = {
 }
 # A point-in-time restore cannot retract external actions, recorded clinical observations or cash.
 PROTECTED = {
+    "longCareEvents": "长护险办理凭证",
     "payments": "收款凭证",
     "bills": "账单",
     "paymentOrders": "支付订单",
@@ -129,6 +130,18 @@ def describe(db):
     live = json.loads(field("main", "SELECT data FROM {s}.workspace WHERE id=1"))
     changes = []
     blockers = []
+    expired_ids = {r[0] for r in db.execute("SELECT resident FROM archive_expirations")}
+    if any(
+        r["id"] in expired_ids and r.get("status") != "归档到期"
+        for r in source.get("residents", ())
+    ):
+        blockers.append("快照包含已满 365 天并清理的日常档案")
+    sealed = {r["id"] for r in live.get("residents", ()) if r.get("status") == "已退住"}
+    if any(
+        r["id"] in sealed and r.get("status") != "已退住"
+        for r in source.get("residents", ())
+    ):
+        blockers.append("已退住的只读档案不可恢复为待入住或在住")
     if source.keys() != live.keys():
         blockers.append("业务集合版本不同")
     for key in sorted(live.keys() | source.keys()):

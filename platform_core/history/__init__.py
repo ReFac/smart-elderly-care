@@ -13,10 +13,13 @@ __all__ = ["init", "prune", "record", "watch", "page", "detail", "undo", "commen
 
 
 def init(db):
+    from ..agents import change_review
+
     db.execute("""CREATE TABLE IF NOT EXISTS history_commits(
         revision INTEGER PRIMARY KEY REFERENCES audit(revision), recordedAt INTEGER NOT NULL,
         comment TEXT NOT NULL, source TEXT NOT NULL, undoOf INTEGER UNIQUE,
         rooms TEXT NOT NULL, people TEXT NOT NULL, changes TEXT NOT NULL)""")
+    change_review.init(db)
     db.execute("""CREATE TABLE IF NOT EXISTS history_targets(
         kind TEXT NOT NULL,entity TEXT NOT NULL,revision INTEGER NOT NULL REFERENCES history_commits(revision) ON DELETE CASCADE,
         PRIMARY KEY(kind,entity,revision))""")
@@ -89,7 +92,8 @@ def record(
         "agent"
         if action.startswith("agent.") or actor["id"] == "rounds-agent"
         else "system"
-        if actor["id"] == "platform-operator" or actor["id"].startswith("channel-")
+        if actor["id"] in ("platform-operator", "archive-service")
+        or actor["id"].startswith("channel-")
         else "human"
     )
     at = datetime.fromisoformat(timestamp)
@@ -106,6 +110,15 @@ def record(
             dump(people),
             dump(changes),
         ),
+    )
+    from ..agents import change_review
+
+    change_review.inspect(
+        db,
+        revision,
+        action,
+        actor,
+        current.get("residentId") or previous.get("residentId") or "",
     )
     seen = list(
         dict.fromkeys(
@@ -168,12 +181,17 @@ class Reader:
         self.user = user
         self.cutoff = int(store.now().timestamp()) - WINDOW
         self.allowed_beds = campus_access.allowed_beds(db, user, include_rooms=True)
+        self.archived_ids = {
+            r[0]
+            for r in db.execute("""SELECT json_extract(value,'$.id') FROM workspace,json_each(data,'$.residents')
+            WHERE json_extract(value,'$.status') IN ('已退住','归档到期')""")
+        }
         self.people = self.rooms = None
         if self.allowed_beds is not None:
             state = json.loads(
                 db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
             )
-            self.people = campus_access.resident_ids(state, self.allowed_beds)
+            self.people = campus_access.resident_ids(state, self.allowed_beds, user)
             # Empty rooms should remain addressable even when they have no bed yet.
             from .. import facility
 
@@ -310,6 +328,7 @@ class Reader:
     def metadata(self, row):
         from .reverse import SUPPORTED
 
+        people = json.loads(row["people"] or "[]")
         undo_reason = ""
         if row["undoneBy"]:
             undo_reason = "这项改动已撤销"
@@ -317,6 +336,11 @@ class Reader:
             undo_reason = "早期记录只有审计摘要"
         elif row["revision"] <= self.import_revision:
             undo_reason = "此后已导入机构数据，请核对当前版本"
+        elif (
+            row["action"].startswith("dossier.")
+            and (set(people) | {row["residentId"]}) & self.archived_ids
+        ):
+            undo_reason = "归档老人的资料只读"
         elif row["action"] not in SUPPORTED:
             undo_reason = "已留存业务凭证，可在对应模块办理更正"
         elif self.user["kind"] != "owner" and row["actorId"] != self.user["id"]:
@@ -356,6 +380,7 @@ class Reader:
         return json.loads(row[0]) if row else []
 
     def details(self, row):
+        from ..agents import change_review
         from .reverse import check, UndoConflict
 
         result = self.metadata(row)
@@ -387,7 +412,11 @@ class Reader:
                 for k in ("before", "after"):
                     if k in c:
                         c[k] = "依当前岗位隐藏"
-        return {**result, "changes": changes}
+        return {
+            **result,
+            "changes": changes,
+            "agentReview": change_review.result(self.db, row["revision"]),
+        }
 
 
 def page(

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from identity_fixture import verified_password
 from platform_core.store import SignedOut, Store
 
 
@@ -56,11 +57,8 @@ class PersonalAccountTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         self.call(token, "account.changePassword", **invalid)
                 self.assertEqual(self.store.version(second)["revision"], before)
-                self.call(
-                    token,
-                    "account.changePassword",
-                    currentPassword=self.current,
-                    newPassword=self.replacement,
+                verified_password(
+                    self.store, token, name, self.current, self.replacement
                 )
                 for previous in (token, second):
                     with self.assertRaises(SignedOut):

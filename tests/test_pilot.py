@@ -1,6 +1,5 @@
 """Verify onboarding through the real store for a site without demo residents."""
 
-from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -15,10 +14,9 @@ class PilotOnboardingTests(unittest.TestCase):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name) / "pilot.sqlite3"
-        with patch.dict("os.environ", {"NH_OWNER_PASSWORD": ""}):
+        initial = "synthetic-pilot-password"
+        with patch.dict("os.environ", {"NH_OWNER_PASSWORD": initial}):
             self.store = Store(self.path, initial_data="empty")
-        with closing(self.store.connect()) as db:
-            initial = db.execute("SELECT password FROM storage_bootstrap").fetchone()[0]
         self.token, _ = self.store.login("owner", initial)
 
     def execute(self, action, **payload):
@@ -48,7 +46,9 @@ class PilotOnboardingTests(unittest.TestCase):
         ]["roomId"]
         bed = self.store.facility_resource(self.token, "room", rid)["beds"][0]
         self.assertEqual(bed["status"], "空闲")
-        self.execute("care.admit", name="试点验收", bedId=bed["id"])
+        self.execute("care.register", name="试点验收")
+        resident = self.store.snapshot(self.token)["data"]["residents"][-1]
+        self.execute("care.admit", residentId=resident["id"], bedId=bed["id"])
         reopened = Store(self.path, initial_data="demo")
         data = reopened.snapshot(self.token)["data"]
         self.assertEqual([r["name"] for r in data["residents"]], ["试点验收"])

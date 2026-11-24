@@ -6,6 +6,7 @@ import {
   table,
   tabs,
   field,
+  staffField,
   select,
   options,
   memo,
@@ -209,7 +210,7 @@ export function shifts(ctx) {
           '值班分院',
           (ctx.state.campusOptions || []).map((c) => ({ value: c.id, label: c.name })),
         ),
-        field('staff', '值班人员'),
+        staffField(ctx, 'staff', '值班人员'),
         field('date', '排班日期', {
           type: 'date',
           value: today(ctx),

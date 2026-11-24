@@ -11,8 +11,7 @@ export const groups = [
   [
     '照护业务',
     [
-      ['intake', '接待入住', 'intake'],
-      ['rooms', '房间工作台', 'location'],
+      ['beds', '床位管理', 'bed'],
       ['residents', '长者档案', 'people'],
       ['dossier', '个人与医疗档案', 'folder'],
       ['assessments', '能力评估', 'assessment'],
@@ -23,9 +22,9 @@ export const groups = [
   [
     '机构运营',
     [
-      ['beds', '床位管理', 'bed'],
       ['inventory', '物资仓储', 'box'],
       ['billing', '财务结算', 'wallet'],
+      ['longCare', '长期护理保险', 'shield'],
       ['shifts', '人员排班', 'shifts'],
       ['reports', '统计报送', 'reports'],
     ],
@@ -51,3 +50,7 @@ export const groups = [
 export const routes = new Map(
   groups.flatMap(([group, items]) => items.map(([id, label, icon]) => [id, { group, label, icon }]))
 );
+
+// Saved desktop links and existing account settings retain these keys.
+routes.set('rooms', routes.get('beds'));
+routes.set('intake', routes.get('residents'));

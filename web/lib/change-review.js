@@ -3,11 +3,15 @@ import { detail } from './dialogs.js';
 
 const titles = {
   'care.inquire': '登记接待',
+  'care.dateArchive':'凭证补登归档日期',
+  'care.fileArchive':'封存历史档案',
+  'care.register':'建立长者档案',
   'care.admit': '办理入住',
   'care.transfer': '变更床位',
   'care.renew': '办理续住',
   'care.discharge': '办理离院',
   'care.leave': '登记请假',
+  'ltci.record': '登记长护险办理',
   'care.assess': '保存能力评估',
   'care.approvePlan': '审核照护计划',
   'care.addTask': '新建照护工单',
@@ -239,7 +243,10 @@ export function changePreview(state, action, payload, options = {}) {
     fields.push([label, text]);
   }
   if (payload.imageBase64) fields.push(['原件', '随本次操作加密归档']);
+  const reviewDomain = state.agentReviewDomains?.[action];
+  const archive = action==='care.discharge' || payload.kind==='archive' || person?.status==='已退住';
   return {
+    reviewDomain:archive ? null : reviewDomain,
     title: options.title || actionTitle(action),
     target,
     fields: options.fields || fields,
@@ -262,6 +269,7 @@ export function confirmChange({
   fields = [],
   confirmLabel = '确认执行',
   allowComment = false,
+  reviewDomain,
 }) {
   return new Promise((resolve) => {
     const content = el('div', 'change-review');
@@ -277,6 +285,7 @@ export function confirmChange({
       }
       content.append(list);
     }
+    if(reviewDomain) content.append(el('p','fx-muted','保存时由院内审核 Agent 核对「'+reviewDomain+'」，结果可在最近改动中查看。'));
     const comment = allowComment ? commentInput() : null;
     if (comment) content.append(comment.element);
     const footer = el('div', 'change-actions');

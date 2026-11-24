@@ -1,4 +1,7 @@
 import { residentInsights } from './resident-insights.js';
+import { billDetail } from './billing.js';
+import { editResident } from './profile-editor.js';
+import { displayAmount, loadProfileChoices, regionPicker } from './profile-controls.js';
 import { contactBook } from './family-contacts.js';
 import { familyInbox, familyRecipients } from './family-rounds.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
@@ -37,7 +40,6 @@ const householdFields = [
   ['siblings', '兄弟姐妹及支持情况', 'textarea'],
   ['children', '子女及照护分工', 'textarea'],
   ['livingArrangement', '原居住与照料安排', 'textarea'],
-  ['incomeSource', '收入与费用来源'],
   ['economicNotes', '经济情况补充', 'textarea']
 ];
 const relativeFields = [
@@ -78,35 +80,24 @@ function displayed(schema, profile) {
   return schema.map(([name, label]) => [label, profile[name] ?? '']);
 }
 
-function editResident(ctx, resident, profile) {
-  const schema = [
-    ['name', '姓名', 'text', true],
-    ['age', '登记年龄（出生日期未知时填写）', 'number'],
-    ...basicFields
-  ];
-  if (allowed(ctx, 'relatives')) schema.push(...householdFields);
-  const inputs = fields(schema, { ...resident, ...profile });
-  inputs.find((f) => f.name === 'age').min = 0;
-  inputs.find((f) => f.name === 'age').max = 125;
-  inputs.find((f) => f.name === 'birthDate').max = today(ctx);
-  ctx.dialog({
-    title: '编辑长者登记资料',
-    description: '姓名必填。已知出生日期时，系统按生日计算周岁。',
-    fields: inputs,
-    onSubmit: (values) => ctx.command('dossier.profile', { ...values, residentId: resident.id })
-  });
-}
-
-function relativeForm(ctx, resident, accountId, profile) {
-  const inputs = fields(relativeFields, profile);
+async function relativeForm(ctx, resident, accountId, profile) {
+  let catalog;
+  try { catalog = await loadProfileChoices(); } catch(e) {ctx.toast(e.message);return;}
+  const location = regionPicker(catalog.regions,'联系地址',profile.addressRegion,profile.address);
+  const inputs = fields(relativeFields.filter(([key])=>key!=='address'), profile);
+  const relation = inputs.find(f=>f.name==='relationship');
+  relation.type='select';
+  relation.options=['',...new Set([...catalog.choices.relationship,...(profile.relationship?[profile.relationship]:[])])];
   inputs.find((f) => f.name === 'idNumber').maxLength = 18;
   ctx.dialog({
     title: '完善亲属资料',
+    content:location.element,
     description: '请核对姓名、与长者的关系和联系方式。身份证号、住址与微信可稍后补充。',
     fields: inputs,
     onSubmit: (values) =>
       ctx.command('dossier.relative', {
         ...values,
+        ...(location.read()===undefined?{}:{addressRegion:location.read()}),
         residentId: resident.id,
         accountId
       })
@@ -309,7 +300,8 @@ function newDocument(ctx, resident) {
   const source = node('input');
   source.maxLength = 200;
   source.placeholder = '例如医院名称、科室或既往病历来源';
-  const method = options(['手工描述', 'DeepSeek OCR', '人工核对的 OCR 转录']);
+  const inpatient=resident.status==='在住';
+  const method = options(inpatient ? ['手工描述','DeepSeek OCR','人工核对的 OCR 转录'] : ['手工描述']);
   const consent = node('input');
   consent.type = 'checkbox';
   const consentField = node('label', 'access-check', [
@@ -386,7 +378,7 @@ function newDocument(ctx, resident) {
   updateMethod();
   method.addEventListener('change', updateMethod);
   kind.addEventListener('change', () => {
-    if (kind.value === '出院小结') method.value = 'DeepSeek OCR';
+    if (kind.value === '出院小结' && inpatient) method.value = 'DeepSeek OCR';
     if (kind.value === '病史补录') method.value = '手工描述';
     updateMethod();
   });
@@ -565,7 +557,7 @@ function timeline(ctx, resident) {
   return panel;
 }
 
-function showKin(ctx, resident) {
+function showKin(ctx, resident, readOnly=false) {
   const profiles = (ctx.state.relativeProfiles || []).filter((p) => p.residentId === resident.id);
   const list = node(
     'div',
@@ -580,7 +572,7 @@ function showKin(ctx, resident) {
       '尚无亲属提交资料。'
     )
   );
-  if (ctx.state.user.kind === 'owner') {
+  if (!readOnly && ctx.state.user.kind === 'owner') {
     const accounts = (ctx.state.accounts || []).filter(
       (a) => a.kind === 'family' && !a.portalSelf && a.enabled && a.residentId === resident.id
     );
@@ -597,6 +589,7 @@ function showKin(ctx, resident) {
 
 export function openDossier(ctx, resident) {
   const profile = (ctx.state.dossierProfiles || []).find((p) => p.residentId === resident.id) || {};
+  const archived = ['已退住','归档','已归档','已出院'].includes(resident.status);
   const actions = choose();
   const side = node('div', 'fx-dossier-demographic fx-profile');
   const contents = node('div', 'fx-dossier-main fx-profile');
@@ -605,15 +598,15 @@ export function openDossier(ctx, resident) {
     node('header', 'fx-dossier-head', [recordIdentity(ctx, resident, resident.level), actions]),
     grid
   ]);
-  if (allowed(ctx, 'intake'))
+  if (!archived && allowed(ctx, 'intake'))
     actions.append(btn(ctx, '编辑登记资料', () => editResident(ctx, resident, profile)));
-  if (allowed(ctx, 'medical.write'))
+  if (!archived && allowed(ctx, 'medical.write'))
     actions.append(btn(ctx, '存档医疗文书', () => newDocument(ctx, resident), 'primary'));
-  if (ctx.state.allowedActions.includes('dossier.signSummary'))
+  if (resident.status==='在住' && ctx.state.allowedActions.includes('dossier.signSummary'))
     actions.append(btn(ctx, '核对动态档案摘要', () => previewSummary(ctx, resident, showDocument)));
   const recentChanges = scopedHistoryButton(ctx, 'resident', resident.id);
   if (recentChanges) actions.append(recentChanges);
-  if (allowed(ctx, 'care')) contents.append(careTimeline(ctx, 'resident', resident.id));
+  if (!archived && allowed(ctx, 'care')) contents.append(careTimeline(ctx, 'resident', resident.id));
   if (allowed(ctx, 'medical')) contents.append(timeline(ctx, resident));
   if (allowed(ctx, 'residents') || allowed(ctx, 'intake'))
     side.append(
@@ -628,9 +621,15 @@ export function openDossier(ctx, resident) {
     );
   if (allowed(ctx, 'relatives'))
     side.append(
-      disclosure('家庭与经济情况', facts(displayed(householdFields, profile))),
-      showKin(ctx, resident)
+      disclosure('家庭情况', facts(displayed(householdFields, profile))),
+      disclosure('费用来源', facts([['费用来源', profile.fundingSources?.join('、')], ...(profile.incomeSource ? [['旧版登记原文',profile.incomeSource]] : [])])),
+      disclosure('长者养老金收入', facts([['每月收入',displayAmount(profile.pensionBand,profile.pensionAmount)]])),
+      showKin(ctx, resident, archived)
     );
+  if (allowed(ctx,'finance')) {
+    const bills=(ctx.state.bills||[]).filter(b=>b.residentId===resident.id).sort((a,b)=>b.month.localeCompare(a.month));
+    side.append(disclosure('收费', node('div','fx-profile',[records(bills,b=>node('div','fx-profile',[named(b.month+' · '+b.status,'应收 '+b.amount+' 元 · 已收 '+b.paid+' 元 · 待缴 '+b.balance+' 元'),btn(ctx,'查看本期收费明细',()=>billDetail(ctx,b),'ghost')]),'暂无已出账单')]), bills.length));
+  }
   if (allowed(ctx, 'clinical') || allowed(ctx, 'medical')) {
     if (resident.summary)
       contents.prepend(section('当前档案摘要', node('p', '', resident.summary)));
@@ -672,9 +671,9 @@ export function openDossier(ctx, resident) {
         )
       );
   }
-  if (allowed(ctx, 'relatives')) contents.append(contactBook(ctx, resident, profile));
-  if (ctx.state.familyRoundRecipients) contents.append(familyRecipients(ctx, resident));
-  if (allowed(ctx, 'care') || allowed(ctx, 'clinical')) contents.prepend(residentInsights(ctx, resident.id));
+  if (allowed(ctx, 'relatives')) contents.append(contactBook(ctx, resident, profile, archived));
+  if (!archived && ctx.state.familyRoundRecipients) contents.append(familyRecipients(ctx, resident));
+  if (resident.status==='在住' && (allowed(ctx, 'care') || allowed(ctx, 'clinical'))) contents.prepend(residentInsights(ctx, resident.id));
   if (!side.childElementCount) side.remove();
   if (!contents.childElementCount) contents.remove();
   ctx.detail('长者详细档案', body);

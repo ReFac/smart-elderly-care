@@ -12,6 +12,7 @@ PERMISSIONS = {
     "family.share": "代录长者对每日巡查简报的分享意愿",
     "inventory": "库存与领用",
     "finance": "财务、收款与结算",
+    "longCare": "长护险参保、评估和待遇经办",
     "shifts": "工作排班",
     "reports": "报送及经营视图",
     "assistants": "运行 Agent 协作、生成与审核建议",
@@ -60,11 +61,12 @@ ROUTE_GRANTS = {
     "assessments": ("care",),
     "care": ("care", "clinical"),
     "medications": ("clinical",),
-    "beds": ("intake", "care"),
+    "beds": ("intake", "care", "clinical", "residents"),
     "rooms": ("intake", "care", "clinical", "residents"),
     "tour": (),
     "inventory": ("inventory",),
     "billing": ("finance",),
+    "longCare": ("longCare",),
     "shifts": ("shifts",),
     "reports": ("reports", "audit"),
     "activity": ("audit",),
@@ -81,6 +83,9 @@ ROUTE_GRANTS = {
 }
 ACTION_GRANTS = {
     "care.inquire": "intake",
+    "care.register": "intake",
+    "care.fileArchive": "intake",
+    "care.dateArchive": "intake",
     "care.admit": "intake",
     "care.transfer": "intake",
     "care.renew": "intake",
@@ -110,6 +115,7 @@ ACTION_GRANTS = {
     "care.exportReferral": "clinical",
     "care.publishDrugRule": "clinical.rules",
     "care.retireDrugRule": "clinical.rules",
+    "ltci.record": "longCare",
     "ops.stock": "inventory",
     "ops.addItem": "inventory",
     "ops.shift": "shifts",
@@ -154,6 +160,7 @@ COLLECTION_GRANTS = {
     "transactions": "inventory",
     "shifts": "shifts",
     "bills": "finance",
+    "longCareEvents": "longCare",
     "deposits": "finance",
     "depositEntries": "finance",
     "payments": "finance",
@@ -202,7 +209,7 @@ def require(user, permission):
         raise PermissionError("此账号没有当前操作权限")
 
 
-STAFF_ACCOUNT_ACTIONS = ("access.create", "access.update", "access.password")
+STAFF_ACCOUNT_ACTIONS = ("access.create", "access.update")
 
 
 def can_record_scale(user):
@@ -271,6 +278,8 @@ def authorize(user, action, payload, state):
         if user["kind"] != "owner":
             raise PermissionError("仅机构总管理员可以维护院区")
         return
+    if action == "access.password":
+        raise PermissionError("密码须由账号本人通过验证码设置")
     if action.startswith("access."):
         if action in STAFF_ACCOUNT_ACTIONS and manages_accounts(user):
             return
@@ -456,6 +465,7 @@ def visible_data(state, user):
         "medical",
         "relatives",
         "finance",
+        "longCare",
         "gateway.simulate",
         "alerts",
         "shifts",
@@ -463,7 +473,17 @@ def visible_data(state, user):
         basic = ["id", "name", "status", "bedId"]
         if any_grant("care", "clinical", "intake", "residents"):
             basic.extend(
-                ["age", "gender", "admittedAt", "endDate", "dischargedAt", "level"]
+                [
+                    "age",
+                    "gender",
+                    "admittedAt",
+                    "endDate",
+                    "dischargedAt",
+                    "archiveUntil",
+                    "registeredAt",
+                    "registeredCampusId",
+                    "level",
+                ]
             )
         if any_grant("intake", "relatives"):
             basic.append("contact")

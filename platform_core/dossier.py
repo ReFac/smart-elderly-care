@@ -11,7 +11,7 @@ import zlib
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from . import access, document_ocr, family_contacts
+from . import access, document_ocr, family_contacts, profile_fields
 from .dossier_summary import sign_summary, summary_draft as summary_draft
 from .care.clinical import refresh_medication_warnings
 from .care.records import append_record, lookup
@@ -126,10 +126,24 @@ def edit_profile(db, state, p, user, today):
         (resident["id"],),
     ).fetchone()
     basic, household = (json.loads(x) for x in existing) if existing else ({}, {})
-    basic.update({k: text(p, k, v) for k, v in BASIC.items() if k in p})
+    basic.update(
+        {
+            k: text(p, k, v)
+            for k, v in BASIC.items()
+            if k in p
+            and k not in ("language", "education", "maritalStatus", "occupation")
+        }
+    )
     if set(p) & HOUSEHOLD.keys():
         access.require(user, "relatives")
-        household.update({k: text(p, k, v) for k, v in HOUSEHOLD.items() if k in p})
+        household.update(
+            {
+                k: text(p, k, v)
+                for k, v in HOUSEHOLD.items()
+                if k in p and k != "livingArrangement"
+            }
+        )
+    profile_fields.update_profile(basic, household, p, user)
     if "familyContact" in p:
         access.require(user, "relatives")
         family_contacts.update(household, p["familyContact"], today)
@@ -200,7 +214,15 @@ def edit_relative(db, state, p, user, today):
         (subject["id"], resident["id"]),
     ).fetchone()
     values = json.loads(saved[0]) if saved else {}
+    if "relationship" in p:
+        profile_fields.enumeration(
+            p,
+            "relationship",
+            profile_fields.catalog("dossier-choices")["relationship"],
+            values.get("relationship", ""),
+        )
     values.update({k: text(p, k, n) for k, n in KIN.items() if k in p})
+    profile_fields.addresses(values, p, (("addressRegion", "address", False),))
     for key in ("name", "relationship", "phone"):
         text(values, key, KIN[key], True)
     if (

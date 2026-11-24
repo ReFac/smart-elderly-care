@@ -183,14 +183,15 @@ class BackupPanel extends HTMLElement {
       const values = [
         stamp(p.captured || p.created),
         {
-          automatic: '每 12 小时',
+          automatic: '每日一次',
           manual: '管理员创建',
           import: '文件导入',
           protection: '恢复前保护点',
         }[p.kind] || '管理员创建',
         p.revision === null ? '—' : 'v' + p.revision,
         p.error || states[p.state],
-        p.bytes ? (p.bytes / 1048576).toFixed(2) + ' MiB' : '—',
+        p.bytes ? (p.bytes / 1048576).toFixed(2) + ' MiB' +
+          (p.sourceBytes > p.bytes ? ' · 节省 ' + Math.round(100*(1-p.bytes/p.sourceBytes)) + '%' : '') : '—',
         copy.join('；') || '等待异地位置',
       ];
       const trial = node('td', '');

@@ -56,7 +56,12 @@ class StaffAdminTests(unittest.TestCase):
         self.assertIn("access", snapshot["user"]["routes"])
         self.assertNotIn("settings", snapshot["user"]["routes"])
         self.assertEqual(
-            snapshot["accessManagement"], {"scope": "staff", "canBindFamily": False}
+            snapshot["accessManagement"],
+            {
+                "scope": "staff",
+                "canBindFamily": False,
+                "staffDuties": list(access.DUTIES),
+            },
         )
         self.assertEqual([a["id"] for a in snapshot["accounts"]], [target["id"]])
         grants = set(self.grants) - {"staff.manage"}
@@ -168,18 +173,18 @@ class StaffAdminTests(unittest.TestCase):
 
     def test_reset_disable_and_live_revocation(self):
         old, target = self.employee("floor-aide", ["care"])
-        new_password = "new-local-password"
-        self.run_command(
-            self.manager, "access.password", id=target["id"], password=new_password
-        )
-        with self.assertRaises(SignedOut):
-            self.store.version(old)
-        replacement, _ = self.store.login("floor-aide", new_password)
+        with self.assertRaises(PermissionError):
+            self.run_command(
+                self.manager,
+                "access.password",
+                id=target["id"],
+                password="new-local-password",
+            )
         self.run_command(self.manager, "access.update", id=target["id"], enabled=False)
         with self.assertRaises(SignedOut):
-            self.store.version(replacement)
+            self.store.version(old)
         self.run_command(self.manager, "access.update", id=target["id"], enabled=True)
-        self.assertTrue(self.store.login("floor-aide", new_password)[0])
+        self.assertTrue(self.store.login("floor-aide", self.password)[0])
         self.run_command(
             self.owner, "access.update", id=target["id"], permissions=["finance"]
         )

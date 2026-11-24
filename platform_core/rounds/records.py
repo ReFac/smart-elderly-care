@@ -29,6 +29,8 @@ def locate(db, state, user, rid):
     person = next((r for r in state["residents"] if r["id"] == rid), None)
     if not person:
         raise FileNotFoundError("未找到长者")
+    if person["status"] != "在住":
+        raise ValueError("仅在住长者可使用巡查档案")
     return current_stay(state, person)
 
 

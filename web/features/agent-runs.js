@@ -190,7 +190,7 @@ function composer(ctx, tools) {
     region.append(
       ctx.ui.button(
         ctx.agentRegion ? '更换区域' : '选择分院、楼层或房间',
-        () => ctx.go('rooms'),
+        () => ctx.go('beds','plan'),
         'text',
       ),
     );

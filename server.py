@@ -1,5 +1,7 @@
 """Serve the shared staff/family workspace and authenticated API on loopback."""
 
+import sys
+import os
 import argparse
 from functools import partial
 from http.cookies import CookieError, SimpleCookie
@@ -131,6 +133,12 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def read_resource(self, path):
+        if path == "/api/auth/channels":
+            from platform_core import identity
+
+            return self.send_json(
+                200, {"channels": sorted(identity.senders(self.store))}
+            )
         priority = re.fullmatch(
             r"/api/rounds/residents/([A-Za-z0-9_-]{1,100})/priorities", path
         )
@@ -373,6 +381,35 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, image, mime)
 
     def write_resource(self, path):
+        if path == "/api/billing/preview":
+            body = self.read_json(SMALL_BODY)
+            return self.send_json(
+                200,
+                self.store.bill_preview(
+                    self.token(), body.get("payload"), body.get("revision")
+                ),
+            )
+        if path in ("/api/auth/code", "/api/auth/verify"):
+            from platform_core import identity
+
+            payload = self.read_json(2048)
+            if path == "/api/auth/code":
+                return self.send_json(
+                    200,
+                    identity.request_code(
+                        self.store,
+                        payload,
+                        token=self.token(),
+                        peer=self.client_address[0],
+                        background=True,
+                    ),
+                )
+            result = identity.finish(self.store, payload, token=self.token())
+            return self.send_json(
+                200,
+                result,
+                self.session_cookie(None) if payload["purpose"] == "password" else None,
+            )
         priority = re.fullmatch(
             r"/api/rounds/residents/([A-Za-z0-9_-]{1,100})/priorities", path
         )
@@ -601,6 +638,12 @@ class Handler(BaseHTTPRequestHandler):
             if not self.token():
                 raise SignedOut("请先登录")
             body = self.read_json(DOCUMENT_BODY)
+            if body.get("action") == "access.create" and (
+                not isinstance(body.get("payload"), dict)
+                or "invitation" not in body["payload"]
+                or "password" in body["payload"]
+            ):
+                raise ValueError("请登记本人激活账号的验证渠道；登录密码由账号本人设置")
             if (
                 body.get("action") != "dossier.document"
                 and int(self.headers["Content-Length"]) > SMALL_BODY
@@ -676,7 +719,22 @@ def main():
             or parsed.fragment
         ):
             parser.error("--public-origin 需要 HTTPS 根域名")
-    store = Store(args.db, initial_data=args.initial_data)
+    initial_password = None
+    if (
+        not args.db.exists()
+        and sys.stdin.isatty()
+        and not os.environ.get("NH_OWNER_PASSWORD")
+    ):
+        from getpass import getpass
+
+        initial_password = getpass("为总管理员设置初始密码（10–128 字符）：")
+        if not 10 <= len(initial_password) <= 128 or initial_password != getpass(
+            "请再次输入："
+        ):
+            parser.error("初始密码长度不符或两次输入不同")
+    store = Store(
+        args.db, initial_data=args.initial_data, initial_owner_password=initial_password
+    )
     handler = partial(Handler, store=store, public_origin=origin)
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
         store.backups.start()

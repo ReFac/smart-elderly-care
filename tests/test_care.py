@@ -34,7 +34,10 @@ class CareWorkflowTests(unittest.TestCase):
     def test_intake_beds_and_discharge_keep_history(self):
         inquiry = self.state["inquiries"][0]
         first, second, *_ = [b for b in self.state["beds"] if b["status"] == "空闲"]
-        self.call("admit", inquiryId=inquiry["id"], bedId=first["id"])
+        self.call("register", inquiryId=inquiry["id"])
+        self.call(
+            "admit", residentId=self.state["residents"][-1]["id"], bedId=first["id"]
+        )
         person = self.state["residents"][-1]
         self.assertEqual(inquiry["residentId"], person["id"])
         with self.assertRaises(ValueError):

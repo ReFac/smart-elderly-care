@@ -116,6 +116,10 @@ function inspector(ctx, change) {
     ),
   ]);
   const content = node('article', 'history-inspector', [head]);
+  if (change.agentReview) content.append(node('section','fx-section',[
+    node('h3','','审核 Agent · '+change.agentReview.domain),
+    node('ul','',change.agentReview.checks.map(check=>node('li','',check))),
+  ]));
   if (change.comment) content.append(node('blockquote', 'history-comment', change.comment));
   if (change.undoOf || change.undoneBy)
     content.append(

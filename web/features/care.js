@@ -7,6 +7,7 @@ import {
   table,
   tabs,
   field,
+  staffField,
   select,
   options,
   memo,
@@ -79,7 +80,7 @@ export function assessments(ctx) {
         select('level', '评定照护等级', options(levels)),
         ...observationFields(),
         memo('note', '评估结论与照护需求', true),
-        field('assignee', '负责照护的人员', {
+        staffField(ctx, 'assignee', '负责照护的人员', {
           required: false,
           placeholder: '留空按所在区域、当日排班与待办量匹配',
         }),
@@ -271,7 +272,7 @@ export function taskForm(ctx) {
     fields: [
       residentField(ctx),
       field('title', '任务名称'),
-      field('assignee', '执行人员'),
+      staffField(ctx, 'assignee', '执行人员'),
       select('kind', '服务类型', options(['日常照护', '巡视', '康复服务', '膳食服务', '医嘱执行'])),
       select('routineActivity', '完成后时间线归类', [
         { value: 'auto', label: '按标准服务名称' },
@@ -536,7 +537,7 @@ export function medications(ctx) {
           type: 'datetime-local',
           required: false,
         }),
-        field('assignee', '负责人员', {
+        staffField(ctx, 'assignee', '负责人员', {
           required: false,
         }),
         memo('interactionNote', '医护人员登记的配伍提醒'),

@@ -36,7 +36,8 @@ function openChanges(filters = {}) {
   else go('history');
 }
 function available(id) {
-  return state?.user.routes.includes(id) && !state.uiSettings.hiddenRoutes.includes(id);
+  const canonical = {rooms:'beds',intake:'residents'}[id] || id;
+  return state?.user.routes.includes(canonical) && !state.uiSettings.hiddenRoutes.includes(canonical);
 }
 function landing() {
   return available('assistants') && state.agentCapabilities?.tools.length
@@ -151,7 +152,14 @@ function go(destination, tab) {
 }
 
 function getRoute() {
-  return location.hash.slice(1) || landing();
+  const original=location.hash.slice(1);
+  if ((original==='rooms' && available('beds')) || (original==='intake' && available('residents'))) {
+    const destination=original==='rooms'?'beds':'residents';
+    selectTab(destination,original==='rooms'?'plan':'all');
+    window.history.replaceState(null,'','#'+destination);
+    return destination;
+  }
+  return original || landing();
 }
 
 async function readState() {
@@ -361,7 +369,7 @@ function sidebar() {
     section.append(head, ...items.map(moduleLink));
     nav.append(section);
   }
-  const shortcuts = ['rooms', 'inbox', 'residents', 'reports'].filter(
+  const shortcuts = ['beds', 'inbox', 'residents', 'reports'].filter(
     (id) => available(id) && routes.get(id).group !== groupName,
   );
   if (shortcuts.length) {
@@ -400,7 +408,7 @@ function searchDialog() {
   const modal = detail('全局搜索', content);
   const data = [
     ...[...routes]
-      .filter(([id]) => available(id))
+      .filter(([id]) => !['rooms','intake'].includes(id) && available(id))
       .map(([id, r]) => ({
         label: r.label,
         keywords: id + ' ' + r.group,

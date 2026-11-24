@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 
+from identity_fixture import verified_password
 from platform_core.store import Store, Conflict, TIMEZONE
 
 
@@ -215,11 +216,8 @@ class ChangeHistory(unittest.TestCase):
             self.store.history_change(self.owner, previous)["source"], "legacy"
         )
         self.assertNotIn(self.password, json.dumps(self.store.history(self.owner)))
-        self.do(
-            "account.changePassword",
-            holder,
-            currentPassword=self.password,
-            newPassword="new-private-test-pass",
+        verified_password(
+            self.store, holder, "history-policy", self.password, "new-private-test-pass"
         )
         current = self.store.version(self.owner)["revision"]
         record = self.store.history_change(self.owner, current)

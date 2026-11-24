@@ -49,7 +49,7 @@ function header(ctx) {
   if (ctx.available('inbox'))
     actions.append(button('预警与确认', () => ctx.go('inbox'), 'secondary', 'bell'));
   if (ctx.available('intake') && ctx.permitted('intake'))
-    actions.append(button('接待登记', () => inquiryForm(ctx), 'secondary', 'plus'));
+    actions.append(button('新建长者档案', () => inquiryForm(ctx), 'secondary', 'plus'));
   if (ctx.available('assistants')) {
     const link = group('a', 'btn btn-primary', icon('spark', 16), el('span', '', '发起 Agent 协作'));
     link.href = '#assistants';

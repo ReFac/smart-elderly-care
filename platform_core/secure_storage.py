@@ -29,7 +29,9 @@ except ImportError:
 INTEGRITY_ERRORS = (sqlite3.IntegrityError, cipherdb.IntegrityError)
 OPERATIONAL_ERRORS = (sqlite3.OperationalError, cipherdb.OperationalError)
 
-MAGIC = b"ANKANG-SNAPSHOT\x01"
+LEGACY_MAGIC = b"ANKANG-SNAPSHOT\x01"
+MAGIC = b"ANKANG-SNAPSHOT\x02"
+SNAPSHOT_FORMATS = (MAGIC, LEGACY_MAGIC)
 SQLITE_HEADER = b"SQLite format 3\x00"
 BLOCK = 1024 * 1024
 
@@ -237,6 +239,12 @@ def create_snapshot(store, destination):
             info = verify(target)
             if info["revision"] != revision:
                 raise ValueError("快照与起始读取修订号不匹配")
+            source_bytes = cold.stat().st_size
+            from .backups import packing
+
+            with target:
+                packing.transform(target)
+            target.execute("VACUUM")
         nonce, salt = secrets.token_bytes(12), secrets.token_bytes(32)
         header = MAGIC + salt + nonce
         seal = Cipher(
@@ -258,7 +266,7 @@ def create_snapshot(store, destination):
             os.fsync(out.fileno())
         os.link(packet, destination)
         sync_dir(destination.parent)
-        return {**info, "size": packet.stat().st_size, "sha256": digest.hexdigest()}
+        return {**info, "size": packet.stat().st_size, "sourceBytes":source_bytes, "sha256": digest.hexdigest()}
 
 
 def restore_snapshot(source, target_db, recovery_key_file):
@@ -278,7 +286,7 @@ def restore_snapshot(source, target_db, recovery_key_file):
         cold = Path(tmp) / "encrypted"
         with source.open("rb") as raw, private_file(cold) as out:
             header = raw.read(len(MAGIC) + 44)
-            if len(header) != len(MAGIC) + 44 or not header.startswith(MAGIC):
+            if len(header) != len(MAGIC) + 44 or not header.startswith(SNAPSHOT_FORMATS):
                 raise ValueError("无法识别快照格式")
             size = os.fstat(raw.fileno()).st_size - len(header) - 16
             if size < 1:
@@ -305,11 +313,18 @@ def restore_snapshot(source, target_db, recovery_key_file):
             out.flush()
             os.fsync(out.fileno())
         with closing(open_database(cold, master)) as db:
+            if header.startswith(MAGIC):
+                from .backups import packing
+
+                with db:
+                    packing.transform(db, restore=True)
             info = verify(db)
             # Restored instances start new sessions and a new, explicitly linked replica set.
             # Child delivery rows precede parent points. Old schemas may lack these tables.
             local_tables = (
                 "sessions",
+                "identity_challenges",
+                "identity_limits",
                 "backup_retrievals",
                 "backup_restores",
                 "backup_imports",
@@ -324,6 +339,13 @@ def restore_snapshot(source, target_db, recovery_key_file):
                 for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
             with db:
+                if "identity_contacts" in existing:
+                    # An earlier snapshot may name a mailbox or SIM that was later replaced.
+                    # Preserve encrypted history but require fresh verification on this host.
+                    db.execute("UPDATE identity_contacts SET verified=-1")
+                if "storage_bootstrap" in existing:
+                    db.execute("PRAGMA secure_delete=ON")
+                    db.execute("DROP TABLE storage_bootstrap")
                 if "family_round_preferences" in existing:
                     # A disaster-recovery host cannot know which party withdrew consent
                     # after this point. Keep the encrypted evidence and old receipts;

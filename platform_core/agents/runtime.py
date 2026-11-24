@@ -65,6 +65,11 @@ FIELDS = {
 def scoped_records(state, spec, resident_id, member_ids=None, *, actor_id=None):
     if spec.tool == CARE_PLAN_TOOL.tool and not resident_id:
         raise ValueError("请先选择一位长者再生成个体照护计划")
+    archived = {
+        r["id"]
+        for r in state.get("residents", ())
+        if r.get("status") in ("未入住", "已退住", "归档到期")
+    }
     data = {}
     for collection in spec.collections:
         records = state[collection]
@@ -77,6 +82,8 @@ def scoped_records(state, spec, resident_id, member_ids=None, *, actor_id=None):
                 and row.get("status") == "待签收"
             ]
         key = "id" if collection == "residents" else "residentId"
+        if archived:
+            records = [row for row in records if row.get(key) not in archived]
         if member_ids is not None:
             if spec.key not in {"care", "finance"}:
                 raise PermissionError("此工具尚未登记区域数据归属")

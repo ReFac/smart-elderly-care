@@ -208,7 +208,13 @@ def prepare(store, token, p, revision):
 
         actor = store.actor(db, session)
         access.require(actor, "medical.write")
-        require_resident(db, actor, p["residentId"])
+        from .care.archive_retention import require_ai_eligible
+
+        state = json.loads(
+            db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+        )
+        require_resident(db, actor, p["residentId"], state)
+        require_ai_eligible(state, p["residentId"])
         return actor
 
     with closing(store.connect()) as db, db:

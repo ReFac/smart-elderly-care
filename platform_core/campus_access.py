@@ -47,7 +47,14 @@ def allowed_beds(db, user, *, include_rooms=False):
     }
 
 
-def resident_ids(state, beds):
+def registration_campuses(user):
+    scope = user.get("facilityScope") or {}
+    if any(key in scope for key in ("roomIds", "floorIds", "buildingIds")):
+        return ()
+    return scope.get("campusIds", ())
+
+
+def resident_ids(state, beds, user=None):
     last_beds = {
         r["residentId"]: r.get("bedId") or r.get("beforeBedId")
         for r in state.get("bedMoves", ())
@@ -56,6 +63,11 @@ def resident_ids(state, beds):
         r["id"]
         for r in state["residents"]
         if (r.get("bedId") or last_beds.get(r["id"])) in beds
+        or (
+            not r.get("bedId")
+            and r["id"] not in last_beds
+            and r.get("registeredCampusId") in registration_campuses(user or {})
+        )
     }
 
 
@@ -65,7 +77,7 @@ def current_residents(db, user):
     state = json.loads(
         db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
     )
-    return resident_ids(state, allowed_beds(db, user))
+    return resident_ids(state, allowed_beds(db, user), user)
 
 
 def require_resident(db, user, resident_id, state=None):
@@ -76,7 +88,7 @@ def require_resident(db, user, resident_id, state=None):
         state = json.loads(
             db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
         )
-    if resident_id not in resident_ids(state, beds):
+    if resident_id not in resident_ids(state, beds, user):
         raise PermissionError("长者不在本人获授权的分院范围内")
 
 
@@ -89,11 +101,11 @@ def require_document(db, user, document_id):
 
 
 def projection(db, state, user):
-    beds = allowed_beds(db, user)
+    beds = allowed_beds(db, user, include_rooms=True)
     if beds is None:
         return state
-    residents = resident_ids(state, beds)
-    campuses = user["facilityScope"]["campusIds"]
+    residents = resident_ids(state, beds, user)
+    campuses = registration_campuses(user)
     result = {}
     # Unknown row collections stay private until their ownership relationship is declared.
     for key, rows in state.items():
@@ -126,6 +138,17 @@ def projection(db, state, user):
 
 
 def authorize_command(db, user, action, payload, state):
+    if action in ("care.register", "care.admit", "care.transfer") and user.get(
+        "facilityScope"
+    ):
+        if action == "care.register":
+            if not registration_campuses(user):
+                raise PermissionError("请使用分院或全院建档权限")
+        else:
+            require_resident(db, user, payload.get("residentId"), state)
+            beds = allowed_beds(db, user, include_rooms=True)
+            if beds is not None and payload.get("bedId") not in beds:
+                raise PermissionError("请选择获授权的床位")
     if action in ("care.completeTask", "care.quality") and user.get("facilityScope"):
         task = next(
             (t for t in state["tasks"] if t["id"] == payload.get("taskId")), None
@@ -145,7 +168,7 @@ def authorize_command(db, user, action, payload, state):
     ):
         return
     beds = allowed_beds(db, user)
-    residents = resident_ids(state, beds)
+    residents = resident_ids(state, beds, user)
 
     def person(rid):
         if rid not in residents:
@@ -166,9 +189,19 @@ def authorize_command(db, user, action, payload, state):
         ):
             raise PermissionError("入住意向不在本人分院")
         return
-    if action == "care.inquire":
+    if action in ("care.inquire", "care.register"):
         if len(user["facilityScope"]["campusIds"]) != 1 and not payload.get("campusId"):
             raise PermissionError("接待登记须指明一个获授权的分院")
+        if action == "care.register":
+            if not registration_campuses(user):
+                raise PermissionError("新档案需要分院或全院建档权限")
+            if payload.get("inquiryId") and not any(
+                r["id"] == payload["inquiryId"]
+                and r.get("campusId", facility.HOME_CAMPUS)
+                in registration_campuses(user)
+                for r in state["inquiries"]
+            ):
+                raise PermissionError("咨询记录不在本人分院")
         return
     if action in ("gw.review", "gw.confirm", "gw.dismiss"):
         table, key = (

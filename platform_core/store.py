@@ -12,6 +12,7 @@ from . import protected_docs, secure_storage, storage_assets
 from .bootstrap import empty_workspace
 from . import backups, history, rounds
 from .access_policy import can_record_scale
+from .care import archive_retention
 from . import (
     access,
     activity,
@@ -55,7 +56,16 @@ def viewer(db, token):
 
 
 class Store:
-    def __init__(self, path, now=clock, *, facility_policy=None, initial_data="demo"):
+    def __init__(
+        self,
+        path,
+        now=clock,
+        *,
+        facility_policy=None,
+        initial_data="demo",
+        code_senders=None,
+        initial_owner_password=None,
+    ):
         if initial_data not in ("demo", "empty"):
             raise ValueError("请选择 demo 或 empty 初始化模式")
         self.path = Path(path)
@@ -64,6 +74,7 @@ class Store:
             self.path
         )
         self.now = now
+        self.code_senders = dict(code_senders or {})
         self.facility_policy = facility_policy
         with closing(self.connect()) as db, db:
             db.execute("PRAGMA journal_mode=WAL")
@@ -85,10 +96,11 @@ class Store:
                     else empty_workspace()
                 )
                 db.execute("INSERT INTO workspace VALUES (1, 0, ?)", (encode(data),))
-            access.init(db)
+            access.init(db, initial_owner_password)
             if version < 4:
                 access.migrate_branding(db)
             dossier.init(db)
+            archive_retention.init(db)
             rounds_family.init(db)
             gateways.init(db)
             agents.init(db)
@@ -105,11 +117,20 @@ class Store:
             rounds.init(db, self.now())
             history.prune(db, self.now())
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        archive_retention.maintain(self)
         self.backups = backups.BackupService(self)
         self.rounds = rounds.RoundService(self)
 
     def actor(self, db, token):
         actor = viewer(db, token)
+        if (
+            actor["kind"] == "family"
+            and db.execute(
+                "SELECT 1 FROM archive_expirations WHERE resident=?",
+                (actor.get("residentId"),),
+            ).fetchone()
+        ):
+            actor = {**actor, "familyServices": False, "portalScopes": []}
         if self.facility_policy is not None:
             actor = {
                 **actor,
@@ -155,6 +176,7 @@ class Store:
             }
 
     def snapshot(self, token):
+        archive_retention.maintain(self)
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
             user = self.actor(db, token)
@@ -163,11 +185,45 @@ class Store:
             ).fetchone()
             today = self.now().date().isoformat()
             state = json.loads(row["data"])
+            state["residents"] = [
+                r
+                for r in state["residents"]
+                if r["status"] != archive_retention.EXPIRED
+            ]
             data = access.project(db, state, user, self.facility_policy)
+            if access.has(user, "finance"):
+                from .operations.charges import CATEGORIES, UNITS
+
+                data["chargeCatalog"] = {"categories": CATEGORIES, "units": UNITS}
+            if (
+                access.has(user, "intake")
+                or access.has(user, "residents")
+                or access.has(user, "care")
+                or access.has(user, "clinical")
+            ):
+                shown_beds = {b["id"] for b in data["beds"]}
+                data["bedLocations"] = {
+                    r[0]: [r[1], r[2], r[3]]
+                    for r in db.execute(
+                        "SELECT beds.bedId,b.campusName,b.name,f.label FROM "
+                        + facility.ROOM_TABLE
+                        + " JOIN facility_beds beds ON beds.roomId=r.id"
+                    )
+                    if r[0] in shown_beds
+                }
             if can_record_scale(user):
                 from .care.scales import CATALOG
 
                 data["careScale"] = CATALOG
+            from . import identity
+
+            data["identityContacts"] = identity.contacts(db, user["id"])
+            data["identityChannels"] = sorted(identity.senders(self))
+            from .agents.change_review import category
+
+            data["agentReviewDomains"] = {
+                a: category(a) for a in data["allowedActions"] if category(a)
+            }
             data["selfAccess"] = {
                 "permissions": [
                     {"id": grant, "label": access.PERMISSIONS[grant]}
@@ -222,6 +278,14 @@ class Store:
                     if item.get("runId")
                     and agents.region_visible(db, user, item["runId"])
                 ]
+            if access.has(user, "longCare") and user["kind"] != "family":
+                from . import long_care
+
+                data["longCareCatalog"] = long_care.catalog()
+                data["longCareEvents"] = [
+                    {**e, "displayStatus": long_care.status_text(e, today)}
+                    for e in data.get("longCareEvents", ())
+                ]
             dossier.project(db, data, user, today)
             rounds_family.project(db, data, user)
             beds = campus_access.allowed_beds(db, user, include_rooms=True)
@@ -232,7 +296,9 @@ class Store:
                     db, state, beds, access.has(user, "clinical"), today
                 ).fetchone()[0]
             people = (
-                campus_access.resident_ids(state, beds) if beds is not None else None
+                campus_access.resident_ids(state, beds, user)
+                if beds is not None
+                else None
             )
             if beds is not None:
                 data["tasks"] = [
@@ -563,6 +629,25 @@ class Store:
                 raise FileNotFoundError("未登记或无权查看此接口")
             return record
 
+    def bill_preview(self, token, payload, revision):
+        from .operations.billing import quote_bill
+
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            user = self.actor(db, token)
+            access.require(user, "finance")
+            row = db.execute(
+                "SELECT data,revision FROM workspace WHERE id=1"
+            ).fetchone()
+            if type(revision) is not int or revision != row["revision"]:
+                raise Conflict("机构记录已更新，请重新打开收费核算")
+            if not isinstance(payload, dict):
+                raise ValueError("请填写收费项目")
+            state = json.loads(row["data"])
+            access.authorize(user, "ops.bill", payload, state)
+            campus_access.authorize_command(db, user, "ops.bill", payload, state)
+            return quote_bill(state, payload, self.now().date().isoformat())
+
     def plan_agent(self, payload, revision, token):
         def inspect(db):
             actor = self.actor(db, token)
@@ -653,6 +738,40 @@ class Store:
                     raise ValueError("未登记的区域工具")
                 payload = validate_proposal(db, data, user, payload, today)
             campus_access.authorize_command(db, user, action, payload, data)
+            if action == "care.register":
+                visible = campus_access.projection(db, data, user)
+                name = payload.get("name")
+                if not name and payload.get("inquiryId"):
+                    name = next(
+                        (
+                            q["name"]
+                            for q in visible["inquiries"]
+                            if q["id"] == payload["inquiryId"]
+                        ),
+                        "",
+                    )
+                matches = any(
+                    r["status"] == archive_retention.ARCHIVED
+                    and r["name"] == str(name or "").strip()
+                    for r in visible["residents"]
+                )
+                if matches and payload.get("acknowledgeArchive") is not True:
+                    raise ValueError(
+                        "已有同名归档老人，请先核对身份再确认建立独立档案。"
+                    )
+            if action == "portal.feedback":
+                archive_retention.writable(data, user.get("residentId"))
+            if action.startswith("dossier.") or action == "care.archive":
+                rid = payload.get("residentId")
+                if not rid and action == "dossier.relative":
+                    subject = (
+                        user
+                        if user["kind"] == "family"
+                        else access.account(db, payload.get("accountId"))
+                    )
+                    rid = (subject or {}).get("residentId")
+                if rid:
+                    archive_retention.writable(data, rid)
             history.watch(db, action)
             previous = activity.locate(db, data, action, payload, user)
             domain = action.partition(".")[0]
@@ -669,7 +788,7 @@ class Store:
                     summary = handovers.withdraw(data, payload, user, now)
                 elif domain in ("ops", "care"):
                     fields = dict(payload)
-                    if action in ("care.inquire", "ops.shift"):
+                    if action in ("care.inquire", "care.register", "ops.shift"):
                         fields["campusId"] = facility.selected_campus(db, user, fields)
                     if action == "care.assess":
                         fields["matchCampusId"] = facility.resident_campus(
@@ -704,6 +823,10 @@ class Store:
                         fields["nowLocal"] = now.strftime("%Y-%m-%dT%H:%M")
                     module = care if domain == "care" else operations
                     summary = module.apply(data, action, fields, today)
+                elif action == "ltci.record":
+                    from . import long_care
+
+                    summary = long_care.record(data, payload, user, today)
                 elif domain == "agent":
                     summary, run_id = agents.apply(
                         db, data, action, payload, user, now, revision, planning
@@ -741,8 +864,10 @@ class Store:
                     (payload["proposalId"],),
                 ).fetchone()[0]
                 care_timeline.stamp_execution(db, data, task_id, now)
+            if action == "care.dateArchive":
+                archive_retention.clear_due(db, data, today, payload["residentId"])
             current = activity.locate(db, data, action, payload, user)
-            if action == "care.admit":
+            if action == "care.register":
                 current = activity.for_person(data, data["residents"][-1]["id"])
             if domain == "gw":
                 current = gateways.audit_context(db, data, action, payload, user)

@@ -12,6 +12,10 @@ def generate_report(state, payload, today):
     cutoff = min(last, parse_day(today))
     rows, issues = [], []
     for resident in state["residents"]:
+        if resident["status"] == "未入住" or (
+            not resident.get("admittedAt") and resident.get("registeredAt")
+        ):
+            continue
         rid = resident["id"]
         try:
             arrival = parse_day(resident.get("admittedAt"))

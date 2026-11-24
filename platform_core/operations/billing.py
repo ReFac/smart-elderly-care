@@ -3,6 +3,7 @@
 from datetime import date
 from decimal import Decimal
 
+from .charges import invoice_lines
 from .records import (
     currency_amount,
     get_resident,
@@ -103,7 +104,7 @@ def leave_dates(state, resident_id, begin, end):
     return away
 
 
-def generate_bill(state, payload, today):
+def quote_bill(state, payload, today):
     resident = get_resident(state, payload)
     month = payload.get("month")
     first, last = month_bounds(month, today)
@@ -112,7 +113,9 @@ def generate_bill(state, payload, today):
         for b in state["bills"]
     ):
         raise ValueError("该长者本月已有账单")
-    arrival = parse_day(resident.get("admittedAt"))
+    if not resident.get("admittedAt"):
+        raise ValueError("该档案没有可计费的入住记录")
+    arrival = parse_day(resident["admittedAt"])
     discharge = resident.get("dischargedAt")
     if resident["status"] == "已退住" and not discharge:
         raise ValueError("退住档案缺少退住日期")
@@ -126,9 +129,11 @@ def generate_bill(state, payload, today):
     )
     last_part = parts[-1]
     package_fee = currency_amount(payload.get("packageFee", 0), "月套餐费")
-    amount = currency_amount(bed_total + care_total + package_fee, "账单合计")
+    lines = invoice_lines(parts, package_fee, payload.get("items", []), days, leave)
+    amount = currency_amount(
+        sum(Decimal(str(item["amount"])) for item in lines), "账单合计"
+    )
     bill = dict(
-        id=new_id("bill"),
         residentId=resident["id"],
         month=month,
         bedFee=last_part["bedFee"],
@@ -136,6 +141,7 @@ def generate_bill(state, payload, today):
         bedTotal=float(bed_total),
         careTotal=float(care_total),
         segments=parts,
+        lineItems=lines,
         manualOverrides=[k for k in ("bedFee", "careFee", "leaveDays") if k in payload],
         packageFee=float(package_fee),
         leaveDays=leave,
@@ -150,9 +156,16 @@ def generate_bill(state, payload, today):
         status="待缴费" if amount else "已结清",
         date=today,
     )
+    return bill
+
+
+def generate_bill(state, payload, today):
+    bill = quote_bill(state, payload, today)
+    bill["id"] = new_id("bill")
+    resident = get_resident(state, payload)
     state["bills"].insert(0, bill)
     apply_deposit(state, get_account(state, resident["id"]), today)
-    return f"生成{resident['name']} {month} 账单 ¥{amount:.2f}，待缴 ¥{bill['balance']:.2f}"
+    return f"生成{resident['name']} {bill['month']} 账单 ¥{bill['amount']:.2f}，待缴 ¥{bill['balance']:.2f}"
 
 
 def charge_segments(state, resident, p, begin, end):

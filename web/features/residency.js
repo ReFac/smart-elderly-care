@@ -1,3 +1,6 @@
+import { allocate, historicInquiries, register, registry, statusLabel } from './admission.js';
+import { displayAmount } from './profile-controls.js';
+import { roomsPage } from './rooms.js';
 import { residentInsights } from './resident-insights.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import {
@@ -10,8 +13,6 @@ import {
   tabs,
   kpis,
   field,
-  select,
-  options,
   memo,
   bedName,
   active,
@@ -47,82 +48,22 @@ const bedOptions = (ctx) =>
     }));
 
 export function admit(ctx, defaults = {}) {
-  runForm(ctx, {
-    title: '办理入住',
-    action: 'care.admit',
-    submitLabel: '确认入住',
-    defaults,
-    fields: [
-      field('name', '长者姓名'),
-      select('bedId', '分配床位', bedOptions(ctx)),
-      select('level', '照护等级', options(levels)),
-      field('age', '年龄', {
-        type: 'number',
-        min: 0,
-        max: 125,
-        required: false
-      }),
-      select('gender', '性别', options(['未登记', '女', '男'])),
-      field('endDate', '合同到期日', {
-        type: 'date',
-        min: today(ctx),
-        required: false
-      }),
-      field('contact', '联系人或电话', {
-        required: false
-      }),
-      field('allergies', '过敏信息', {
-        required: false
-      }),
-      field('risk', '重点关注事项', {
-        required: false
-      })
-    ],
-    map: (values) =>
-      defaults.inquiryId
-        ? {
-            ...values,
-            inquiryId: defaults.inquiryId
-          }
-        : values
-  });
+  allocate(
+    ctx,
+    null,
+    ctx.state.beds.find((b) => b.id === defaults.bedId)
+  );
 }
 
 export function transfer(ctx, row, targetBed) {
-  runForm(ctx, {
-    title: '办理转床',
-    action: 'care.transfer',
-    description: row
-      ? row.name + ' · 当前床位 ' + bedName(ctx, row.bedId)
-      : '转入 ' + targetBed.label + ' 床',
-    fields: [
-      ...(row
-        ? []
-        : [
-            select('residentId', '选择转入的在住长者', [
-              { value: '', label: '请选择长者' },
-              ...active(ctx).map((p) => ({
-                value: p.id,
-                label: p.name + ' · ' + bedName(ctx, p.bedId)
-              }))
-            ])
-          ]),
-      ...(targetBed ? [] : [select('bedId', '转入床位', bedOptions(ctx))])
-    ],
-    map: (v) => ({
-      ...v,
-      bedId: targetBed?.id || v.bedId,
-      residentId: row?.id || v.residentId
-    }),
-    submitLabel: '确认转床'
-  });
+  allocate(ctx, row, targetBed);
 }
 
 function discharge(ctx, row) {
   runForm(ctx, {
     title: '办理退住',
     action: 'care.discharge',
-    description: '确认后将释放 ' + row.name + ' 的床位，保留历史档案。',
+    description: '确认后将释放 ' + row.name + ' 的床位，转为只读归档，保管 365 天。',
     fields: [memo('note', '退住小结', true)],
     map: (v) => ({
       ...v,
@@ -202,8 +143,58 @@ export function profile(ctx, row) {
     return name === 'bills' ? entries : byRecent(entries);
   };
   const summary = node('div', 'fx-profile fx-admission-profile');
-  summary.append(recordIdentity(ctx, row, row.level));
-  if (hasGrant(ctx, 'care', 'clinical')) summary.append(residentInsights(ctx, row.id));
+  summary.append(recordIdentity(ctx, { ...row, status: statusLabel(row) }, row.level));
+  if (row.status === '未入住' && canAct(ctx, 'care.fileArchive'))
+    summary.append(
+      btn(ctx, '封存为归档老人', () =>
+        runForm(ctx, {
+          title: '封存历史档案',
+          action: 'care.fileArchive',
+          description: row.name + ' · 此后该档案只读，日常资料从原退住日起保管 365 天。',
+          fields: [
+            field('archiveDate', '原退住或归档日期', {
+              type: 'date',
+              value: today(ctx),
+              max: today(ctx)
+            })
+          ],
+          map: (v) => ({ ...v, residentId: row.id })
+        })
+      )
+    );
+  if (row.status === '未入住' && canAct(ctx, 'care.admit'))
+    summary.append(btn(ctx, '从此档案办理入住', () => allocate(ctx, row), 'primary'));
+  if (row.status === '已退住') {
+    const dated =
+      row.dischargedAt &&
+      /^\d{4}-\d{2}-\d{2}$/.test(row.dischargedAt) &&
+      Number.isFinite(Date.parse(row.dischargedAt)) &&
+      new Date(row.dischargedAt).toISOString().slice(0, 10) === row.dischargedAt;
+    summary.append(
+      node(
+        'p',
+        'rounds-warning',
+        dated
+          ? '只读归档 · ' + row.dischargedAt + ' 退住 · 日常档案保管 365 天'
+          : '原退住日期待核实，保管期限尚未起算。'
+      )
+    );
+    if (!dated && canAct(ctx, 'care.dateArchive'))
+      summary.append(
+        btn(ctx, '按凭证补登退住日期', () =>
+          runForm(ctx, {
+            title: '按原凭证补登退住日期',
+            action: 'care.dateArchive',
+            description:
+              '以原凭证日期计算 365 天。确认已满保管期的日期后，将立即清理日常资料并保留原件与账务凭证。',
+            fields: [field('archiveDate', '原凭证上的退住日期', { type: 'date', max: today(ctx) })],
+            map: (v) => ({ ...v, residentId: row.id })
+          })
+        )
+      );
+  }
+  if (row.status === '在住' && hasGrant(ctx, 'care', 'clinical'))
+    summary.append(residentInsights(ctx, row.id));
   add(
     summary,
     facts([
@@ -229,15 +220,15 @@ export function profile(ctx, row) {
   const shortcuts = choose();
   const changes = scopedHistoryButton(ctx, 'resident', row.id);
   if (changes) shortcuts.append(changes);
-  if (hasGrant(ctx, 'care'))
+  if (row.status === '在住' && hasGrant(ctx, 'care'))
     shortcuts.append(
       btn(ctx, '照护时间线', () =>
-        ctx.detail(row.name + ' · 照护记录', careTimeline(ctx, 'resident', row.id)),
-      ),
+        ctx.detail(row.name + ' · 照护记录', careTimeline(ctx, 'resident', row.id))
+      )
     );
   if (state.user.routes.includes('dossier'))
     shortcuts.append(btn(ctx, '打开详细档案', () => openDossier(ctx, row), 'primary'));
-  if (hasGrant(ctx, 'care', 'clinical'))
+  if (row.status === '在住' && hasGrant(ctx, 'care', 'clinical'))
     shortcuts.append(btn(ctx, '服务记录预览', () => familyPreview(ctx, row)));
   if (shortcuts.childElementCount) summary.append(shortcuts);
   if (row.status === '在住') {
@@ -277,7 +268,7 @@ export function profile(ctx, row) {
     block('健康体征', 'vitals', ['clinical'], (v) =>
       named(v.metric + ' ' + v.value + ' ' + (v.unit || ''), v.date + ' · ' + v.status)
     ),
-    block('费用明细', 'bills', ['finance'], (b) =>
+    block('收费', 'bills', ['finance'], (b) =>
       named(b.month + ' · ' + money(b.amount), b.status + ' · 待缴 ' + money(b.balance))
     ),
     block('请假记录', 'leaves', ['finance', 'intake'], (l) =>
@@ -287,156 +278,66 @@ export function profile(ctx, row) {
       named(a.summary || a.note || '档案更新', a.date)
     )
   );
+  if (hasGrant(ctx, 'relatives')) {
+    const details = (state.dossierProfiles || []).find((p) => p.residentId === row.id) || {};
+    history.append(
+      section(
+        '费用来源',
+        node('p', '', details.fundingSources?.join('、') || details.incomeSource || '未登记')
+      ),
+      section(
+        '长者养老金收入',
+        node('p', '', displayAmount(details.pensionBand, details.pensionAmount))
+      )
+    );
+  }
   if (history.childElementCount) summary.append(history);
   add(summary, clinicalHistory(ctx, row));
   ctx.detail('长者档案', summary);
 }
 
 export function inquiryForm(ctx) {
-  runForm(ctx, {
-    title: '登记入住意向',
-    action: 'care.inquire',
-    fields: [
-      ...(ctx.state.campusOptions?.length
-        ? [select('campusId', '接待分院', ctx.state.campusOptions.map((c) => ({ value: c.id, label: c.name })))]
-        : []),
-      field('name', '长者姓名'),
-      field('contact', '联系人或电话', {
-        required: false
-      }),
-      memo('note', '入住需求')
-    ]
-  });
+  register(ctx);
 }
 
 export function intake(ctx) {
-  const list = byRecent(ctx.state.inquiries);
-  return page(
-    ctx,
-    '接待入住',
-    '登记来访意向，跟进入住需求并分配床位。',
-    choose(
-      btn(ctx, '直接办理入住', () => admit(ctx)),
-      btn(ctx, '登记入住意向', () => inquiryForm(ctx), 'primary')
-    ),
-    kpis([
-      ['待跟进', list.filter((r) => r.status === '待跟进').length],
-      ['已转入住', list.filter((r) => r.status === '已入住').length],
-      ['可分配床位', bedOptions(ctx).length]
-    ]),
-    table(ctx, {
-      title: '接待记录',
-      rows: list,
-      search: {
-        placeholder: '搜索姓名或联系人',
-        value: (r) => r.name + ' ' + r.contact
-      },
-      filter: {
-        value: (r) => r.status
-      },
-      cols: [
-        {
-          label: '来访长者',
-          view: (r) => named(r.name, r.contact)
-        },
-        {
-          label: '登记日期',
-          view: (r) => r.date
-        },
-        {
-          label: '入住需求',
-          view: (r) => r.note || '—'
-        },
-        {
-          label: '跟进状态',
-          view: (r) => badge(ctx, r.status)
-        },
-        {
-          label: '操作',
-          align: 'end',
-          view: (r) =>
-            r.status === '待跟进'
-              ? link(ctx, '办理入住', () =>
-                  admit(ctx, {
-                    inquiryId: r.id,
-                    name: r.name,
-                    contact: r.contact
-                  })
-                )
-              : '—'
-        }
-      ]
-    })
-  );
+  return residents(ctx);
 }
 
 export function residents(ctx) {
-  const list = (rows, renewals = false) =>
-    table(ctx, {
-      title: renewals ? '已到期及未来 30 天到期' : '长者名册',
-      rows,
-      search: {
-        placeholder: '搜索姓名或档案号',
-        value: (r) => r.name + ' ' + r.id
-      },
-      filter: {
-        value: (r) => r.status
-      },
-      cols: [
-        {
-          label: '长者',
-          view: (r) =>
-            node('div', 'fx-person-cell', [
-              node('span', 'fx-person-mark', ctx.ui.icon('people', 16)),
-              named(r.name, r.id)
-            ])
-        },
-        {
-          label: '床位',
-          view: (r) => bedName(ctx, r.bedId)
-        },
-        {
-          label: '照护等级',
-          view: (r) => r.level
-        },
-        {
-          label: '入住日期',
-          view: (r) => r.admittedAt
-        },
-        ...(renewals ? [{ label: '合同到期', view: (r) => r.endDate }] : []),
-        {
-          label: '状态',
-          view: (r) => badge(ctx, r.status)
-        },
-        {
-          label: '操作',
-          align: 'end',
-          view: (r) =>
-            renewals && canAct(ctx, 'care.renew')
-              ? link(ctx, '办理续住', () => renew(ctx, r))
-              : link(ctx, '查看档案', () => profile(ctx, r))
-        }
-      ]
-    });
-  const all = byRecent(ctx.state.residents);
+  const choices = [
+    ['all', '档案名册', () => node('div', 'fx-profile', [registry(ctx), historicInquiries(ctx)])]
+  ];
+  if (canAct(ctx, 'care.renew'))
+    choices.push([
+      'renew',
+      '到期续住',
+      () =>
+        table(ctx, {
+          title: '到期及未来 30 天到期的档案',
+          rows: expiringContracts(ctx.state.residents, today(ctx)),
+          cols: [
+            { label: '长者', view: (r) => r.name },
+            { label: '合同到期', view: (r) => r.endDate },
+            { label: '办理', view: (r) => link(ctx, '续住', () => renew(ctx, r)) }
+          ]
+        })
+    ]);
   return page(
     ctx,
     '长者档案',
-    '按档案号或姓名查找长者。',
-    canAct(ctx, 'care.admit') ? btn(ctx, '办理入住', () => admit(ctx), 'primary') : null,
-    canAct(ctx, 'care.renew')
-      ? tabs('residents', [
-          ['all', '长者名册', () => list(all)],
-          ['renew', '到期续住', () => list(expiringContracts(all, today(ctx)), true)]
-        ])
-      : list(all)
+    '',
+    canAct(ctx, 'care.register') ? btn(ctx, '新建长者档案', () => register(ctx), 'primary') : null,
+    choices.length > 1 ? tabs('residents', choices) : choices[0][2]()
   );
 }
 
-export function beds(ctx) {
+function allBeds(ctx) {
   const all = ctx.state.beds;
   const free = bedOptions(ctx);
-  const wards = [...new Set(all.map((b) => b.ward))];
+  const wardName = (b) =>
+    [...(ctx.state.bedLocations?.[b.id]?.slice(0, 2) || []), b.ward].join(' / ');
+  const wards = [...new Set(all.map(wardName))];
   const filter = node('select', 'fx-input');
   filter.setAttribute('aria-label', '筛选院区');
   for (const ward of ['', ...wards]) {
@@ -460,12 +361,17 @@ export function beds(ctx) {
     for (const button of filterBar.children)
       button.setAttribute('aria-pressed', String(button.dataset.value === status));
     for (const ward of wards.filter((w) => !filter.value || filter.value === w)) {
-      const inWard = all.filter((b) => b.ward === ward);
+      const inWard = all.filter((b) => wardName(b) === ward);
       const visible = inWard.filter((b) => !status || b.status === status);
       if (!visible.length) continue;
       const rooms = new Map();
       for (const bed of visible) {
-        const room = bed.room || bed.label.replace(/-[^-]+$/, '');
+        const room = [
+          ctx.state.bedLocations?.[bed.id]?.[2],
+          bed.room || bed.label.replace(/-[^-]+$/, '')
+        ]
+          .filter(Boolean)
+          .join(' · ');
         if (!rooms.has(room)) rooms.set(room, []);
         rooms.get(room).push(bed);
       }
@@ -536,11 +442,7 @@ export function beds(ctx) {
   }
   filter.addEventListener('change', draw);
   draw();
-  return page(
-    ctx,
-    '床位管理',
-    '按区域查看床态，选择床位办理入住或查阅在住档案。',
-    canAct(ctx, 'care.completeTask') ? btn(ctx, '床旁核验', () => bedside(ctx), 'primary') : null,
+  return node('div', 'fx-profile', [
     kpis([
       ['床位总数', all.length],
       ['已入住', all.length - free.length],
@@ -548,6 +450,19 @@ export function beds(ctx) {
     ]),
     node('div', 'fx-bed-controls', [filterBar, filter]),
     grid
+  ]);
+}
+
+export function beds(ctx) {
+  return page(
+    ctx,
+    '床位管理',
+    '',
+    canAct(ctx, 'care.completeTask') ? btn(ctx, '床旁核验', () => bedside(ctx), 'primary') : null,
+    tabs('beds', [
+      ['all', '全部床位', () => allBeds(ctx)],
+      ['plan', '楼层平面图', () => roomsPage(ctx, true)]
+    ])
   );
 }
 export function expiringContracts(residents, day) {

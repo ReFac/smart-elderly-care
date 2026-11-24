@@ -79,21 +79,24 @@ def inquire(state, p, today):
     return f"登记了{name}的入住意向"
 
 
-def admit(state, p, today):
+def register(state, p, today):
+    """Create an independent dossier before this stay can occupy a bed."""
     inquiry = lookup(state, "inquiries", p["inquiryId"]) if p.get("inquiryId") else None
-    if inquiry and inquiry["status"] != "待跟进":
-        raise ValueError("这条意向已办理入住。")
+    if inquiry and (inquiry["status"] != "待跟进" or inquiry.get("residentId")):
+        raise ValueError("该历史咨询已关联档案。")
     name = text_field(
         p.get("name") or (inquiry and inquiry["name"]),
         "长者姓名",
         required=True,
         limit=60,
     )
-    bed = vacant_bed(state, p.get("bedId"))
-    level = care_level(p.get("level") or "自理")
-    end_date = iso_date(p.get("endDate") or offset_date(today, 365), "入住到期日")
-    if end_date < today:
-        raise ValueError("入住到期日不能早于今天。")
+    kind = p.get("kind", "new")
+    if kind not in ("new", "archive") or p.get("bedId"):
+        raise ValueError("请选择新档案或归档老人，床位在建档后分配。")
+    archived = kind == "archive"
+    prior = iso_date(p.get("archiveDate") or today, "归档日期") if archived else ""
+    if prior and not offset_date(today, -365) < prior <= today:
+        raise ValueError("归档日期须在最近 365 天内。")
     age = p.get("age")
     if age not in ("", None):
         try:
@@ -101,37 +104,90 @@ def admit(state, p, today):
             if not 0 <= age <= 125:
                 raise ValueError
         except (TypeError, ValueError):
-            raise ValueError("请输入有效年龄。") from None
+            raise ValueError("请选择 0 至 125 岁的年龄。") from None
     else:
         age = None
+    gender = p.get("gender") or "未登记"
+    if gender not in ("未登记", "男", "女"):
+        raise ValueError("请选择性别。")
     resident = append_record(
         state,
         "residents",
         name=name,
         bedId="",
-        level=level,
-        status="在住",
+        level=care_level(p.get("level") or "自理"),
+        status="已退住" if archived else "未入住",
         age=age,
-        gender=text_field(p.get("gender") or "未登记", "性别"),
-        allergies=text_field(p.get("allergies"), "过敏史"),
-        risk=text_field(p.get("risk"), "风险要点"),
-        contact=text_field(
-            p.get("contact") or (inquiry and inquiry["contact"]), "联系人"
-        ),
-        admittedAt=today,
-        endDate=end_date,
-        dischargedAt="",
+        gender=gender,
+        allergies="",
+        risk="",
+        contact=inquiry.get("contact", "") if inquiry else "",
+        admittedAt="",
+        endDate="",
+        dischargedAt=prior,
         summary="",
         inquiryId=inquiry["id"] if inquiry else "",
+        registeredAt=today,
+        registeredCampusId=p.get("campusId", ""),
     )
-    move(state, resident, today, "入住", new_bed=bed)
+    if archived:
+        resident["archiveUntil"] = offset_date(prior, 365)
     if inquiry:
-        inquiry.update(status="已入住", residentId=resident["id"])
-    return f"为{name}办理入住，分配{bed['label']}"
+        inquiry.update(status="已建档", residentId=resident["id"])
+    return ("登记归档老人" if archived else "建立待入住档案") + name
+
+
+def date_archive(state, p, today):
+    from .archive_retention import expiry
+
+    person = lookup(state, "residents", p.get("residentId"))
+    if person["status"] != "已退住" or expiry(person):
+        raise ValueError("仅可为缺少有效退住日期的历史档案补登日期。")
+    date = iso_date(p.get("archiveDate"), "凭证上的退住日期")
+    if date > today:
+        raise ValueError("退住日期不应晚于今日。")
+    person.update(dischargedAt=date, archiveUntil=offset_date(date, 365))
+    return "依据原凭证补登记归档日期"
+
+
+def file_archive(state, p, today):
+    person = lookup(state, "residents", p.get("residentId"))
+    if person["status"] != "未入住":
+        raise ValueError("请从未入住档案封存历史资料；在住长者须先办理退住。")
+    day = iso_date(p.get("archiveDate"), "原退住或归档日期")
+    if not offset_date(today, -365) < day <= today:
+        raise ValueError("归档日期须在最近 365 天内。")
+    person.update(status="已退住", dischargedAt=day, archiveUntil=offset_date(day, 365))
+    return "封存历史档案 " + person["name"]
+
+
+def admit(state, p, today):
+    if not p.get("residentId") or set(p) - {"residentId", "bedId", "level", "endDate"}:
+        raise ValueError("请先建立长者档案，办理入住时只选择已有未入住档案。")
+    resident = lookup(state, "residents", p["residentId"])
+    if resident["status"] != "未入住" or resident.get("bedId"):
+        raise ValueError(
+            "请选择未入住档案。在住长者请转床，归档老人再次入住须建立本次档案。"
+        )
+    bed = vacant_bed(state, p.get("bedId"))
+    level = care_level(p.get("level") or resident["level"])
+    end_date = iso_date(p.get("endDate") or offset_date(today, 365), "入住到期日")
+    if end_date < today:
+        raise ValueError("入住到期日不能早于今天。")
+    resident.update(status="在住", admittedAt=today, endDate=end_date, level=level)
+    move(state, resident, today, "入住", new_bed=bed)
+    inquiry = next(
+        (r for r in state["inquiries"] if r["id"] == resident.get("inquiryId")), None
+    )
+    if inquiry:
+        inquiry["status"] = "已入住"
+    return f"为{resident['name']}办理入住，分配{bed['label']}"
 
 
 def transfer(state, p, today):
     resident = get_resident(state, p.get("residentId"))
+    if "fromBedId" in p and p["fromBedId"] != resident["bedId"]:
+        raise ValueError("原床位已改变，请重新核对转床。")
     new_bed = vacant_bed(state, p.get("bedId"))
     old_bed = lookup(state, "beds", resident["bedId"])
     move(state, resident, today, "转床", old_bed, new_bed)
@@ -143,7 +199,12 @@ def discharge(state, p, today):
     note = text_field(p.get("note"), "退住说明")
     old_bed = lookup(state, "beds", resident["bedId"])
     move(state, resident, today, "退住", old_bed=old_bed)
-    resident.update(status="已退住", dischargedAt=today, dischargeNote=note)
+    resident.update(
+        status="已退住",
+        dischargedAt=today,
+        archiveUntil=offset_date(today, 365),
+        dischargeNote=note,
+    )
     for collection in ("tasks", "plans", "medications"):
         for entry in state[collection]:
             if entry["residentId"] == resident["id"] and entry["status"] in (

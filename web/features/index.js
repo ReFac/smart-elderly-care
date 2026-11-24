@@ -2,6 +2,7 @@ import { intake, residents, beds } from './residency.js';
 
 import { assessments, care, medications } from './care.js';
 
+import { longCare } from './long-care.js';
 import { billing } from './billing.js';
 
 import { inventory, shifts, reports } from './operations.js';
@@ -36,6 +37,7 @@ const features = {
   care,
   medications,
   billing,
+  longCare,
   inventory,
   shifts,
   reports,

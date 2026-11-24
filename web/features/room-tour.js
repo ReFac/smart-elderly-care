@@ -147,7 +147,7 @@ export function openFacilityTour(ctx, scope = {}, label = '') {
 export function tourPage(ctx) {
   const manage =
     canAct(ctx, 'facility.setScene') && ctx.available('rooms')
-      ? ctx.ui.button('前往房间工作台', () => ctx.go('rooms'), 'secondary', 'building')
+      ? ctx.ui.button('前往楼层平面图', () => ctx.go('beds','plan'), 'secondary', 'building')
       : null;
   return page(ctx, '环境导览', '浏览机构已发布的环境照片与全景视点。', manage, tourViewer(ctx, {}));
 }

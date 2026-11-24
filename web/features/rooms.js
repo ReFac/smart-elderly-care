@@ -1,6 +1,6 @@
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
-import { active, canAct, choose, node, page } from './shared.js';
-import { admit, profile, transfer } from './residency.js';
+import { active, canAct, node, page } from './shared.js';
+import { admit, profile } from './residency.js';
 import { chooseAdmin } from './room-admin.js';
 import { openFacilityTour } from './room-tour.js';
 import { button, statusText, pathName, heading, lookup, failure } from './room-elements.js';
@@ -17,7 +17,7 @@ export async function goToRoom(ctx, id) {
       floorId: room.floorId,
       roomId: room.id,
     });
-    ctx.go('rooms');
+    ctx.go('beds','plan');
   } catch (error) {
     ctx.toast(error.message);
   }
@@ -259,29 +259,7 @@ function floorPlan(ctx, data, chooseRoom) {
 }
 
 function placeInBed(ctx, room, bed) {
-  const actions = choose();
-  const dialog = ctx.detail(
-    pathName(room.campusName, room.buildingName, room.floorLabel, bed.label + ' 床'),
-    actions
-  );
-  if (canAct(ctx, 'care.admit'))
-    actions.append(
-      ctx.ui.button(
-        '办理新入住',
-        () => {
-          dialog.close();
-          admit(ctx, { bedId: bed.id });
-        },
-        'primary'
-      )
-    );
-  if (canAct(ctx, 'care.transfer') && active(ctx).length)
-    actions.append(
-      ctx.ui.button('转入在住长者', () => {
-        dialog.close();
-        transfer(ctx, null, bed);
-      })
-    );
+  admit(ctx,{bedId:bed.id});
 }
 
 function roomDetails(ctx, room, canRead, highlighted, openTour) {
@@ -349,11 +327,11 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
   ]);
 }
 
-export function roomsPage(ctx) {
+export function roomsPage(ctx, embedded=false) {
   const stage = node('div', 'room-stage', statusText('正在读取楼栋…'));
   const controls = node('div', 'room-controls');
   const area = node('div', 'room-area');
-  const root = page(
+  const root = embedded ? node('section','room-page',[controls,stage]) : page(
     ctx,
     '房间工作台',
     '选择分院、楼栋和楼层，可通过平面图、房号或长者姓名定位房间。',
