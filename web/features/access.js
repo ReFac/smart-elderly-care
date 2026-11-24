@@ -584,6 +584,7 @@ function settings(ctx) {
       ['服务模型', config.model || 'deepseek-flash'],
       ['本期额度', String(config.tokenLimit || 0) + ' tokens'],
       ['已用 / 预留', String(config.tokensUsed || 0) + ' / ' + String(config.tokensReserved || 0)],
+      ['公开搜索', `已计费 ${config.webSearch?.calls || 0} 次，待核对 ${config.webSearch?.pending || 0} 次`],
       ['有效期至', config.expiresOn || '—'],
     ]),
     node('p', 'fx-muted', '云端规划按机构另购套餐启用。开通、续期与额度调整由平台运营方办理。'),

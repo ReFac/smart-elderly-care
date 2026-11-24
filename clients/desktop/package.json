@@ -5,6 +5,7 @@
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
+    "test": "node ../../tests/desktop-sources.test.cjs",
     "package": "node package.cjs"
   },
   "devDependencies": {

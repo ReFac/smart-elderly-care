@@ -20,7 +20,8 @@ async function packageApplication() {
       : path.join(output, 'resources');
   const appPath = path.join(resources, 'app');
   await fs.mkdir(appPath);
-  await fs.copyFile(path.join(__dirname, 'main.cjs'), path.join(appPath, 'main.cjs'));
+  for (const file of ['main.cjs', 'source-preload.cjs', 'public-source.cjs'])
+    await fs.copyFile(path.join(__dirname, file), path.join(appPath, file));
   await fs.writeFile(
     path.join(appPath, 'package.json'),
     JSON.stringify(

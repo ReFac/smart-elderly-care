@@ -4,6 +4,7 @@ from contextlib import closing
 from datetime import datetime
 import json
 from pathlib import Path
+from threading import BoundedSemaphore
 from zoneinfo import ZoneInfo
 
 from .room_context import room_context, validate_proposal
@@ -74,6 +75,7 @@ class Store:
             self.path
         )
         self.now = now
+        self.network_probes = BoundedSemaphore(4)
         self.code_senders = dict(code_senders or {})
         self.facility_policy = facility_policy
         with closing(self.connect()) as db, db:

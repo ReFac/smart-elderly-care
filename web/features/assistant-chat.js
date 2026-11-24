@@ -1,3 +1,4 @@
+import { networkControl, searchSources } from './assistant-network.js';
 import { el, icon } from '../lib/ui.js';
 import { node } from './shared.js';
 import { holdToSpeak, voiceServiceReason } from './agent-voice.js';
@@ -166,6 +167,16 @@ function buildChat(getContext, actor, area, region, label) {
     destroyed = false;
   const requestURL = path + (area ? '?' + area : '');
   let voice;
+  const network = networkControl({
+    probe: (signal) =>
+      json('/api/assistant/network/probe', {
+        method: 'POST',
+        signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      }),
+    changed: () => draw(),
+  });
   async function json(url, options) {
     const response = await fetch(url, { cache: 'no-store', ...options });
     const data = await response.json();
@@ -210,19 +221,26 @@ function buildChat(getContext, actor, area, region, label) {
       }
     },
   });
-  const tools = node('div', 'assistant-compose-tools', [voice.control, send]);
+  const sendActions = node('div', 'assistant-send-actions', [keys, send]);
+  const tools = node('div', 'assistant-compose-tools', [voice.control, sendActions]);
   const composeBox = node('div', 'assistant-compose-box', [input, tools]);
   composer.append(
     error,
     note,
+    network.status,
     composeBox,
-    node('div', 'assistant-composer-foot', [autoLabel, keys]),
+    node('div', 'assistant-composer-foot', [autoLabel, network.button]),
   );
   panel.append(header, log, composer);
   document.body.append(panel);
 
   function sync() {
-    const blocked = !loaded || waiting || sending;
+    const blocked = !loaded || waiting || sending || network.probing;
+    network.button.disabled =
+      !network.enabled && !network.probing && (blocked || voicePhase !== 'idle');
+    input.placeholder = network.enabled
+      ? '搜索公开资料，例如河南长护险政策…'
+      : '问点什么，或按住下方说话…';
     input.disabled = !loaded || waiting;
     input.readOnly = sending;
     send.disabled =
@@ -253,17 +271,19 @@ function buildChat(getContext, actor, area, region, label) {
             : '可以从院里的近况问起，也可以让我帮您找到办理入口。',
       ),
     ]);
-    const examples = personal
-      ? [
-          ['heart', '在哪里查看照护消息？'],
-          ['building', '在哪里查看院内环境？'],
-        ]
-      : label
+    const examples = network.enabled
+      ? [['globe', '查一下河南长期护理保险的公开政策']]
+      : personal
         ? [
-            ['pulse', '这里过去24小时有哪些变化？'],
-            ['care', '有什么照护事项需要跟进？'],
+            ['heart', '在哪里查看照护消息？'],
+            ['building', '在哪里查看院内环境？'],
           ]
-        : [['pulse', '今天养老院情况怎么样？']];
+        : label
+          ? [
+              ['pulse', '这里过去24小时有哪些变化？'],
+              ['care', '有什么照护事项需要跟进？'],
+            ]
+          : [['pulse', '今天养老院情况怎么样？']];
     if (!personal && !label && getContext().available('inventory'))
       examples.push(['box', '今天的护理用具状况如何？']);
     if (!personal && !label && getContext().available('intake'))
@@ -271,6 +291,7 @@ function buildChat(getContext, actor, area, region, label) {
     const suggestions = el('div', 'assistant-starters');
     for (const [glyph, text] of examples) {
       const b = control(text, glyph, 'assistant-starter', () => transmit(text));
+      b.disabled = network.probing;
       b.append(icon('chevron', 14));
       suggestions.append(b);
     }
@@ -280,7 +301,9 @@ function buildChat(getContext, actor, area, region, label) {
   function row(item) {
     const mine = item.role === 'user';
     const body = node('div', 'assistant-turn-body', [messageBody(item.content)]);
-    if (item.action && !mine) {
+    const sources = searchSources(item);
+    if (sources) body.append(sources);
+    if (item.action && !mine && !item.webSearched) {
       const action = item.action;
       const trigger = control(
         action.kind === 'navigate'
@@ -316,7 +339,10 @@ function buildChat(getContext, actor, area, region, label) {
     if (!messages.length && loaded && !waiting && !sending) log.append(emptyState());
     if (sending) {
       log.append(row({ role: 'user', content: retry.text }));
-      const pending = node('div', 'assistant-waiting', [mark(14), '正在整理回答…']);
+      const pending = node('div', 'assistant-waiting', [
+        mark(14),
+        retry.webSearch ? '正在查阅公开资料…' : '正在整理回答…',
+      ]);
       log.append(pending);
     }
     if (waiting && !messages.length) log.append(el('p', 'assistant-loading', '正在读取对话…'));
@@ -341,10 +367,13 @@ function buildChat(getContext, actor, area, region, label) {
     } else log.scrollTop = wasAt;
     sync();
   }
-  function update(result) {
+  function update(result, sent = false) {
+    const next = result.generation || '';
+    if (loaded && (scopeKey !== result.scopeKey || (generation !== next && !(sent && !generation))))
+      network.reset();
     messages = result.messages;
     scopeKey = result.scopeKey;
-    generation = result.generation || '';
+    generation = next;
     loaded = true;
   }
   function problem(message, callback, label = '重试') {
@@ -378,6 +407,7 @@ function buildChat(getContext, actor, area, region, label) {
     }
   }
   async function reloadConflict(message) {
+    network.reset();
     loaded = false;
     messages = [];
     scopeKey = '';
@@ -400,6 +430,7 @@ function buildChat(getContext, actor, area, region, label) {
       });
       if (destroyed) return;
       update(result);
+      network.reset();
       retry = null;
       input.value = '';
       note.textContent = '';
@@ -417,6 +448,7 @@ function buildChat(getContext, actor, area, region, label) {
     }
   }
   function hide() {
+    if (network.probing) network.reset();
     panel.hidden = true;
     voice.cancel();
     const launch = document.getElementById('assistant-launch');
@@ -438,15 +470,17 @@ function buildChat(getContext, actor, area, region, label) {
       !loaded ||
       waiting ||
       sending ||
+      network.probing ||
       voicePhase !== 'idle' ||
       !text ||
       text.length > input.maxLength
     )
       return;
     const page = location.hash.slice(1) || 'overview';
-    if (!retry || retry.text !== text || retry.page !== page)
-      retry = { text, page, id: crypto.randomUUID() };
+    if (!retry || retry.text !== text || retry.page !== page || retry.webSearch !== network.enabled)
+      retry = { text, page, id: crypto.randomUUID(), webSearch: network.enabled };
     sending = true;
+    network.status.textContent = '';
     input.value = '';
     note.textContent = '';
     error.replaceChildren();
@@ -463,6 +497,7 @@ function buildChat(getContext, actor, area, region, label) {
         body: JSON.stringify({
           text,
           requestId: retry.id,
+          ...(retry.webSearch ? { webSearch: true } : {}),
           page: retry.page,
           region,
           scopeKey,
@@ -470,9 +505,13 @@ function buildChat(getContext, actor, area, region, label) {
         }),
       });
       if (destroyed) return;
-      update(result);
+      update(result, true);
       received = true;
-      if (messages.at(-2)?.content === text && page === (location.hash.slice(1) || 'overview'))
+      if (
+        !messages.at(-1)?.webSearched &&
+        messages.at(-2)?.content === text &&
+        page === (location.hash.slice(1) || 'overview')
+      )
         action = messages.at(-1)?.action;
       retry = null;
     } catch (e) {
@@ -482,6 +521,7 @@ function buildChat(getContext, actor, area, region, label) {
         sending = false;
         await reloadConflict('对话或权限已变化，已重新读取，请核对后发送。');
       } else if (e.status === 403) {
+        network.reset();
         loaded = false;
         scopeKey = '';
         messages = [];
@@ -493,6 +533,7 @@ function buildChat(getContext, actor, area, region, label) {
           const latest = await json(requestURL, { signal: request.signal });
           if (destroyed) return;
           if (latest.scopeKey !== scopeKey) {
+            network.reset();
             loaded = false;
             messages = [];
             retry = null;
@@ -570,6 +611,7 @@ function buildChat(getContext, actor, area, region, label) {
     destroy() {
       destroyed = true;
       voice.cancel();
+      network.reset();
       request?.abort();
       window.removeEventListener('blur', loseWindow);
       panel.remove();

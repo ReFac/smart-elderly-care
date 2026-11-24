@@ -20,6 +20,7 @@ const paths = {
   wallet: 'M20 7H4V5l13-3v5 M4 7h16v13H4z M20 11h-5v5h5 M17 13.5h.1',
   shifts: 'M3 6h18v15H3z M7 3v6m10-6v6 M3 11h18m-13 4h2m3 0h2',
   reports: 'M4 3v17h17 M8 16v-5m5 5V7m5 9v-7',
+  globe: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z M3 12h18 M12 3c2.3 2.6 3.5 5.6 3.5 9s-1.2 6.4-3.5 9c-2.3-2.6-3.5-5.6-3.5-9s1.2-6.4 3.5-9z',
   spark: 'm12 2 2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z M20 2v4m-2-2h4',
   mic: 'M9 7a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0z M5 11v1a7 7 0 0 0 14 0v-1 M12 19v3m-3 0h6',
   keyboard: 'M2 5h20v14H2z M5 9h1m3 0h1m3 0h1m3 0h1 M5 12h1m3 0h1m3 0h1m3 0h1 M8 15h8',

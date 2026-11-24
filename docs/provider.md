@@ -36,6 +36,24 @@ python3 manage_plan.py --db .local/workspace.sqlite3 reconcile --actor ACCOUNT_I
 
 若运营方已结算而供应商随后才返回不同用量，`unsettled` 会以 `late_receipt` 列出原结算、供应商总量及差额。按原请求号用 `reconcile --tokens` 输入对账确认的**实际总量**。系统保留原结算，另存本次调整。补扣差额在核对前预留，退款差额在核对后释放；同一张迟到回执重复送达只产生一次调整。迟到答复不会写入对话或业务建议。
 
+## 公开网页搜索
+
+在助理对话框底部，点击「语音转写后自动发送」右侧的头像。工作台先以机构凭据访问 DeepSeek 官方模型列表，确认可以连接 Flash 后显示「已联网」。开启后可以直接问公开问题，回复下方列出可点击的网页标题和域名。新对话默认关闭。连接失败可在同一位置重试。[DeepSeek 模型列表](https://api-docs.deepseek.com/api/list-models/)
+
+| 接口 | 用途 |
+| --- | --- |
+| `POST /api/assistant/network/probe` | 登录后发送空 JSON 对象。检查机构套餐、服务网络、供应商凭据和模型可用性。成功回传 `connected`、`model`、`checkedAt`。探测只访问固定的官方模型目录。 |
+| `POST /api/assistant/chat` | 在现有请求上加 `webSearch: true` 允许本轮搜索。公开查询由模型从本轮问题选取关键词，服务端调用官方 Search API，再将有界的网页摘录交给 Flash 写答复。每条实际查询过网页的回复带 `webSearched: true` 和 `sources`。来源随本条消息保存，重新打开不会再次查询。 |
+
+院内业务、具体个人信息、操作指令和依赖院内上下文的追问继续按原有权限办理。独立搜索接口收到的是经过检查的本轮公开关键词。搜索结果作为资料供模型阅读，来源列表由服务端根据真实回执构建。遇到没有匹配的网页、供应商拒绝或网络故障时，工作台会显示相应状态。[官方搜索接口](https://api-docs.deepseek.com/api/search/)
+
+独立搜索和模型 token 分别计量。按本次核对的官方规则，成功返回非空结果时每次计一笔搜索，空结果免费；连接探测不调用推理模型。机构总管理员可在套餐页查看计费搜索次数和待核对次数。运维方可用下列命令按供应商账单核对未明回执。记录用账号及请求号关联，不保存搜索关键词。[DeepSeek 搜索计费说明](https://api-docs.deepseek.com/guides/search/#billing)
+
+```bash
+python3 manage_plan.py --db .local/workspace.sqlite3 search-unsettled
+python3 manage_plan.py --db .local/workspace.sqlite3 search-reconcile --actor ACCOUNT_ID --request REQUEST_ID --calls 1
+```
+
 ## 会传给模型的内容
 
 对话发送用户主动输入的消息、该账号在当前授权范围内的近期统计和当前会话历史。物资与财务简报使用已授权的品目、数量、金额等指标；照护巡查发送当日计划、完成、待办和逾期数量。临床岗位和定时巡查另行生成临床提示，只使用风险登记和体征待复核的标志、已核对的咳嗽时段统计。普通护工的调用仅使用护理进度，二者独立生成和展示。长者姓名、具体工单的经办人和病历原文不进入巡查提示。语音使用 DeepSeek ASR，文书原件使用单独的 OCR 办理流程。

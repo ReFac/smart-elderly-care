@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>助理联网搜索回归</title>
+<link rel="stylesheet" href="../../web/style.css">
+<link rel="stylesheet" href="../../web/agents.css">
+<body>
+<output role="status">运行中</output>
+<script type="module">
+  import { chatLauncher, toggleChat, openChat, clearChat, checkChatUser } from '../../web/features/assistant-chat.js';
+
+  const check = (ok, label) => { if (!ok) throw new Error(label); };
+  const find = (s) => document.querySelector(s);
+  async function until(test, label) {
+    const end = performance.now() + 4000;
+    while (!test() && performance.now() < end) await new Promise(resolve => setTimeout(resolve, 12));
+    check(test(), label);
+  }
+  const user = { id:'test-network-user', kind:'staff', permissions:['assistants'] };
+  const state = { user, uiSettings:{ institutionName:'演练机构', hiddenRoutes:[] },
+    residents:[{id:'fixture-private-person',name:'仅供院内核对'}] };
+  const calls = [], navigations = [];
+  const ctx = {state, available:() => true, go:(...args)=>navigations.push(args), async refreshWorkspace(){ return true; } };
+  let mode='ok', backendError=false, probeStarted, unblock, generation='', messages=[];
+  const current = () => ({ scopeKey:'test-scope',generation,messages });
+  window.fetch = async (url, options) => {
+    const payload=options.body && JSON.parse(options.body);
+    calls.push({url,method:options.method || 'GET',payload});
+    if (url === '/api/assistant/network/probe') {
+      check(options.method==='POST' && JSON.stringify(payload)==='{}','连接检测不含问题、页面或用户资料');
+      if (mode === 'wait') { probeStarted=true; await new Promise(resolve=>unblock=resolve); }
+      if (mode === 'fail') return Response.json({error:'搜索服务暂不可用，请稍后重试。'},{status:503});
+      return Response.json({connected:true,model:'deepseek-flash'});
+    }
+    if (url === '/api/assistant/chat/reset'){
+      if (payload.generation!==generation) return Response.json({error:'版本变更'},{status:409});
+      generation+='-reset';messages=[];return Response.json(current());
+    }
+    if (options.method==='POST') {
+      check(url==='/api/assistant/chat','仅向机构同源聊天接口发送问题');
+      if (backendError) throw new TypeError('网络暂不可用');
+      if (!generation) generation='first';
+      messages.push({role:'user',content:payload.text,at:new Date().toISOString()});
+      const fetched=payload.webSearch===true;
+      messages.push({role:'assistant',content:fetched?'可查阅公开政策文本。':'院内答复。',at:new Date().toISOString(),
+        ...(fetched ? {webSearched:true,action:{kind:'navigate',route:'intake'},sources:[
+          {title:'<b>长期护理保险办理说明</b>',url:'https://www.nhsa.gov.cn/policy.html'},
+          {title:'重复链接',url:'https://www.nhsa.gov.cn/policy.html'},
+          {title:'错误地址',url:'javascript:alert(1)'},
+          {title:'院内',url:'http://127.0.0.1/file'},
+          {title:'内网',url:'https://private.local/report'},
+          {title:'含凭据',url:'https://user:secret@example.com/path'},
+        ]}: {})});
+    }
+    return Response.json(current());
+  };
+  const launch=chatLauncher(()=>toggleChat(()=>ctx));
+  document.body.append(launch);
+  const network=()=>find('.assistant-network');
+  const pressed=()=>network()?.getAttribute('aria-pressed')==='true';
+  const chats=()=>calls.filter(row=>row.url==='/api/assistant/chat' && row.method==='POST');
+  async function send(question){
+    const input=find('.assistant-input');
+    input.value=question;
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+    await until(()=>!input.readOnly && !input.disabled, '一轮结束');
+  }
+  async function run(){
+    launch.click(); await until(()=>!network().disabled,'打开助理');
+    check(!pressed() && !calls.some(row=>row.url.includes('/probe')),'首次进入不会检测或开启联网');
+    const foot=find('.assistant-composer-foot');
+    check(foot.firstElementChild.matches('.assistant-auto') && foot.lastElementChild===network(),'头像开关位于自动发送右侧');
+    check(network().getAttribute('aria-label')==='联网搜索' && network().tabIndex===0 && !!network().querySelector('.assistant-mark'),'头像开关可以通过键盘操作');
+    mode='wait';network().click();
+    await until(()=>probeStarted && network().getAttribute('aria-busy')==='true','检测中可取消');
+    await send('这个院内草稿仍在输入中');
+    check(chats().length===0 && find('.assistant-hold').disabled,'检测阶段不会误发');
+    network().click(); unblock(); await until(()=>!network().getAttribute('aria-busy').includes('true'),'取消检测');
+    check(!pressed(),'迟到的检测回执无法再次联网');
+    mode='fail'; network().click();
+    await until(()=>find('.assistant-network-status').textContent.includes('暂不可用'),'失败可见');
+    check(!pressed() && !find('.assistant-hold').disabled,'检测失败仍可普通问答');
+    mode='ok';network().click();await until(pressed,'联网开启');
+    check(find('.assistant-input').value.includes('草稿'),'切换开关保留草稿');
+    await send('河南的长护险公开政策有哪些？');
+    check(chats()[0].payload.webSearch===true && !JSON.stringify(chats()[0].payload).includes('fixture-private-person'),'联网提问不传业务台账');
+    check(pressed(),'当前对话首次回答后联网设置仍有效');
+    const link=find('.assistant-source-link');
+    check(document.querySelectorAll('.assistant-source-link').length===1 && !document.querySelector('.assistant-source-link b'),'来源去重、安全链接和纯文本标题');
+    check(link.href==='https://www.nhsa.gov.cn/policy.html' && link.target==='_blank' && link.rel.includes('noreferrer') && link.textContent.includes('www.nhsa.gov.cn'),'可核验来源与外链隔离');
+    check(!find('.assistant-action') && !navigations.length,'网页不能触发院内操作');
+    launch.click();launch.click();await until(()=>!network().disabled,'重开同一对话');
+    check(pressed(),'收起再打开保留本轮联网状态');
+    backendError=true;await send('再次搜索');
+    const failed=chats().at(-1).payload;
+    network().click();backendError=false;
+    await send('再次搜索');
+    const ordinary=chats().at(-1).payload;
+    check(!ordinary.webSearch && ordinary.requestId!==failed.requestId,'改为普通模式重试时使用独立请求');
+    check(!find('.from-assistant:last-child .assistant-sources'),'普通回答不标为已查网');
+    network().click(); await until(pressed,'重新联网');
+    generation='another-tab';messages=[{role:'user',content:'新一轮'},{role:'assistant',content:'已更新'}];
+    find('.assistant-new').click();await until(()=>!network().disabled && find('.assistant-log').textContent.includes('已更新'),'旧标签页与新会话同步');
+    check(!pressed() && messages.length===2,'新一代会话不继承联网');
+    network().click();await until(pressed,'再次开启');
+    find('.assistant-new').click(); await until(()=>!network().disabled && !find('.from-assistant'),'重置成功');
+    check(!pressed(),'手动新建对话默认关闭');
+    network().click();await until(pressed,'区域切换前开启');
+    openChat(()=>ctx,{roomId:'fixture-room',label:'演练房间'});await until(()=>!network().disabled,'切换到房间对话');
+    check(!pressed(),'房间范围单独启用');
+    state.user={...user,id:'other'};checkChatUser(ctx);launch.click();await until(()=>!network().disabled,'换账号');
+    check(!pressed(),'其他账号默认关闭');
+    check(!calls.some(c=>!c.url.startsWith('/api/assistant/')),'页面自身不直接联系搜索网站');
+    clearChat();document.documentElement.dataset.result='pass';find('output').textContent='PASS';
+  }
+  run().catch(error=>{document.documentElement.dataset.result='fail';find('output').textContent=error.stack || error.message;});
+</script>
+</body></html>

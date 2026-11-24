@@ -28,6 +28,7 @@
   let messages = [], submitted = [], audioUploads = 0, fail = false, generation = 'test', releaseReply;
   const snapshot = () => ({ messages:[...messages], scopeKey:'fixture', generation, contextLimit:100000 });
   window.fetch = async (url, options) => {
+    if (url === '/api/assistant/network/probe') return Response.json({connected:true});
     if (url === '/test/asr') {
       check(options.body instanceof Blob && options.headers['X-DeepSeek-Consent'] === 'yes', '录音请求');
       audioUploads++;
@@ -96,11 +97,16 @@
     await until(()=>input.value.includes('护理用具'), '松开自动转写并回填');
     check(submitted.length===1 && audioUploads===1,'不开自动发送时可以修改');
     find('.assistant-auto input').click();
+    find('.assistant-network').click();
+    await until(()=>find('.assistant-network').getAttribute('aria-pressed')==='true','启用联网后语音提问');
     type(''); press(mic);
     await until(()=>mic.dataset.phase==='recording','再次录音');
     await new Promise(resolve=>setTimeout(resolve,250)); release(mic);
     await until(()=>submitted.length===2,'开启自动发送后松开即发');
     check(audioUploads===2 && streams.every(s=>s.getAudioTracks().every(t=>t.readyState==='ended')),'麦克风已释放');
+    check(submitted.at(-1).webSearch===true, '语音自动发送沿用当前联网开关');
+    await until(()=>!find('.assistant-network').disabled,'语音问题已送达');
+    find('.assistant-network').click();
     fail=true;type('追问'); enter();
     await until(()=>find('.assistant-error').innerText.includes('网络暂不可用'),'云端错误直接可见');
     check(input.value==='追问' && !goTo.length,'出错保留草稿');

@@ -24,6 +24,8 @@ npm start
 
 若使用机构后端，在启动时设置 `NH_APP_URL` 为机构完整 HTTPS 地址。主窗口和用于打印床头卡、查看授权图片的子窗口共用登录会话。渲染页面启用 Electron 沙箱、上下文隔离和同源导航约束。
 
+助理的联网回答会列出网页来源。点击来源标题后，桌面端会核对链接和域名解析地址，再用系统默认浏览器打开公开网页。床头卡打印和医疗原件继续在机构桌面窗口内打开。在 `clients/desktop` 运行 `npm test` 可检查来源点击和地址约束。[Electron 安全指南](https://www.electronjs.org/docs/latest/tutorial/security)
+
 创建当前操作系统及 CPU 架构的独立桌面目录：
 
 ```bash

@@ -12,6 +12,7 @@ from .. import access_policy as policy, provider
 from ..provider import deepseek
 from ..store import Conflict, SignedOut
 from . import chat_context as ctx
+from . import chat_web
 
 CONTEXT_LIMIT = 100_000
 OUTPUT_LIMIT = 1800
@@ -43,6 +44,10 @@ def init(db):
         generation TEXT NOT NULL,request TEXT NOT NULL,fingerprint TEXT NOT NULL,
         asked TEXT NOT NULL,answered TEXT NOT NULL,question TEXT NOT NULL,answer TEXT NOT NULL,
         action TEXT,hours INTEGER NOT NULL, UNIQUE(actor,request))""")
+    if "web_sources" not in {
+        r[1] for r in db.execute("PRAGMA table_info(assistant_turns)")
+    }:
+        db.execute("ALTER TABLE assistant_turns ADD COLUMN web_sources TEXT")
     db.execute(
         "CREATE INDEX IF NOT EXISTS assistant_recent ON assistant_turns(actor,scope,generation,seq DESC)"
     )
@@ -50,7 +55,7 @@ def init(db):
 
 def rows(db, actor, scope, generation):
     return db.execute(
-        """SELECT asked,answered,question,answer,action,hours FROM assistant_turns
+        """SELECT asked,answered,question,answer,action,hours,web_sources FROM assistant_turns
         WHERE actor=? AND scope=? AND generation=? ORDER BY seq DESC""",
         (actor, scope, generation),
     )
@@ -66,6 +71,8 @@ def messages(db, actor, scope, generation, limit):
                 "content": row["answer"],
                 "at": row["answered"],
                 "action": json.loads(row["action"]) if row["action"] else None,
+                "webSearched": row["web_sources"] is not None,
+                "sources": json.loads(row["web_sources"]) if row["web_sources"] else [],
             },
         ]
         size = len(ctx.compact(pair).encode()) + 32
@@ -184,7 +191,20 @@ def permitted_actions(user, routes, text, selected):
     return {}
 
 
-def build_body(db, model, user, scope, generation, routes, facts, actions, page, text):
+def build_body(
+    db,
+    model,
+    user,
+    scope,
+    generation,
+    routes,
+    facts,
+    actions,
+    page,
+    text,
+    *,
+    web_enabled=False,
+):
     envelope = {
         "本次可见资料": facts,
         "本人可见页面": routes,
@@ -194,6 +214,8 @@ def build_body(db, model, user, scope, generation, routes, facts, actions, page,
     instruction = SYSTEM + (
         ACTION_FORMAT if actions else "只用自然中文直接回复，不要输出 JSON 或技术字段。"
     )
+    if web_enabled:
+        instruction += "\n本轮只有院内资料，没有执行公开网络搜索。不要声称已查网或列出未经核实的网页来源；需要公共资料时可提示以不含个人资料的独立主题提问。"
     system = {"role": "system", "content": instruction}
     envelope["当前问题"] = text
     envelope["对话上文"] = []
@@ -218,6 +240,12 @@ def build_body(db, model, user, scope, generation, routes, facts, actions, page,
         "stream": False,
         **({"response_format": {"type": "json_object"}} if actions else {}),
     }
+
+
+def token_allowance(body):
+    return (
+        len(ctx.compact(body["messages"]).encode()) + body["max_tokens"] + CONTEXT_PAD
+    )
 
 
 def extract(response, actions, request, scope):
@@ -269,6 +297,7 @@ def reply(store, token, data, *, transport=None):
         "region",
         "hours",
         "generation",
+        "webSearch",
     }:
         raise ValueError("对话参数无效")
     text, request, page = data.get("text"), data.get("requestId"), data.get("page", "")
@@ -280,6 +309,9 @@ def reply(store, token, data, *, transport=None):
         raise ValueError("发送编号无效")
     if not isinstance(page, str) or len(page) > 80:
         raise ValueError("页面编号无效")
+    web_enabled = data.get("webSearch", False)
+    if type(web_enabled) is not bool:
+        raise ValueError("联网开关格式无效")
     text = text.strip()
     now = store.now()
     area = data.get("region")
@@ -301,9 +333,10 @@ def reply(store, token, data, *, transport=None):
                 (uid, scope),
             ).fetchone()
         generation = thread["generation"]
-        fingerprint = sha256(
-            ctx.compact([scope, generation, text, page, data.get("hours")]).encode()
-        ).hexdigest()
+        signature = [scope, generation, text, page, data.get("hours")]
+        if web_enabled:
+            signature.append(True)
+        fingerprint = sha256(ctx.compact(signature).encode()).hexdigest()
         previous = db.execute(
             "SELECT fingerprint FROM api_usage WHERE actor=? AND request=?",
             (uid, receipt),
@@ -353,14 +386,33 @@ def reply(store, token, data, *, transport=None):
             )
         ):
             topics += " " + last["question"]
-        facts = ctx.evidence(store, db, user, state, selected, hours, topics)
         actions = permitted_actions(user, routes, text, selected)
-        body = build_body(
-            db, model, user, scope, generation, routes, facts, actions, page, text
+
+        def private_body(db, state):
+            facts = ctx.evidence(store, db, user, state, selected, hours, topics)
+            return build_body(
+                db,
+                model,
+                user,
+                scope,
+                generation,
+                routes,
+                facts,
+                actions,
+                page,
+                text,
+                web_enabled=web_enabled,
+            )
+
+        consider_search = web_enabled and chat_web.eligible(db, state, text, actions)
+        # The public excerpt size is unknown. Hold the baseline now, then resize the
+        # reservation under a write transaction once the exact selected excerpts are known.
+        body = (
+            chat_web.public_body(model, text, [], OUTPUT_LIMIT, now)
+            if consider_search
+            else private_body(db, state)
         )
-        allowance = (
-            len(ctx.compact(body["messages"]).encode()) + OUTPUT_LIMIT + CONTEXT_PAD
-        )
+        allowance = token_allowance(body)
         if sum(provider.usage(db, plan["id"])) + allowance > plan["tokenLimit"]:
             raise Unavailable("机构的云端 AI 套餐可用额度不足，请联系管理员")
         db.execute(
@@ -381,10 +433,98 @@ def reply(store, token, data, *, transport=None):
             (request, int(now.timestamp()), uid, scope),
         )
 
+    def current_search_state(db):
+        _, _, _, visible, _, current = conversation(store, db, token, area, scope)
+        if (
+            not current
+            or current["pending"] != request
+            or current["generation"] != generation
+        ):
+            raise Conflict("对话已更新，请重新提问")
+        if not db.execute(
+            "SELECT 1 FROM api_usage WHERE actor=? AND request=? AND status='pending'",
+            (uid, receipt),
+        ).fetchone():
+            raise chat_web.SearchFailure("本轮用量已进入对账，请重新发送")
+        live_plan = provider.latest(db)
+        if (
+            not live_plan
+            or live_plan["id"] != plan["id"]
+            or not live_plan["enabled"]
+            or not (
+                live_plan["startsOn"]
+                <= store.now().date().isoformat()
+                <= live_plan["expiresOn"]
+            )
+        ):
+            raise chat_web.SearchFailure("机构云端 AI 套餐已经变化，请重新提问")
+        return visible
+
+    sources = None
+    preparation_error = None
     charged = 0
     rejected = False
     result, failure = None, ""
     try:
+        if consider_search:
+            try:
+                network = chat_web.collect(
+                    store,
+                    uid,
+                    request,
+                    plan["id"],
+                    key,
+                    text,
+                    scope,
+                    current_search_state,
+                )
+                with closing(store.connect()) as db, db:
+                    db.execute("BEGIN IMMEDIATE")
+                    visible = current_search_state(db)
+                    available = (
+                        provider.latest(db)["tokenLimit"]
+                        - sum(provider.usage(db, plan["id"]))
+                        + allowance
+                    )
+                    if network is not None:
+                        topic, hits = network
+                        actions = {}
+                        body = chat_web.public_body(
+                            model, topic, hits, OUTPUT_LIMIT, now
+                        )
+                        while len(hits) > 1 and token_allowance(body) > available:
+                            hits = hits[:-1]
+                            body = chat_web.public_body(
+                                model, topic, hits, OUTPUT_LIMIT, now
+                            )
+                        sources = [
+                            {"title": item["title"], "url": item["url"]}
+                            for item in hits
+                        ]
+                    else:
+                        body = private_body(db, visible)
+                    allowance = token_allowance(body)
+                    if allowance > available:
+                        raise chat_web.SearchFailure(
+                            "机构套餐剩余额度不足以整理本轮答复，请联系管理员"
+                        )
+                    changed = db.execute(
+                        "UPDATE api_usage SET allowance=? WHERE actor=? AND request=? AND status='pending'",
+                        (allowance, uid, receipt),
+                    )
+                    if not changed.rowcount:
+                        raise chat_web.SearchFailure("本轮用量已进入对账，请重新发送")
+            except (
+                Conflict,
+                PermissionError,
+                SignedOut,
+                ValueError,
+                FileNotFoundError,
+            ) as err:
+                preparation_error = err
+                raise chat_web.SearchFailure(
+                    "公开检索的会话、套餐或权限已经变化"
+                ) from None
         response = (
             transport(key, body) if transport else deepseek.send(key, body, timeout=60)
         )
@@ -395,10 +535,17 @@ def reply(store, token, data, *, transport=None):
         else:
             raise ValueError
         _, answer, action = extract(response, actions, request, scope)
+        if sources is not None:
+            answer = chat_web.public_response(answer, sources)
+            if not answer:
+                raise ValueError("缺少可展示的公开答复")
         if action and area:
             action["region"] = ctx.region.selection(area)
         result = (answer, action)
         status = "ok"
+    except chat_web.SearchFailure as err:
+        # No synthesis was sent. Topic-selection tokens and the search call have their own receipts.
+        status, failure, rejected = "closed", str(err), True
     except HTTPError as err:
         rejected = err.code in deepseek.REJECTED_HTTP
         status = "closed" if rejected else "uncertain"
@@ -464,8 +611,8 @@ def reply(store, token, data, *, transport=None):
                 current_scope = None
             if current_scope == scope:
                 db.execute(
-                    """INSERT INTO assistant_turns(actor,scope,generation,request,fingerprint,asked,answered,question,answer,action,hours)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    """INSERT INTO assistant_turns(actor,scope,generation,request,fingerprint,asked,answered,question,answer,action,hours,web_sources)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         uid,
                         scope,
@@ -478,9 +625,12 @@ def reply(store, token, data, *, transport=None):
                         answer,
                         ctx.compact(action) if action else None,
                         hours,
+                        ctx.compact(sources) if sources is not None else None,
                     ),
                 )
                 return view(db, uid, scope, current)
     if result:
         raise Conflict("当前账号权限或区域已变化，请重新打开助理")
+    if preparation_error is not None:
+        raise preparation_error
     raise Unavailable(failure)

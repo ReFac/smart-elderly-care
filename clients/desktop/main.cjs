@@ -1,4 +1,6 @@
-const { app, BrowserWindow, dialog, session } = require('electron');
+const { app, BrowserWindow, dialog, session, shell } = require('electron');
+const path = require('node:path');
+const { registerSourceLinks } = require('./public-source.cjs');
 
 function workspaceUrl() {
   const target = new URL(process.env.NH_APP_URL || 'http://127.0.0.1:8765');
@@ -29,8 +31,9 @@ async function showWorkspace(target) {
     minHeight: 530,
     backgroundColor: '#f3f6fc',
     autoHideMenuBar: true,
-    webPreferences,
+    webPreferences: { ...webPreferences, preload: path.join(__dirname, 'source-preload.cjs') },
   });
+  registerSourceLinks(win.webContents, target.origin, url => shell.openExternal(url));
   try {
     await win.loadURL(target.href);
   } catch {

@@ -396,6 +396,12 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, image, mime)
 
     def write_resource(self, path):
+        if path == "/api/assistant/network/probe":
+            from platform_core.agents import network
+
+            if self.read_json(1024):
+                raise ValueError("连接检测仅使用机构配置的 DeepSeek 服务")
+            return self.send_json(200, network.probe(self.store, self.token()))
         chart = re.fullmatch(r"/api/residents/([a-zA-Z0-9_-]+)/summary-draft", path)
         if chart:
             if self.read_json(SMALL_BODY) != {}:

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .. import access_policy
 from ..agents import specialists
-from . import deepseek, late_receipts
+from . import deepseek, late_receipts, search_usage
 from .late_receipts import late_usage as late_usage, unsettled as unsettled
 
 DEFAULT_MODEL = "deepseek-flash"
@@ -34,6 +34,7 @@ def init(db):
         specialistIds TEXT NOT NULL DEFAULT '[]', reason TEXT NOT NULL DEFAULT '',
         PRIMARY KEY(actor,request))""")
     db.execute("CREATE INDEX IF NOT EXISTS api_usage_plan ON api_usage(planId)")
+    search_usage.init(db)
     late_receipts.init(db)
     generation.init(db)
 
@@ -233,6 +234,7 @@ def status(db, user, now=None):
             tokensUsed=used,
             tokensReserved=held,
             media=media_overview(db),
+            webSearch=search_usage.overview(db, plan["id"] if plan else None),
         )
     return result
 

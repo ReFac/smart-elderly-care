@@ -8,7 +8,7 @@ from platform_core import secure_storage
 import sys
 
 from platform_core import activity, provider
-from platform_core.provider import media
+from platform_core.provider import media, search_usage
 
 
 def main():
@@ -40,6 +40,13 @@ def main():
     )
     rec_media.add_argument("--call", required=True)
     rec_media.add_argument("--units", type=int, required=True)
+    commands.add_parser("search-unsettled", help="查看待核对的公开搜索请求")
+    rec_search = commands.add_parser(
+        "search-reconcile", help="按供应商账单核对单笔搜索"
+    )
+    rec_search.add_argument("--actor", required=True)
+    rec_search.add_argument("--request", required=True)
+    rec_search.add_argument("--calls", type=int, choices=(0, 1), required=True)
     args = parser.parse_args()
     try:
         with (
@@ -62,7 +69,12 @@ def main():
 
             history.watch(db, "platform.plan")
             change = None
-            if args.command == "grant":
+            if args.command == "search-reconcile":
+                search_usage.reconcile(
+                    db, args.actor, args.request, args.calls, provider.local_time()
+                )
+                change = f"核对公开搜索用量 {args.calls} 次"
+            elif args.command == "grant":
                 provider.grant(db, args.name, args.tokens, args.expires)
                 for kind, limit in (("ocr", args.ocr_pages), ("asr", args.asr_seconds)):
                     if limit is not None:
@@ -102,7 +114,9 @@ def main():
                     {},
                     {},
                 )
-            if args.command == "media-unsettled":
+            if args.command == "search-unsettled":
+                result = search_usage.unsettled(db)
+            elif args.command == "media-unsettled":
                 result = [
                     dict(r)
                     for r in db.execute(
