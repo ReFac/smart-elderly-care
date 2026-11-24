@@ -1,0 +1,4 @@
+page{background:#f3f6fc;color:#172b50}
+.state{display:flex;flex-direction:column;padding:140rpx 48rpx;gap:26rpx}
+.title{font-size:40rpx;font-weight:600}
+button{background:#2457b7;color:#fff;margin:14rpx 0 0}

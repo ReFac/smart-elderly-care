@@ -1,0 +1,41 @@
+import { intake, residents, beds } from './residency.js';
+
+import { assessments, care, medications } from './care.js';
+
+import { billing } from './billing.js';
+
+import { inventory, shifts, reports } from './operations.js';
+
+import { assistantsPage } from './assistants.js';
+
+import { renderAccess } from './access.js';
+import { renderDossier } from './dossier.js';
+import { renderGateways } from './gateways.js';
+import { activityPage } from './activity.js';
+
+const features = {
+  access: (ctx) => renderAccess('access', ctx),
+  settings: (ctx) => renderAccess('settings', ctx),
+  family: (ctx) => renderDossier('family', ctx),
+  dossier: (ctx) => renderDossier('dossier', ctx),
+  integrations: (ctx) => renderGateways('integrations', ctx),
+  inbox: (ctx) => renderGateways('inbox', ctx),
+  activity: activityPage,
+  intake,
+  residents,
+  beds,
+  assessments,
+  care,
+  medications,
+  billing,
+  inventory,
+  shifts,
+  reports,
+  assistants: assistantsPage,
+};
+
+export function renderFeature(route, ctx) {
+  const render = features[route];
+  if (!render) return ctx.ui.empty('未找到该工作页面');
+  return render(ctx);
+}

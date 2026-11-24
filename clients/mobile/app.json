@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "颐和医养",
+    "slug": "yihe-care",
+    "version": "0.2.0",
+    "orientation": "default",
+    "platforms": ["android", "ios"],
+    "userInterfaceStyle": "light",
+    "android": { "package": "cn.yihe.care", "permissions": ["CAMERA"] },
+    "ios": {
+      "bundleIdentifier": "cn.yihe.care",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "用于拍摄并留存长者医疗文书原件。",
+        "NSPhotoLibraryUsageDescription": "用于选择经授权归档的医疗文书照片。"
+      }
+    }
+  }
+}

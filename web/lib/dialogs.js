@@ -1,0 +1,119 @@
+import { el, button, toast } from './ui.js';
+
+function modal(title) {
+  const previous = document.activeElement;
+  const dialog = el('dialog', 'dialog');
+  dialog.setAttribute('aria-label', title);
+  const head = el('header', 'dialog-head');
+  const close = button('', () => dialog.close(), 'icon', 'close');
+  close.setAttribute('aria-label', '关闭对话框');
+  head.append(el('h2', '', title), close);
+  dialog.append(head);
+  dialog.addEventListener('click', (event) => {
+    if (event.target !== dialog) return;
+    const r = dialog.getBoundingClientRect();
+    if (
+      event.clientX < r.left ||
+      event.clientX > r.right ||
+      event.clientY < r.top ||
+      event.clientY > r.bottom
+    )
+      dialog.close();
+  });
+  dialog.addEventListener(
+    'close',
+    () => {
+      dialog.remove();
+      if (previous?.isConnected) previous.focus();
+    },
+    {
+      once: true,
+    }
+  );
+  document.body.append(dialog);
+  return dialog;
+}
+
+export function detail(title, content) {
+  const dialog = modal(title);
+  const body = el('section', 'dialog-body');
+  body.append(content);
+  dialog.append(body);
+  dialog.showModal();
+  return dialog;
+}
+
+export function formDialog({
+  title,
+  fields,
+  onSubmit,
+  description,
+  submitLabel: submitLabel = '保存',
+}) {
+  const dialog = modal(title);
+  const form = el('form', 'dialog-form');
+  if (description) form.append(el('p', 'form-description', description));
+  const controls = [];
+  for (const field of fields) {
+    const label = el('label', 'field');
+    const caption = el('span', '', field.label);
+    if (field.required) caption.append(el('span', 'required', ' *'));
+    let input;
+    if (field.type === 'select') {
+      input = el('select');
+      for (const option of field.options || []) {
+        const value = typeof option === 'object' ? option.value : option;
+        const name = typeof option === 'object' ? option.label : option;
+        input.add(new Option(name, value));
+      }
+    } else if (field.type === 'textarea') {
+      input = el('textarea');
+      input.rows = 3;
+    } else {
+      input = el('input');
+      input.type = field.type || 'text';
+    }
+    input.name = field.name;
+    input.required = Boolean(field.required);
+    if (field.value != null) input.value = field.value;
+    if (field.placeholder) input.placeholder = field.placeholder;
+    for (const name of ['min', 'max', 'step', 'maxLength'])
+      if (field[name] != null) input[name] = field[name];
+    if (input.type === 'text' || field.type === 'textarea')
+      input.maxLength = field.maxLength || 1500;
+    controls.push(input);
+    label.append(caption, input);
+    form.append(label);
+  }
+  const error = el('div', 'form-error');
+  error.setAttribute('role', 'alert');
+  const footer = el('footer', 'dialog-actions');
+  const submit = el('button', 'btn btn-primary', submitLabel);
+  submit.type = 'submit';
+  footer.append(
+    button('取消', () => dialog.close()),
+    submit
+  );
+  form.append(error, footer);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (submit.disabled) return;
+    submit.disabled = true;
+    try {
+      const values = Object.fromEntries(new FormData(form));
+      if (await onSubmit(values)) dialog.close();
+      else
+        error.textContent =
+          document.getElementById('announcer').textContent || '保存失败，请核对表单。';
+    } catch (ex) {
+      error.textContent = ex.message;
+      toast(ex.message);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  dialog.append(form);
+  dialog.showModal();
+  controls[0]?.focus();
+  return dialog;
+}
