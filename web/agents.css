@@ -215,6 +215,14 @@
 .assistant-message-text .assistant-bullet { padding-left: 14px; position: relative; }
 .assistant-bullet:before { content: '•'; position: absolute; left: 1px; color: var(--accent); }
 .assistant-action { margin-top: 8px; font-weight: 600; color: var(--accent); }
+.assistant-page-links { display: grid; justify-items: start; gap: 6px; margin-top: 9px; }
+.assistant-page-link {
+  max-width: 100%; min-height: 40px; margin: 0; padding: 7px 11px;
+  background: var(--soft); border-color: #bdcee6; overflow-wrap: anywhere;
+}
+.assistant-page-link svg { flex: none; }
+.assistant-page-link svg:last-child { margin-left: auto; }
+.assistant-page-link:is(:hover, :focus-visible) { border-color: var(--accent); }
 .assistant-waiting, .assistant-loading { color: var(--muted); font-size: 13px; }
 .assistant-waiting { align-items: center; }
 .assistant-composer { flex: none; padding: 10px 16px 13px; background: white; }
@@ -258,6 +266,7 @@
   .global-tools { gap: 3px; }
   .account-trigger { padding-left: 4px; }
   .assistant-composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .assistant-page-link { min-height: 44px; }
 }
 @media (max-height: 500px) {
   .assistant-welcome { margin-top: 0; }

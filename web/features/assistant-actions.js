@@ -1,5 +1,6 @@
 import { badge, canAct, field, memo, node, select, table, today } from './shared.js';
 import { taskForm } from './care.js';
+import { routes } from '../lib/navigation.js';
 
 // These destinations are also indexed by the keyboard quick finder.
 export const quickDestinations = [
@@ -20,12 +21,64 @@ export const quickDestinations = [
   { label: '护理用具工单', words: '物资工单 物资任务 补货', route: 'inventory', tab: 'orders' },
 ];
 
+function pageDestination(ctx, entry) {
+  const route = entry?.route;
+  if (!routes.has(route) || !ctx.available(route)) return null;
+  // The admission shortcut also requires the legacy intake route grant.
+  if (route === 'intake' && ctx.state.user.routes && !ctx.state.user.routes.includes('intake'))
+    return null;
+  const tab = entry.tab;
+  if (tab != null && (typeof tab !== 'string' || !/^[a-z][a-zA-Z0-9]{0,39}$/.test(tab)))
+    return null;
+  const dest = route === 'intake' ? 'residents' : route === 'rooms' ? 'beds' : route;
+  return {
+    route,
+    destination: dest,
+    tab: route === 'intake' ? 'all' : route === 'rooms' ? 'plan' : tab,
+    title: typeof entry.title === 'string' && entry.title.trim()
+      ? entry.title.trim()
+      : routes.get(dest).label,
+    icon: routes.get(dest).icon,
+  };
+}
+
+export function assistantPageLinks(ctx, message) {
+  if (message.role !== 'assistant' || message.webSearched) return [];
+  const links = [];
+  for (const entry of Array.isArray(message.pageLinks) ? message.pageLinks : []) {
+    const link = pageDestination(ctx, entry);
+    if (link && !links.some((item) => item.destination === link.destination && item.tab === link.tab))
+      links.push(link);
+  }
+  // Earlier conversations only stored a single navigate action.
+  if (message.action?.kind === 'navigate') {
+    const link = pageDestination(ctx, message.action);
+    if (link && !links.some((item) => item.destination === link.destination))
+      links.push(link);
+  }
+  return links;
+}
+
+export function assistantCommand(ctx, message) {
+  const action = message?.action;
+  if (message?.role !== 'assistant' || message.webSearched || !action) return null;
+  if (action.kind !== 'navigate') return ['notice', 'workOrder'].includes(action.kind) ? action : null;
+  const target = pageDestination(ctx, action);
+  if (!target) return null;
+  const links = assistantPageLinks(ctx, message).filter((link) => link.destination === target.destination);
+  const link = links.find((item) => item.tab === target.tab) || links[0] || target;
+  return { ...link, kind: 'navigate' };
+}
+
 export function openAssistantAction(ctx, action) {
-  if (!action || !ctx.available(action.route)) return ctx.toast('当前账号无法打开这个页面');
+  if (!action || !routes.has(action.route) || !ctx.available(action.route))
+    return ctx.toast('当前账号无法打开这个页面');
   if (action.kind === 'navigate') {
-    if (action.route === 'intake') return ctx.go('residents', 'all');
-    if (action.route === 'rooms') return ctx.go('beds', 'plan');
-    return ctx.go(action.route);
+    const link = pageDestination(ctx, action);
+    if (!link) return ctx.toast('当前账号无法打开这个页面');
+    return ctx.go(link.destination, link.tab, () =>
+      document.getElementById('content')?.focus({ preventScroll: true }),
+    );
   }
   if (!action.id) return ctx.toast('无法识别这项建议，请重新提问');
   if (action.kind === 'workOrder' && action.route === 'care') {

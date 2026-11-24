@@ -159,6 +159,100 @@ class ChatTests(unittest.TestCase):
         )
         self.assertEqual(self.store.version(self.owner)["revision"], 0)
 
+    def test_requested_floorplan_excludes_current_page_and_other_tab(self):
+        self.transport.return_value["choices"][0]["message"]["content"] = (
+            "点击楼层平面图。床位管理还有全部床位页签。你当前停在长期护理保险页面。"
+        )
+        self.assertEqual(
+            self.ask("我想按平面图选床，该从哪里进入？", page="longCare")["messages"][
+                -1
+            ]["pageLinks"],
+            [{"route": "beds", "tab": "plan", "title": "楼层平面图"}],
+        )
+        guide = json.loads(self.transport.call_args.args[1]["messages"][-1]["content"])[
+            "可见办理入口（页面及分页签）"
+        ]
+        self.assertIn("长护险经办台账", guide["长期护理保险"][0])
+        self.assertIn("档案名册", " ".join(guide["长者档案"]))
+
+    def test_internal_destination_unavailable_to_employee_stays_off_public_network(
+        self,
+    ):
+        staff = self.staff(["clinical"])
+        with patch("platform_core.agents.chat_web.collect") as search:
+            self.transport.return_value["choices"][0]["message"]["content"] = (
+                "当前账号仅提供健康体征。"
+            )
+            msg = self.ask("打开机构的数据备份", token=staff, webSearch=True)[
+                "messages"
+            ][-1]
+        search.assert_not_called()
+        self.assertFalse(msg["pageLinks"])
+        self.assertIsNone(msg["action"])
+        self.assertFalse(msg["webSearched"])
+
+    def test_how_to_links_to_real_pages_and_tabs_without_opening_a_form(self):
+        cases = [
+            ("在哪里办理老人入住？", "residents", "all"),
+            ("我想按平面图选床，该从哪里进入？", "beds", "plan"),
+            ("我想查看机构的备份和恢复记录，入口在哪里？", "settings", "backups"),
+            ("怎么进入长期护理保险的经办台账？", "longCare", None),
+            ("怎么查看欠费提醒？", "billing", "reminders"),
+        ]
+        for i, (text, route, tab) in enumerate(cases):
+            with self.subTest(text=text):
+                reply = self.ask(text, "how" + str(i))["messages"][-1]
+                self.assertEqual(
+                    [(p["route"], p.get("tab")) for p in reply["pageLinks"]],
+                    [(route, tab)],
+                )
+                self.assertIsNone(reply["action"])
+        self.assertEqual(self.store.version(self.owner)["revision"], 0)
+
+    def test_recommended_pages_survive_history_and_anaphoric_followup(self):
+        # Older turns stored just the assistant's prose, with no application destinations.
+        self.transport.return_value["choices"][0]["message"]["content"] = (
+            "可在「物资仓储」的「库存台账」核对库存；收款请进入「财务结算」的「收款流水」。"
+        )
+        first = self.ask("接下来有什么需要看的？")
+        links = first["messages"][-1]["pageLinks"]
+        self.assertEqual(
+            [(p["route"], p.get("tab")) for p in links],
+            [("inventory", "stock"), ("billing", "payments")],
+        )
+        self.assertEqual(chat.read(self.store, self.owner), first)
+        self.transport.return_value["choices"][0]["message"]["content"] = (
+            "可以选择刚才提到的入口。"
+        )
+        self.assertEqual(
+            self.ask("刚才说的那个页面入口在哪？", "follow")["messages"][-1][
+                "pageLinks"
+            ],
+            links,
+        )
+        self.assertFalse(self.ask("谢谢", "bye")["messages"][-1]["pageLinks"])
+
+    def test_canonical_links_follow_hidden_routes_and_tab_permissions(self):
+        staff = self.staff(["clinical"])
+        self.transport.return_value["choices"][0]["message"]["content"] = (
+            "您可以前往「机构设置」「照护工单」和「健康体征」。"
+        )
+        reply = self.ask("这些入口在哪里？", token=staff)["messages"][-1]
+        self.assertEqual(
+            reply["pageLinks"],
+            [{"route": "care", "tab": "vitals", "title": "健康体征"}],
+        )
+        with closing(self.store.connect()) as db, db:
+            db.execute(
+                """UPDATE institution_settings SET visual=json_set(visual,'$.hiddenRoutes',json('["care"]'))"""
+            )
+        self.assertFalse(chat.read(self.store, staff)["messages"])
+        self.assertFalse(
+            self.ask("这些入口在哪里？", "hidden", token=staff)["messages"][-1][
+                "pageLinks"
+            ]
+        )
+
     def test_scope_revocation_private_transcripts_and_reset(self):
         employee = self.staff(["assistants", "inventory"])
         first = self.ask("看看仓库", token=employee)

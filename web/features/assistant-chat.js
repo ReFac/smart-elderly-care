@@ -3,7 +3,7 @@ import { el, icon } from '../lib/ui.js';
 import { node } from './shared.js';
 import { holdToSpeak, voiceServiceReason } from './agent-voice.js';
 import { openPriorReports } from './assistants.js';
-import { openAssistantAction } from './assistant-actions.js';
+import { assistantCommand, assistantPageLinks, openAssistantAction } from './assistant-actions.js';
 
 const path = '/api/assistant/chat';
 const dayLabel = new Intl.DateTimeFormat('zh-CN', {
@@ -303,15 +303,28 @@ function buildChat(getContext, actor, area, region, label) {
     const body = node('div', 'assistant-turn-body', [messageBody(item.content)]);
     const sources = searchSources(item);
     if (sources) body.append(sources);
-    if (item.action && !mine && !item.webSearched) {
+    const links = assistantPageLinks(getContext(), item);
+    if (links.length) {
+      const group = el('div', 'assistant-page-links');
+      group.setAttribute('role', 'group');
+      group.setAttribute('aria-label', '相关页面');
+      for (const link of links) {
+        const button = control(
+          '前往' + link.title,
+          link.icon,
+          'assistant-action assistant-page-link',
+          () => perform({ ...link, kind: 'navigate' }, button),
+        );
+        button.append(icon('chevron', 14));
+        group.append(button);
+      }
+      body.append(group);
+    }
+    if (!mine && !item.webSearched && ['notice', 'workOrder'].includes(item.action?.kind)) {
       const action = item.action;
       const trigger = control(
-        action.kind === 'navigate'
-          ? '前往' + action.title
-          : action.kind === 'notice'
-            ? '核对通知'
-            : '核对工单',
-        action.kind === 'navigate' ? 'location' : 'file',
+        action.kind === 'notice' ? '核对通知' : '核对工单',
+        'file',
         'assistant-action',
         () => perform(action),
       );
@@ -455,13 +468,26 @@ function buildChat(getContext, actor, area, region, label) {
     launch?.setAttribute('aria-expanded', 'false');
     (lastFocused?.isConnected ? lastFocused : launch)?.focus({ preventScroll: true });
   }
-  async function perform(action) {
+  let openingAction = false;
+  async function perform(action, button) {
+    if (openingAction) return;
+    openingAction = true;
+    if (button) {
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+    }
     try {
       if (!(await getContext().refreshWorkspace()) || destroyed || panel.hidden) return;
       hide();
       await openAssistantAction(getContext(), action);
     } catch (e) {
       if (!destroyed) getContext().toast(e.message);
+    } finally {
+      openingAction = false;
+      if (button) {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+      }
     }
   }
   async function transmit(raw) {
@@ -508,11 +534,10 @@ function buildChat(getContext, actor, area, region, label) {
       update(result, true);
       received = true;
       if (
-        !messages.at(-1)?.webSearched &&
         messages.at(-2)?.content === text &&
         page === (location.hash.slice(1) || 'overview')
       )
-        action = messages.at(-1)?.action;
+        action = assistantCommand(getContext(), messages.at(-1));
       retry = null;
     } catch (e) {
       if (destroyed) return;

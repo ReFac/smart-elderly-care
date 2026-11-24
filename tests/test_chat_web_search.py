@@ -157,6 +157,28 @@ class NetworkChatTests(unittest.TestCase):
         self.search.assert_not_called()
         self.classify.assert_not_called()
 
+    def test_workspace_help_and_public_insurance_policy_have_separate_destinations(
+        self,
+    ):
+        for i, (text, expected) in enumerate(
+            (
+                ("长护险经办台账在哪里？", "longCare"),
+                ("平台备份入口在哪里？", "settings"),
+            )
+        ):
+            msg = self.ask(text, "help-" + str(i), webSearch=True)["messages"][-1]
+            self.assertFalse(msg["webSearched"])
+            self.assertEqual([p["route"] for p in msg["pageLinks"]], [expected])
+        self.classify.assert_not_called()
+        self.search.assert_not_called()
+        self.topic = "河南 长护险 公开政策"
+        msg = self.ask("河南长护险公开政策在哪里可以查？", "public", webSearch=True)[
+            "messages"
+        ][-1]
+        self.assertTrue(msg["webSearched"])
+        self.assertFalse(msg["pageLinks"])
+        self.search.assert_called_once()
+
     def test_non_verbatim_or_private_topic_and_no_match_use_correct_provenance(self):
         self.topic = "secretly-injected-text"
         self.assertFalse(self.ask(webSearch=True)["messages"][-1]["webSearched"])

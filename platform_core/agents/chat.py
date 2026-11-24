@@ -12,7 +12,7 @@ from .. import access_policy as policy, provider
 from ..provider import deepseek
 from ..store import Conflict, SignedOut
 from . import chat_context as ctx
-from . import chat_web
+from . import chat_navigation, chat_web
 
 CONTEXT_LIMIT = 100_000
 OUTPUT_LIMIT = 1800
@@ -25,6 +25,7 @@ SYSTEM = """你是安康医养平台的中文 AI 助理。像一位熟悉院务�
 全院简报只给一段概况和两三项最值得交班关注的事实，避免再列重复清单。问候和普通问题自然回答。不说召回、运行、多智能体等内部术语。
 对话只读，不能声称已创建、发布、改动或通知任何人。只有用户这句明确要求开工单或发通知时，才能建议打开对应审核窗。
 “创建老人入住”等办理或界面定位指令可建议打开授权页面；单纯询问情况、问怎么做、举例或假设不能自动打开窗。
+询问入口、操作步骤，或建议转去某页时，优先请用户直接点击回答下方的具体入口。使用所给页面和页签的原名，只引用与问题直接相关且当前账号可见的入口。页面默认内容无需再进子页，不要因为清单没有列到同名子页就推断用户缺乏权限。指代刚才提到的页面时结合上文辨认，如有歧义请用户选择。
 护理用具工单优先去物资，个人照护工单去照护。只有可选动作列出的路由与种类可以建议。简报不列未被问及的资料缺口。
 """
 ACTION_FORMAT = """指令明确时直接给出 action。界面会立即打开相应页面或审核窗，文案简短告知可以在哪里核对，不要再问用户是否同意打开。工单或通知需经办人在表单中确认才会发布。返回 JSON 对象 {"answer":"实际回答","action":null}，或者 action 为 {"kind":"navigate|workOrder|notice","route":"可选路由号","title":"简短标题","description":"可供经办人核对的概要"}。
@@ -61,7 +62,7 @@ def rows(db, actor, scope, generation):
     )
 
 
-def messages(db, actor, scope, generation, limit):
+def messages(db, actor, scope, generation, limit, pages=None):
     turns = []
     for row in rows(db, actor, scope, generation):
         pair = [
@@ -80,7 +81,23 @@ def messages(db, actor, scope, generation, limit):
             break
         turns.append(pair)
         limit -= size
-    return [m for pair in reversed(turns) for m in pair]
+    chronological = list(reversed(turns))
+    if pages is not None:
+        previous = []
+        for question, answer in chronological:
+            previous = (
+                []
+                if answer["webSearched"]
+                else chat_navigation.resolve(
+                    question["content"],
+                    answer["content"],
+                    pages,
+                    previous,
+                    answer["action"],
+                )
+            )
+            answer["pageLinks"] = [p.link() for p in previous]
+    return [m for pair in chronological for m in pair]
 
 
 def conversation(store, db, token, area, supplied_scope=None):
@@ -93,12 +110,12 @@ def conversation(store, db, token, area, supplied_scope=None):
     return user, key, routes, state, selected, thread
 
 
-def view(db, uid, scope, thread):
+def view(db, uid, scope, thread, pages):
     return {
         "scopeKey": scope,
         "contextLimit": CONTEXT_LIMIT,
         "generation": thread["generation"] if thread else "",
-        "messages": messages(db, uid, scope, thread["generation"], CONTEXT_LIMIT)
+        "messages": messages(db, uid, scope, thread["generation"], CONTEXT_LIMIT, pages)
         if thread
         else [],
     }
@@ -107,8 +124,10 @@ def view(db, uid, scope, thread):
 def read(store, token, area=None):
     with closing(store.connect()) as db, db:
         db.execute("BEGIN")
-        user, scope, _, _, _, thread = conversation(store, db, token, area)
-        return view(db, user["id"], scope, thread)
+        user, scope, routes, _, _, thread = conversation(store, db, token, area)
+        return view(
+            db, user["id"], scope, thread, chat_navigation.visible(user, routes)
+        )
 
 
 def reset(store, token, data):
@@ -198,6 +217,7 @@ def build_body(
     scope,
     generation,
     routes,
+    pages,
     facts,
     actions,
     page,
@@ -208,6 +228,7 @@ def build_body(
     envelope = {
         "本次可见资料": facts,
         "本人可见页面": routes,
+        "可见办理入口（页面及分页签）": chat_navigation.directory(pages),
         "目前页面": routes.get(page, ""),
         "本句可选动作（页面号对应动作）": actions,
     }
@@ -322,6 +343,7 @@ def reply(store, token, data, *, transport=None):
             store, db, token, area, data.get("scopeKey")
         )
         uid = user["id"]
+        pages = chat_navigation.visible(user, routes)
         previous_generation = thread["generation"] if thread else ""
         if not thread:
             db.execute(
@@ -348,7 +370,7 @@ def reply(store, token, data, *, transport=None):
                 "SELECT 1 FROM assistant_turns WHERE actor=? AND request=?",
                 (uid, request),
             ).fetchone():
-                return view(db, uid, scope, thread)
+                return view(db, uid, scope, thread, pages)
             raise Conflict("上次发送正在处理或未能取得答复，请刷新后重试")
         if "generation" in data and data["generation"] != previous_generation:
             raise Conflict("已开启新对话，请重新查看后发送")
@@ -386,14 +408,9 @@ def reply(store, token, data, *, transport=None):
             )
         ):
             topics += " " + last["question"]
-        actions = permitted_actions(user, routes, text, selected)
-        if (
-            web_enabled
-            and actions
-            and set(actions.values()) == {"navigate"}
-            and chat_web.requests_public_site(text)
-        ):
-            actions = {}
+        actions = chat_navigation.navigation_actions(
+            permitted_actions(user, routes, text, selected), text, pages
+        )
 
         def private_body(db, state):
             facts = ctx.evidence(store, db, user, state, selected, hours, topics)
@@ -404,6 +421,7 @@ def reply(store, token, data, *, transport=None):
                 scope,
                 generation,
                 routes,
+                pages,
                 facts,
                 actions,
                 page,
@@ -411,7 +429,11 @@ def reply(store, token, data, *, transport=None):
                 web_enabled=web_enabled,
             )
 
-        consider_search = web_enabled and chat_web.eligible(db, state, text, actions)
+        consider_search = (
+            web_enabled
+            and not chat_navigation.local_question(text)
+            and chat_web.eligible(db, state, text, actions)
+        )
         # The public excerpt size is unknown. Hold the baseline now, then resize the
         # reservation under a write transaction once the exact selected excerpts are known.
         body = (
@@ -635,7 +657,7 @@ def reply(store, token, data, *, transport=None):
                         ctx.compact(sources) if sources is not None else None,
                     ),
                 )
-                return view(db, uid, scope, current)
+                return view(db, uid, scope, current, pages)
     if result:
         raise Conflict("当前账号权限或区域已变化，请重新打开助理")
     if preparation_error is not None:
