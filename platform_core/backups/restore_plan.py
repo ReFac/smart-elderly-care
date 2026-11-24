@@ -47,6 +47,7 @@ ORIGINALS = {
     "rounds_observations": "已核对咳嗽时段观测",
     "rounds_reports": "已生成的长者巡查简报",
     "scheduled_work_runs": "定时工单派发凭证",
+    "permission_requests": "实名签署的权限申请和一次性使用凭证",
 }
 # A point-in-time restore cannot retract external actions, recorded clinical observations or cash.
 PROTECTED = {
@@ -168,6 +169,7 @@ OPTIONAL_TABLES = {
     "scheduled_work_rules",
     "scheduled_work_menus",
     "scheduled_work_runs",
+    "permission_requests",
 }
 
 

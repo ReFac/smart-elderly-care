@@ -118,8 +118,9 @@ def years_old(birth, day):
     return day.year - birth.year - ((day.month, day.day) < (birth.month, birth.day))
 
 
-def edit_profile(db, state, p, user, today):
-    access.require(user, "intake")
+def edit_profile(db, state, p, user, today, *, temporary=False):
+    if not temporary:
+        access.require(user, "intake")
     resident = lookup(state, "residents", p.get("residentId"))
     name = text(p, "name", 60, True)
     existing = db.execute(

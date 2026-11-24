@@ -19,6 +19,7 @@ PREFIXES = {
     ),
     "family": ("family_round_",),
     "account": ("accounts",),
+    "permissionRequest": ("permission_requests",),
     "agent": ("agent_",),
     "rounds": (
         "rounds_policy",
@@ -46,6 +47,7 @@ SECRET = {
     "token",
     "key",
     "download_token",
+    "signature_proof",
 }
 JSON_COLUMNS = {
     "visual",
@@ -98,6 +100,10 @@ def watch(db, action):
             WHEN OLD.data IS NOT NEW.data BEGIN
             INSERT INTO history_capture VALUES('workspace','1',OLD.data,NEW.data); END""")
     prefixes = PREFIXES.get(action.partition(".")[0], ())
+    if action == "permissionRequest.editProfile":
+        prefixes += ("dossier_profiles",)
+    if action == "access.setRealName":
+        prefixes = ("account_real_names",)
     if action in ("care.proposeGroupActivity", "care.confirmGroupActivity", "care.confirmScheduledMeal"):
         prefixes = ("daily_life_",)
     if action.startswith("care.area"):

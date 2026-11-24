@@ -242,6 +242,10 @@ class Reader:
             return policy.has(self.user, "intake")
         if action == "ops.billingLifecycle":
             return policy.has(self.user, "finance")
+        if action == "permissionRequest.editProfile":
+            return policy.has(self.user, "intake")
+        if action in ("permissionRequest.create", "permissionRequest.review"):
+            return policy.has(self.user, "permissions.approve") and policy.has(self.user, "intake")
         if action == "family.consent":
             return policy.has(self.user, "relatives") and policy.has(
                 self.user, "family.share"

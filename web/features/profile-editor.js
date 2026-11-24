@@ -10,12 +10,12 @@ import {
   group,
 } from './profile-controls.js';
 
-export async function editResident(ctx, resident, profile) {
+export async function editResident(ctx, resident, profile, delegated) {
   try {
     const { choices, regions } = await loadProfileChoices();
     const value = { ...resident, ...profile };
     const form = node('div', 'dossier-form');
-    if (ctx.state.allowedActions?.includes('dossier.confirmVisit')) {
+    if (!delegated && ctx.state.allowedActions?.includes('dossier.confirmVisit')) {
       form.append(group('病例与过往就诊', [
         ctx.ui.button('手动录入病例', () => openVisitEditor(ctx.current?.() || ctx, resident, 'manual')),
         ctx.ui.button('上传一组就诊资料', () => openVisitEditor(ctx.current?.() || ctx, resident, 'ai')),
@@ -66,7 +66,7 @@ export async function editResident(ctx, resident, profile) {
     }
     let sources, pension;
     const notes = {};
-    if (hasGrant(ctx, 'relatives')) {
+    if (!delegated && hasGrant(ctx, 'relatives')) {
       selected.livingArrangement = picker(
         '原居住与照料安排',
         choices.livingArrangement,
@@ -99,11 +99,13 @@ export async function editResident(ctx, resident, profile) {
     }
     ctx.dialog({
       title: '编辑长者登记资料',
+      description: delegated?.description,
       fields: [],
       content: form,
       onSubmit: () => {
+        const identity = delegated ? { requestId: delegated.requestId } : { residentId: resident.id };
         const payload = {
-          residentId: resident.id,
+          ...identity,
           name: name.control.value.trim(),
           phone: phone.control.value.trim(),
           birthDate: birth.control.value,
@@ -135,7 +137,7 @@ export async function editResident(ctx, resident, profile) {
         for (const [key, item] of Object.entries({ ...selected, ...notes }))
           names[key] = item.element.querySelector('span').textContent;
         for (const [key, v] of Object.entries(payload)) {
-          if (key === 'residentId') continue;
+          if (key in identity) continue;
           const previous = value[key] ?? (Array.isArray(v) ? [] : '');
           if (
             Array.isArray(v)
@@ -156,7 +158,10 @@ export async function editResident(ctx, resident, profile) {
           ctx.toast('登记内容没有变化');
           return true;
         }
-        return ctx.command('dossier.profile', payload, { target: residentLabel(ctx, resident), fields: details });
+        return ctx.command(delegated ? 'permissionRequest.editProfile' : 'dossier.profile', payload, {
+          target: delegated?.target || residentLabel(ctx, resident), fields: details,
+          expectedRevision: delegated?.revision,
+        });
       },
     });
   } catch (err) {

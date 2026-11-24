@@ -48,10 +48,12 @@ def init(db):
         generation TEXT NOT NULL,request TEXT NOT NULL,fingerprint TEXT NOT NULL,
         asked TEXT NOT NULL,answered TEXT NOT NULL,question TEXT NOT NULL,answer TEXT NOT NULL,
         action TEXT,hours INTEGER NOT NULL, UNIQUE(actor,request))""")
-    if "web_sources" not in {
-        r[1] for r in db.execute("PRAGMA table_info(assistant_turns)")
-    }:
+    columns = {r[1] for r in db.execute("PRAGMA table_info(assistant_turns)")}
+    if "web_sources" not in columns:
         db.execute("ALTER TABLE assistant_turns ADD COLUMN web_sources TEXT")
+    if "voice_receipt" not in columns:
+        db.execute("ALTER TABLE assistant_turns ADD COLUMN voice_receipt TEXT")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS assistant_turn_voice ON assistant_turns(voice_receipt) WHERE voice_receipt IS NOT NULL")
     db.execute(
         "CREATE INDEX IF NOT EXISTS assistant_recent ON assistant_turns(actor,scope,generation,seq DESC)"
     )
@@ -343,7 +345,10 @@ def extract(response, actions, request, scope):
     return tokens, answer.strip(), action
 
 
-def reply(store, token, data, *, transport=None, progress=None):
+def reply(store, token, data, *, transport=None, progress=None, voice_receipt=None):
+    speak = progress is not None and progress.speak
+    if voice_receipt is not None and not speak:
+        raise ValueError("语音回执仅用于已启用朗读的消息")
     if set(data) - {
         "requestId",
         "page",
@@ -377,6 +382,10 @@ def reply(store, token, data, *, transport=None, progress=None):
             store, db, token, area, data.get("scopeKey")
         )
         uid = user["id"]
+        if speak:
+            from ..provider import speech
+
+            speech.require_chat_receipt(db, user, area, voice_receipt)
         pages = chat_navigation.visible(user, routes)
         previous_generation = thread["generation"] if thread else ""
         if not thread:
@@ -392,6 +401,8 @@ def reply(store, token, data, *, transport=None, progress=None):
         signature = [scope, generation, text, page, data.get("hours")]
         if web_enabled:
             signature.append(True)
+        if speak:
+            signature.append(voice_receipt)
         fingerprint = sha256(ctx.compact(signature).encode()).hexdigest()
         previous = db.execute(
             "SELECT fingerprint FROM api_usage WHERE actor=? AND request=?",
@@ -408,6 +419,10 @@ def reply(store, token, data, *, transport=None, progress=None):
             raise Conflict("上次发送正在处理或未能取得答复，请刷新后重试")
         if "generation" in data and data["generation"] != previous_generation:
             raise Conflict("已开启新对话，请重新查看后发送")
+        if voice_receipt and db.execute(
+            "SELECT 1 FROM assistant_turns WHERE voice_receipt=?", (voice_receipt,)
+        ).fetchone():
+            raise Conflict("该次语音已经发送，请按住说话录制下一条")
         if (
             thread["pending"]
             and thread["pendingAt"] + PENDING_SECONDS > now.timestamp()
@@ -772,8 +787,8 @@ def reply(store, token, data, *, transport=None, progress=None):
                 current_scope = None
             if current_scope == scope:
                 db.execute(
-                    """INSERT INTO assistant_turns(actor,scope,generation,request,fingerprint,asked,answered,question,answer,action,hours,web_sources)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    """INSERT INTO assistant_turns(actor,scope,generation,request,fingerprint,asked,answered,question,answer,action,hours,web_sources,voice_receipt)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         uid,
                         scope,
@@ -787,6 +802,7 @@ def reply(store, token, data, *, transport=None, progress=None):
                         ctx.compact(action) if action else None,
                         hours,
                         ctx.compact(sources) if sources is not None else None,
+                        voice_receipt,
                     ),
                 )
                 return view(db, uid, scope, current, pages, selected)

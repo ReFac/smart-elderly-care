@@ -77,6 +77,18 @@ function saveForm(form, label, submit) {
   });
 }
 
+function registerSignatureName(ctx, account) {
+  ctx.dialog({
+    title: '登记签名实名',
+    description: `为 ${account.displayName}（${account.username}）登记审批时使用的实名。请先核对员工身份资料。`,
+    fields: [{ name: 'realName', label: '本人实名', value: account.signatureRealName, required: true, maxLength: 60 }],
+    submitLabel: '保存签名实名',
+    onSubmit: ({ realName }) => ctx.command('access.setRealName', { accountId: account.id, realName }, {
+      confirmed: true,
+    }),
+  });
+}
+
 function careFlowFigure() {
   const figure = node('figure', 'access-flow');
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -450,6 +462,7 @@ function accounts(ctx) {
           ])
         : null,
       account.kind==='staff' ? facts([['岗位职责',account.staffDuties.join('、') || '待登记']]) : null,
+      isOwner && account.kind !== 'family' ? facts([['签名实名', account.signatureRealName || '待登记']]) : null,
       account.kind==='family' && boundPerson(account) && ctx.available('dossier') ? link(ctx,'查看绑定长者档案',()=>openDossier(ctx,boundPerson(account))) : null,
       capabilitySummary(ctx, account),
       grants,
@@ -527,6 +540,7 @@ function accounts(ctx) {
             choose(
               r.kind === 'owner' ? null : link(ctx, '编辑', () => editAccount(ctx, r.kind, r)),
               r.kind === 'staff' ? link(ctx, '合同与工资日', () => openEmployment(ctx, r)) : null,
+              isOwner && r.kind !== 'family' ? link(ctx, '签名实名', () => registerSignatureName(ctx, r)) : null,
 
               r.kind === 'owner'
                 ? null

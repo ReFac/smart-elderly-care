@@ -165,6 +165,23 @@ class AccountPermissions(unittest.TestCase):
         self.assertTrue(data["tasks"])
         self.assertNotIn("access", staff["routes"])
 
+    def test_owner_registers_signature_identity_independently_of_display_name(self):
+        _, nurse = self.create(role="护士")
+        fields = {"accountId": nurse["id"], "realName": "林雅慧"}
+        with self.assertRaises(PermissionError):
+            access.apply(self.db, self.state, "access.setRealName", fields, nurse)
+        access.apply(self.db, self.state, "access.setRealName", fields, self.owner)
+        access.apply(
+            self.db, self.state, "access.setRealName",
+            {"accountId": self.owner["id"], "realName": "陈安"}, self.owner,
+        )
+        self.assertEqual(access.account(self.db, self.owner["id"])["displayName"], "Owner")
+        self.assertEqual(access.account(self.db, nurse["id"])["displayName"], "测试人员")
+        self.assertEqual(access.real_name(self.db, nurse["id"]), "林雅慧")
+        self.assertEqual(access.project(self.db, self.state, nurse)["signatureRealName"], "林雅慧")
+        _, colleague = self.create(name="another-staff")
+        self.assertEqual(access.project(self.db, self.state, colleague)["signatureRealName"], "")
+
     def test_notes_and_audit_follow_source_grants(self):
         _, staff = self.create(permissions=["inventory", "assistants", "audit"])
         allowed = access.project(self.db, self.state, staff)["suggestions"]

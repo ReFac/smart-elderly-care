@@ -13,7 +13,7 @@ from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, staff_employment, storage_assets
 from . import lead_contacts, lead_intake, medical_visits, people_labels, visit_schedule
 from . import care_areas, daily_life, med_rounds, medication_reports, resident_health, scheduled_work
-from . import visitor_access
+from . import permission_requests, visitor_access
 from .bootstrap import empty_workspace
 from .care import trial_expiry, trial_followups
 from . import backups, history, rounds
@@ -106,6 +106,7 @@ class Store:
                 )
                 db.execute("INSERT INTO workspace VALUES (1, 0, ?)", (encode(data),))
             access.init(db, initial_owner_password)
+            permission_requests.init(db)
             visitor_access.init(db)
             if version < 4:
                 access.migrate_branding(db)
@@ -235,6 +236,7 @@ class Store:
             dispatch.project(db, state, user, data)
             trial_followups.project(db, state, user, data)
             lead_contacts.project(db, state, user, data)
+            data["pendingPermissionRequests"] = permission_requests.pending_count(db, state, user, self.now())
             if not data["leadCampuses"] and "leads" in user["routes"]:
                 user = {**user, "routes": [route for route in user["routes"] if route != "leads"]}
                 data["user"] = user
@@ -924,6 +926,7 @@ class Store:
                     archive_retention.writable(data, rid)
             history.watch(db, action)
             previous = activity.locate(db, data, action, payload, user)
+            permission_target = None
             domain = action.partition(".")[0]
             try:
                 if action == "leads.capacity":
@@ -1066,6 +1069,16 @@ class Store:
                     from .provider import media
 
                     summary = media.configure(db, user, payload)
+                elif action == permission_requests.CREATE:
+                    summary, permission_target = permission_requests.create(self, db, data, user, payload, now)
+                elif action == permission_requests.REVIEW:
+                    try:
+                        summary, permission_target = permission_requests.review(self, db, data, user, payload, now)
+                    except (access.SignaturePasswordDenied, access.LoginThrottled):
+                        db.commit()  # Persist failed re-authentication without approving the request.
+                        raise
+                elif action == permission_requests.EDIT:
+                    summary, permission_target = permission_requests.edit(self, db, data, user, payload, now)
                 elif domain == "access":
                     summary = access.apply(
                         db, data, action, payload, user, self.facility_policy
@@ -1096,9 +1109,11 @@ class Store:
             if action == "care.dateArchive":
                 archive_retention.clear_due(db, data, today, payload["residentId"])
             if action in ("care.admit", "care.confirmStay", "dossier.profile", "dossier.relative",
-                          "access.create", "access.update", "access.status"):
+                          "access.create", "access.update", "access.status", permission_requests.EDIT):
                 lead_contacts.reconcile_callbacks(db, data, now)
             current = activity.locate(db, data, action, payload, user)
+            if permission_target:
+                current = activity.for_person(data, permission_target)
             if action == "care.register":
                 current = activity.for_person(data, data["residents"][-1]["id"])
             if domain == "gw":

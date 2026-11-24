@@ -248,6 +248,11 @@ def page(db, user, room="", actor="", before=None, limit=50):
         item = dict(record)
         initiator = item.pop("agentInitiator")
         grants = (item.pop("agentGrants") or "").split()
+        if item["action"].startswith("permissionRequest.") and user.get("facilityScope"):
+            try:
+                campus_access.require_resident(db, user, item["residentId"])
+            except PermissionError:
+                continue
         if user.get("facilityScope") and item["action"].startswith("agent."):
             from .agents import region_visible
 

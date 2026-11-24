@@ -168,12 +168,7 @@ class WardOverview(unittest.TestCase):
             region={},
         )
         with patch.object(read_aloud, "read_key", return_value="test"):
-            self.assertEqual(
-                read_aloud.listen(self.store, self.token, payload, transport=audio),
-                b"audio",
-            )
-            audio.assert_called_once_with("test", msg["content"])
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(PermissionError, "按住说话"):
                 read_aloud.listen(self.store, self.token, payload, transport=audio)
             with self.assertRaises(PermissionError):
                 read_aloud.listen(
@@ -182,6 +177,7 @@ class WardOverview(unittest.TestCase):
                     {**payload, "requestId": "unrelated"},
                     transport=audio,
                 )
+        audio.assert_not_called()
 
     def test_directory_snapshot_retains_relationship_until_365_days(self):
         with closing(self.store.connect()) as db, db:

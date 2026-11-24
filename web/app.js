@@ -20,6 +20,7 @@ import { dueMedicationCount } from './features/medication-rules.js';
 import { pendingLeadCalls } from './features/leads.js';
 import { residentLabel, residentHref, staffLabel } from './features/people-labels.js';
 import { openDossier } from './features/dossier.js';
+import { canOpenPermissionRequests, openPermissionRequests, pendingPermissionRequests } from './features/permission-requests.js';
 
 const { el, icon, button, toast } = ui;
 
@@ -615,6 +616,15 @@ function notices() {
   }
   const d = detail('待处理事项', list);
   if (state.user.kind !== 'family') {
+    const ctx = context();
+    if (canOpenPermissionRequests(ctx)) {
+      const count = pendingPermissionRequests(ctx);
+      const entry = el('button', 'result');
+      entry.type = 'button';
+      entry.append(icon('shield'), el('span', '', '权限申请'), ui.badge(count + ' 项待我审批', count ? 'amber' : 'neutral'));
+      entry.addEventListener('click', () => { d.close(); openPermissionRequests(context()); });
+      list.append(entry);
+    }
     for (const [label, panel] of [
       ['全员通知', staffNotices],
       ...((state.supplyOrders || []).some(r => r.assigneeId === state.user.id && r.status === '待执行')
@@ -726,6 +736,7 @@ function masthead() {
       myTrialFollowups().length ||
       unresolvedTrials().length ||
       pendingRenewals() ||
+      pendingPermissionRequests(context()) ||
       state.groupActivityDue > 0 ||
       (available('billing') && todayBillingNotices() > 0) ||
       (available('leads') && pendingLeadCalls(state)) ||

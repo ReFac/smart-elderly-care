@@ -68,11 +68,13 @@ def listen(store, token, payload, *, transport=None):
         if not thread or thread["generation"] != payload["generation"]:
             raise PermissionError("对话已变化，请重新打开健康助理")
         row = db.execute(
-            "SELECT answer FROM assistant_turns WHERE actor=? AND scope=? AND generation=? AND request=?",
+            "SELECT answer,voice_receipt FROM assistant_turns WHERE actor=? AND scope=? AND generation=? AND request=?",
             (actor["id"], scope, thread["generation"], request),
         ).fetchone()
         uid = actor["id"]
         if row:
+            if not row["voice_receipt"]:
+                raise PermissionError("只有按住说话发送的语音答复可以朗读")
             if not progressive:
                 return uid, row[0][part * CHUNK : (part + 1) * CHUNK]
             pieces = chat_progress.sentences(row[0], final=True)

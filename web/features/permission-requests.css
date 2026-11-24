@@ -1,0 +1,93 @@
+.dialog.permission-requests-dialog {
+  width: min(760px, calc(100vw - 32px));
+}
+.permission-workbench,
+.permission-card-list,
+.permission-scope,
+.permission-target {
+  display: grid;
+  gap: 14px;
+}
+.permission-toolbar,
+.permission-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.permission-toolbar {
+  flex-wrap: wrap;
+}
+.permission-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.permission-views .btn {
+  min-height: 32px;
+  color: var(--muted);
+}
+.permission-views .btn[aria-pressed='true'] {
+  color: var(--accent);
+  background: #fff;
+  border-color: var(--line);
+  box-shadow: 0 1px 2px #14294514;
+}
+.permission-request-card {
+  display: grid;
+  gap: 13px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.permission-card-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--accent);
+}
+.permission-card-title {
+  flex: 1;
+  min-width: 0;
+}
+.permission-card-title h3 {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+.permission-card-title p,
+.permission-load-status,
+.permission-reason strong {
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+.permission-request-card .fx-facts,
+.permission-scope .fx-facts {
+  margin: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(270px, 100%), 1fr));
+}
+.permission-reason {
+  padding: 9px 12px;
+  border-radius: 5px;
+  background: var(--paper);
+  overflow-wrap: anywhere;
+}
+.permission-reason p {
+  margin-top: 3px;
+  white-space: pre-wrap;
+}
+.permission-request-card > .fx-actions {
+  justify-content: flex-end;
+}
+.permission-request-form .permission-target .field {
+  margin: 0;
+}

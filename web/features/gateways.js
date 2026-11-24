@@ -3,6 +3,7 @@ import { staffNotices } from './assistant-actions.js';
 import { commentInput } from '../lib/change-review.js';
 import { voiceProposal } from './speech-input.js';
 import { roundsInbox } from './rounds-desk.js';
+import { canOpenPermissionRequests, pendingPermissionRequests, permissionRequestsPanel } from './permission-requests.js';
 import {
   node,
   page,
@@ -387,6 +388,10 @@ function inbox(ctx) {
   if (has(ctx, 'care') || has(ctx, 'clinical')) {
     metadata.rounds = ['care', '待核对的照护事项', null];
     views.push(['rounds', '巡查提醒', () => roundsInbox(ctx)]);
+  }
+  if (canOpenPermissionRequests(ctx)) {
+    metadata.permissionRequests = ['shield', '办理临时档案授权', pendingPermissionRequests(ctx) || null];
+    views.push(['permissionRequests', '权限申请', () => permissionRequestsPanel(ctx)]);
   }
   if (ctx.state.user.kind !== 'family') {
     metadata.notices = ['bell', '全体员工可见', (ctx.state.staffNotices || []).length];

@@ -6,6 +6,7 @@ import { dailyTimeline } from './daily-timeline.js';
 import { billDetail } from './billing.js';
 import { billingNotices } from './billing-notices.js';
 import { editResident } from './profile-editor.js';
+import { openPermissionRequest } from './permission-requests.js';
 import { displayAmount, loadProfileChoices, regionPicker } from './profile-controls.js';
 import { contactBook } from './family-contacts.js';
 import { familyInbox, familyRecipients } from './family-rounds.js';
@@ -29,6 +30,7 @@ import {
   facts,
   recordIdentity,
   hasGrant,
+  canAct,
   disclosure,
   badge,
   section,
@@ -549,8 +551,10 @@ function showKin(ctx, resident, readOnly=false) {
 function registrationDetails(ctx, resident, profile, archived, stay) {
   const content = node('div', 'fx-profile');
   const actions = choose();
-  if (!archived && allowed(ctx, 'intake')) {
-    actions.append(btn(ctx, '编辑登记资料', () => editResident(ctx, resident, profile), 'primary'));
+  if (!archived && (allowed(ctx, 'intake') || canAct(ctx, 'permissionRequest.create'))) {
+    actions.append(allowed(ctx, 'intake')
+      ? btn(ctx, '编辑登记资料', () => editResident(ctx, resident, profile), 'primary')
+      : btn(ctx, '申请编辑权限', () => openPermissionRequest(ctx, resident)));
     content.append(node('div', 'resident-dossier-actions', actions));
   }
   if (allowed(ctx, 'residents') || allowed(ctx, 'intake'))
@@ -728,7 +732,8 @@ function dossierSections(ctx, resident, lifeEvent, initialSection) {
   const archived = ['已退住', '归档', '已归档', '已出院', '归档到期'].includes(resident.status);
   const stay = residencyDetails(ctx, resident);
   const views = [];
-  if (stay.enrollment || hasGrant(ctx, 'residents', 'intake', 'relatives', 'finance') || ctx.state.familyRoundRecipients)
+  if (stay.enrollment || hasGrant(ctx, 'residents', 'intake', 'relatives', 'finance') ||
+      ctx.state.familyRoundRecipients || (!archived && canAct(ctx, 'permissionRequest.create')))
     views.push(['registration', '登记资料', 'file', () => registrationDetails(ctx, resident, profile, archived, stay)]);
   if (hasGrant(ctx, 'care', 'clinical', 'medical') || !archived && allowed(ctx, 'medical.write'))
     views.push(['medical', '医疗资料', 'heart', () => medicalDetails(ctx, resident, archived, stay)]);

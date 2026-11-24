@@ -55,4 +55,4 @@ python3 manage_plan.py --db .local/workspace.sqlite3 media-reconcile --call CALL
 
 ## 健康助理朗读
 
-勾选对话框底部的「朗读」，健康助理会在文字逐步显示时把已生成的短句发给 DeepSeek 合成。播放前一段时可准备下一段。机构服务端按账号、区域和会话取出原句，关闭开关或收起助理可停止播放。业务操作入口随校验后的完整答复显示。Owner 可查看已计费和待核对字符。 [DeepSeek 官方朗读接口](https://api-docs.deepseek.com/guides/tts/)
+使用「按住说话」时可勾选「朗读」。转写完成后手动发送与自动发送均有效，普通文字提问不会请求音频。服务端核对账号、区域、会话及转写回执，随着文字逐步显示把短句交给 DeepSeek 合成，可提前准备下一段。声纹小窗显示朗读状态，支持暂停、继续和退出。收起助理或退出账号也会停止播放。Owner 可查看已计费和待核对字符。[DeepSeek 官方朗读接口](https://api-docs.deepseek.com/guides/tts/)

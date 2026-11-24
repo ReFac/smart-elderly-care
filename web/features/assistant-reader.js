@@ -1,26 +1,84 @@
 import { el, icon } from '../lib/ui.js';
 import { node } from './shared.js';
 
-export function replyReader(report) {
+export function replyReader(report, exit) {
   const check = el('input');
   check.type = 'checkbox';
-  const label = node('label', 'assistant-auto', [check, icon('speaker', 15), '朗读']);
+  check.disabled = true;
+  const label = node('label', 'assistant-auto assistant-read-option', [check, icon('speaker', 15), '朗读']);
+  let voicePreference = false;
+  check.addEventListener('change', () => { voicePreference = check.checked; });
+
   const player = el('audio', 'assistant-audio');
-  player.controls = true;
   player.hidden = true;
+  const wave = el('span', 'assistant-reader-wave');
+  wave.setAttribute('aria-hidden', 'true');
+  for (const level of [8, 15, 22, 14, 25, 16, 7]) {
+    const bar = el('span');
+    bar.style.setProperty('--wave-height', level + 'px');
+    wave.append(bar);
+  }
+  const status = el('strong', 'assistant-reader-status');
+  status.setAttribute('role', 'status');
+  const toggle = el('button', 'assistant-reader-toggle', '暂停');
+  const close = el('button', 'assistant-reader-close', '退出');
+  toggle.type = close.type = 'button';
+  const popup = node('div', 'assistant-reader', [
+    node('div', 'assistant-reader-caption', [wave, status]),
+    node('div', 'assistant-reader-controls', [toggle, close]), player,
+  ]);
+  popup.hidden = true;
+  popup.setAttribute('role', 'group');
+  popup.setAttribute('aria-label', '答复朗读');
+
   const queue = [];
-  let session;
+  let session, play, paused = false;
+
+  function playback(state) {
+    popup.dataset.playback = state;
+    status.textContent = {
+      playing: '正在朗读',
+      paused: '朗读已暂停',
+      ready: '朗读已就绪',
+      loading: '正在准备朗读',
+    }[state];
+    toggle.textContent = ['paused', 'ready'].includes(state) ? '继续' : '暂停';
+  }
+  player.addEventListener('playing', () => {
+    if (!popup.hidden && !paused) playback('playing');
+  });
+  toggle.addEventListener('click', () => {
+    if (paused || popup.dataset.playback === 'ready') {
+      paused = false;
+      playback('loading');
+      play?.();
+    } else {
+      paused = true;
+      player.pause();
+      playback('paused');
+    }
+  });
+  close.addEventListener('click', () => {
+    stop();
+    exit();
+  });
 
   function stop() {
     queue.length = 0;
     session?.abort();
     session = null;
-    player.pause();
-    player.removeAttribute('src');
-    player.load();
-    player.hidden = true;
+    resetPlayer();
   }
-  check.addEventListener('change', () => { if (!check.checked) stop(); });
+  function resetPlayer() {
+    popup.hidden = true;
+    play = null;
+    paused = false;
+    player.pause();
+    if (player.hasAttribute('src')) {
+      player.removeAttribute('src');
+      player.load();
+    }
+  }
 
   async function prepare(body, signal) {
     try {
@@ -49,7 +107,8 @@ export function replyReader(report) {
         try {
           if (active.signal.aborted) break;
           player.src = url;
-          player.hidden = false;
+          playback(paused ? 'paused' : 'loading');
+          popup.hidden = false;
           await new Promise((resolve, reject) => {
             const done = () => { cleanup(); resolve(); };
             const fail = () => { cleanup(); reject(new Error('音频无法播放')); };
@@ -61,33 +120,45 @@ export function replyReader(report) {
             player.addEventListener('ended', done);
             player.addEventListener('error', fail);
             active.signal.addEventListener('abort', done);
-            player.play().catch(err => {
-              if (active.signal.aborted) return;
-              if (err.name === 'NotAllowedError') report('音频已就绪，点击播放即可朗读。');
+            play = () => player.play().catch(err => {
+              if (active.signal.aborted || err.name === 'AbortError') return;
+              if (err.name === 'NotAllowedError') playback('ready');
               else fail();
             });
+            if (!paused) play();
           });
         } finally {
+          if (session === active) {
+            play = null;
+            if (!paused) playback('loading');
+          }
           URL.revokeObjectURL(url);
         }
       }
     } catch (error) {
       if (!active.signal.aborted) { queue.length = 0; report(error.message); }
     } finally {
-      if (session === active) { session = null; player.hidden = true; }
+      if (session === active) {
+        session = null;
+        resetPlayer();
+      }
     }
   }
 
   return {
-    label, player, stop,
-    get enabled() { return check.checked; },
+    label, popup, stop,
+    get voicePreference() { return voicePreference; },
+    enableForVoice(available) {
+      check.disabled = !available;
+      check.checked = available && voicePreference;
+      label.title = available ? '朗读本次语音提问的答复' : '使用按住说话后可启用朗读';
+    },
     enqueueSentence(sentence, context) {
-      if (!check.checked) return;
       queue.push({ ...context, sentence });
       if (!session) void drain();
     },
     enqueue(item, context) {
-      if (!check.checked || item?.role !== 'assistant' || !item.requestId) return;
+      if (item?.role !== 'assistant' || !item.requestId) return;
       const count = Math.ceil(Array.from(item.content).length / 600);
       for (let part = 0; part < count; part++)
         queue.push({ ...context, part, requestId: item.requestId });

@@ -143,7 +143,11 @@ function buildChat(getContext, actor, area, region, label) {
   note.setAttribute('role', 'status');
   const error = el('div', 'assistant-error');
   error.setAttribute('role', 'alert');
-  const reader = replyReader((message) => { note.textContent = message; });
+  const reader = replyReader((message) => { note.textContent = message; }, () => {
+    speechDismissed = true;
+    speechTurn = null;
+    (panel.hidden ? document.getElementById('assistant-launch') : input)?.focus({ preventScroll: true });
+  });
   const auto = el('input');
   auto.type = 'checkbox';
   const pref = 'assistant:auto-send:' + ctx.state.user.id;
@@ -164,11 +168,12 @@ function buildChat(getContext, actor, area, region, label) {
     waiting = false,
     sending = false;
   let voicePhase = 'idle',
+    voiceDraft = '',
     request,
     retry,
     lastFocused,
     destroyed = false;
-  let partial = '', partialRow, partialFrame, speechTurn;
+  let partial = '', partialRow, partialFrame, speechTurn, speechDismissed = false;
   const requestURL = path + (area ? '?' + area : '');
   let voice;
   const network = networkControl({
@@ -213,8 +218,10 @@ function buildChat(getContext, actor, area, region, label) {
         body: blob,
       }),
     onText(result) {
-      if (destroyed || panel.hidden || !result.text) return;
-      input.value = [input.value.trim(), result.text.trim()].filter(Boolean).join('\n');
+      const transcript = result.text?.trim();
+      if (destroyed || panel.hidden || !transcript) return;
+      input.value = [input.value.trim(), transcript].filter(Boolean).join('\n');
+      voiceDraft = typeof result.transcriptId === 'string' ? result.transcriptId : '';
       adjustInput();
       if (input.value.length > input.maxLength) {
         note.textContent = '转写内容较长，请拆分后发送。';
@@ -224,6 +231,10 @@ function buildChat(getContext, actor, area, region, label) {
         input.focus();
       }
     },
+  });
+  // Allow a second pointer to choose speech without taking focus from a held microphone.
+  reader.label.addEventListener('pointerdown', (event) => {
+    if (voicePhase === 'starting' || voicePhase === 'recording') event.preventDefault();
   });
   const sendActions = node('div', 'assistant-send-actions', [keys, send]);
   const visit = !area && ctx.state.allowedActions?.includes('dossier.confirmVisit')
@@ -238,7 +249,7 @@ function buildChat(getContext, actor, area, region, label) {
     error,
     note,
     network.status,
-    reader.player,
+    reader.popup,
     composeBox,
     node('div', 'assistant-composer-foot', [autoLabel, reader.label, network.button]),
   );
@@ -261,6 +272,7 @@ function buildChat(getContext, actor, area, region, label) {
       voicePhase !== 'idle';
     if (voice) voice.control.disabled = blocked;
     if (visit) visit.disabled = sending || network.probing || voicePhase !== 'idle';
+    reader.enableForVoice(!blocked && !panel.hidden && (voicePhase !== 'idle' || voiceDraft));
   }
   function adjustInput() {
     input.style.height = 'auto';
@@ -456,7 +468,11 @@ function buildChat(getContext, actor, area, region, label) {
   function hide(keepPlayback = false) {
     if (keepPlayback !== true) {
       reader.stop();
+      speechDismissed = true;
       speechTurn = null;
+    } else {
+      reader.popup.classList.add('assistant-reader-detached');
+      document.body.append(reader.popup);
     }
     if (network.probing) network.reset();
     panel.hidden = true;
@@ -487,7 +503,7 @@ function buildChat(getContext, actor, area, region, label) {
       }
     }
   }
-  async function transmit(raw) {
+  async function transmit(raw, voiceTranscriptId = '') {
     const text = raw.trim();
     if (
       !loaded ||
@@ -501,14 +517,19 @@ function buildChat(getContext, actor, area, region, label) {
       return;
     const startPage = location.hash;
     const page = startPage.slice(1).split('?')[0] || 'overview';
-    if (!retry || retry.text !== text || retry.page !== page || retry.webSearch !== network.enabled)
-      retry = { text, page, id: crypto.randomUUID(), webSearch: network.enabled };
+    const speechRequested = Boolean(voiceTranscriptId && reader.voicePreference);
+    if (!retry || retry.text !== text || retry.page !== page || retry.webSearch !== network.enabled ||
+      retry.voiceTranscriptId !== (speechRequested ? voiceTranscriptId : ''))
+      retry = { text, page, id: crypto.randomUUID(), webSearch: network.enabled,
+        voiceTranscriptId: speechRequested ? voiceTranscriptId : '' };
     sending = true;
     reader.stop();
     partial = '';
     speechTurn = null;
+    speechDismissed = false;
     network.status.textContent = '';
     input.value = '';
+    voiceDraft = '';
     note.textContent = '';
     error.replaceChildren();
     adjustInput();
@@ -518,7 +539,6 @@ function buildChat(getContext, actor, area, region, label) {
       received = false,
       speechFrames = false;
     try {
-      const speechRequested = reader.enabled;
       const result = await streamReply(path + '/stream', {
         text,
         requestId: retry.id,
@@ -528,9 +548,10 @@ function buildChat(getContext, actor, area, region, label) {
         scopeKey,
         generation,
         readAloud: speechRequested,
+        ...(speechRequested ? { voiceTranscriptId: retry.voiceTranscriptId } : {}),
       }, request.signal, event => {
         if (destroyed) return;
-        if (event.type === 'begin' && !panel.hidden && speechRequested)
+        if (event.type === 'begin' && !panel.hidden && speechRequested && !speechDismissed)
           speechTurn = { region, scopeKey: event.scopeKey, generation: event.generation, requestId: event.requestId };
         if (event.type === 'text' && typeof event.text === 'string') appendText(event.text);
         if (event.type === 'speech' && Number.isInteger(event.sentence)) {
@@ -541,7 +562,7 @@ function buildChat(getContext, actor, area, region, label) {
       if (destroyed) return;
       update(result, true);
       received = true;
-      if (!panel.hidden && !speechFrames)
+      if (!panel.hidden && speechRequested && !speechFrames && !speechDismissed)
         reader.enqueue(messages.at(-1), {region, scopeKey, generation});
       if (
         messages.at(-2)?.content === text &&
@@ -552,7 +573,10 @@ function buildChat(getContext, actor, area, region, label) {
     } catch (e) {
       if (destroyed) return;
       reader.stop();
-      if (!input.value) input.value = text;
+      if (!input.value) {
+        input.value = text;
+        voiceDraft = voiceTranscriptId;
+      }
       if (e.status === 401) {
         await getContext().refreshWorkspace();
         if (!destroyed) problem('登录已过期，请重新登录。');
@@ -601,9 +625,17 @@ function buildChat(getContext, actor, area, region, label) {
   }
   composer.addEventListener('submit', (event) => {
     event.preventDefault();
-    transmit(input.value);
+    transmit(input.value, voiceDraft);
   });
-  input.addEventListener('input', adjustInput);
+  input.addEventListener('beforeinput', (event) => {
+    if (voiceDraft && event.inputType !== 'historyUndo' &&
+      input.selectionStart === 0 && input.selectionEnd === input.value.length)
+      voiceDraft = '';
+  });
+  input.addEventListener('input', () => {
+    if (!input.value.trim()) voiceDraft = '';
+    adjustInput();
+  });
   let composing = false;
   input.addEventListener('compositionstart', () => {
     composing = true;
@@ -645,6 +677,10 @@ function buildChat(getContext, actor, area, region, label) {
         return;
       }
       lastFocused = document.activeElement;
+      if (reader.popup.parentNode !== composer) {
+        reader.popup.classList.remove('assistant-reader-detached');
+        composer.insertBefore(reader.popup, composeBox);
+      }
       panel.hidden = false;
       document.getElementById('assistant-launch')?.setAttribute('aria-expanded', 'true');
       if (!sending && !waiting) load();
@@ -654,6 +690,7 @@ function buildChat(getContext, actor, area, region, label) {
     destroy() {
       destroyed = true;
       reader.stop();
+      reader.popup.remove();
       voice.cancel();
       network.reset();
       request?.abort();

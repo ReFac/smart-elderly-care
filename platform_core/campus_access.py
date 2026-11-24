@@ -138,7 +138,10 @@ def projection(db, state, user):
 
 
 def authorize_command(db, user, action, payload, state):
-    if action in ("ops.bill", "ops.deposit", "ops.residentBillingPolicy"):
+    if action.startswith("permissionRequest."):
+        # The request and its one-time edit are checked against the selected approver's scope.
+        return
+    if action in ("dossier.profile", "ops.bill", "ops.deposit", "ops.residentBillingPolicy"):
         require_resident(db, user, payload.get("residentId"), state)
     elif action in ("ops.pay", "ops.importReceipt", "ops.paymentOrder", "ops.remindBill"):
         bill = next((row for row in state["bills"] if row["id"] == payload.get("billId")), None)

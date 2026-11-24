@@ -6,7 +6,7 @@ const grantGroups = [
   ['医疗档案与亲属', ['medical', 'medical.write', 'relatives', 'family.share']],
   ['机构运营', ['inventory', 'finance', 'longCare', 'shifts', 'reports']],
   ['智能协作与设备', ['assistants', 'gateway.simulate', 'alerts', 'voice', 'voice.confirm']],
-  ['人员与审计', ['staff.manage', 'audit']],
+  ['人员与审计', ['staff.manage', 'permissions.approve', 'audit']],
 ];
 
 // Labels describe the action IDs returned by the server for this account.
@@ -118,10 +118,12 @@ const commands = {
     {
       create: '创建账号',
       update: '调整账号与授权',
+      setRealName: '登记审批签名实名',
       settings: '设置机构界面',
     },
   ],
   account: ['个人账号', { changePassword: '修改本人密码' }],
+  permissionRequest: ['权限申请', { create: '申请档案编辑权限', review: '实名签署审批', editProfile: '使用临时档案授权' }],
   family: ['巡查简报', { consent: '登记长者分享意愿', subscribe: '本人订阅站内简报', read: '签收本人简报' }],
   portal: ['长者与家属服务', { feedback: '评价已完成的服务' }],
 };

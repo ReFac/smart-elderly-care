@@ -272,6 +272,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.store.rounds.matches(path, False):
             return self.send_json(200, self.store.rounds.read(self.token(), path))
         token = self.token()
+        permission_profile = re.fullmatch(r"/api/permission-requests/([a-f0-9]{32})/profile", path)
+        if path == "/api/permission-requests" or permission_profile:
+            from platform_core import permission_requests
+
+            return self.send_json(200, permission_requests.read(
+                self.store, token, permission_profile[1] if permission_profile else None
+            ))
         voice = re.fullmatch(r"/api/voice-proposals/([a-f0-9]{32})", path)
         if voice:
             return self.send_json(200, self.store.voice_proposal(token, voice[1]))
@@ -526,6 +533,7 @@ class Handler(BaseHTTPRequestHandler):
         from platform_core.agents.chat_progress import Progress
 
         speak = request.pop("readAloud", False)
+        voice_receipt = request.pop("voiceTranscriptId", None)
         if type(speak) is not bool:
             raise ValueError("朗读选项格式无效")
         self.close_connection = True
@@ -548,7 +556,7 @@ class Handler(BaseHTTPRequestHandler):
 
         progress = Progress(self.store, emit, speak=speak)
         try:
-            result = chat.reply(self.store, self.token(), request, progress=progress)
+            result = chat.reply(self.store, self.token(), request, progress=progress, voice_receipt=voice_receipt)
             emit({"type": "done", "result": result})
         except (SignedOut, Conflict, PermissionError, FileNotFoundError, chat.Unavailable,
                 ValueError, TypeError, OverflowError, RecursionError, *OPERATIONAL_ERRORS) as err:

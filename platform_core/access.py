@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import time
+from unicodedata import category, normalize
 from uuid import uuid4
 
 from . import campus_access, identity, portal, staff_scope
@@ -51,6 +52,10 @@ OWNER_LABEL = "Owner"
 
 class LoginThrottled(PermissionError):
     """The same account has exceeded its failed sign-in budget."""
+
+
+class SignaturePasswordDenied(PermissionError):
+    """An authenticated signer did not prove possession of their current password."""
 
 
 def _password(value):
@@ -137,6 +142,10 @@ def init(db, initial_owner_password=None):
     db.execute("CREATE INDEX IF NOT EXISTS sessions_account ON sessions(account_id)")
     db.execute("""CREATE TABLE IF NOT EXISTS login_failures (
       subject TEXT PRIMARY KEY, since INTEGER NOT NULL, attempts INTEGER NOT NULL)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS account_real_names (
+      account_id TEXT PRIMARY KEY REFERENCES accounts(id),
+      real_name TEXT NOT NULL, registered_by TEXT NOT NULL REFERENCES accounts(id),
+      registered_at TEXT NOT NULL)""")
     db.execute("""CREATE TABLE IF NOT EXISTS institution_settings (
       id INTEGER PRIMARY KEY CHECK(id=1), visual TEXT NOT NULL, deepseek_enabled INTEGER NOT NULL,
       deepseek_model TEXT NOT NULL)""")
@@ -229,17 +238,29 @@ def login(db, username, password):
         or len(password) > 128
     ):
         raise PermissionError("账号或密码不正确，或账号已停用")
-    now = int(time.time())
     row = db.execute(
         "SELECT * FROM accounts WHERE username=?", (username.strip(),)
     ).fetchone()
+    _verify_password(db, row, password, signing=False)
+    token = secrets.token_urlsafe(32)
+    now = int(time.time())
+    db.execute("DELETE FROM sessions WHERE expires <= ?", (now,))
+    db.execute(
+        "INSERT INTO sessions VALUES(?,?,?)",
+        (_token_hash(token), row["id"], now + SESSION_LIFETIME),
+    )
+    return token, _public(row)
+
+
+def _verify_password(db, row, password, *, signing):
+    now = int(time.time())
     subject = row["id"] if row else "unknown"
     db.execute("DELETE FROM login_failures WHERE since<=?", (now - WINDOW,))
     failed = db.execute(
         "SELECT attempts FROM login_failures WHERE subject=?", (subject,)
     ).fetchone()
     if failed and failed[0] >= MAX_FAILURES:
-        raise LoginThrottled("登录尝试过多，请在 15 分钟后重试")
+        raise LoginThrottled("签名验证次数过多，请在 15 分钟后重试" if signing else "登录尝试过多，请在 15 分钟后重试")
     computed = _digest(password, row["salt"] if row else DUMMY_SALT)
     if (
         not row
@@ -251,15 +272,48 @@ def login(db, username, password):
                    ON CONFLICT(subject) DO UPDATE SET attempts=attempts+1""",
             (subject, now),
         )
+        if signing:
+            raise SignaturePasswordDenied("当前账号密码不正确，签名未提交")
         raise PermissionError("账号或密码不正确，或账号已停用")
-    token = secrets.token_urlsafe(32)
     db.execute("DELETE FROM login_failures WHERE subject=?", (subject,))
-    db.execute("DELETE FROM sessions WHERE expires <= ?", (now,))
-    db.execute(
-        "INSERT INTO sessions VALUES(?,?,?)",
-        (_token_hash(token), row["id"], now + SESSION_LIFETIME),
+
+
+def verify_current_password(db, user, current_password):
+    if not isinstance(current_password, str) or not 0 < len(current_password) <= 128:
+        raise SignaturePasswordDenied("请输入当前账号密码以确认签名")
+    row = db.execute("SELECT * FROM accounts WHERE id=?", (user["id"],)).fetchone()
+    _verify_password(db, row, current_password, signing=True)
+
+
+def signature_text(value):
+    if not isinstance(value, str):
+        raise ValueError("请填写账号本人的实名")
+    name = normalize("NFC", value.strip())
+    if not 1 <= len(name) <= 60 or not any(c.isalpha() for c in name) or any(
+        category(c).startswith("C") or c.isspace() and c not in (" ", "\u3000") for c in name
+    ):
+        raise ValueError("请填写有效的实名，最多 60 字")
+    return name
+
+
+def real_name(db, actor_id):
+    record = db.execute("SELECT real_name FROM account_real_names WHERE account_id=?", (actor_id,)).fetchone()
+    return record[0] if record else ""
+
+
+def _register_real_name(db, user, payload):
+    if set(payload) != {"accountId", "realName"} or not isinstance(payload["accountId"], str):
+        raise ValueError("请选择机构账号并填写实名")
+    target = account(db, payload["accountId"])
+    if not target or target["kind"] not in ("owner", "staff"):
+        raise ValueError("只能为机构员工或 Owner 登记签名实名")
+    name = signature_text(payload["realName"])
+    db.execute("""INSERT INTO account_real_names VALUES(?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        ON CONFLICT(account_id) DO UPDATE SET real_name=excluded.real_name,
+        registered_by=excluded.registered_by, registered_at=excluded.registered_at""",
+        (target["id"], name, user["id"]),
     )
-    return token, _public(row)
+    return f"登记账号 {target['username']} 的签名实名"
 
 
 def _valid_token(token):
@@ -306,7 +360,7 @@ def _assignable(user):
     return (
         set(PERMISSIONS)
         if user["kind"] == "owner"
-        else set(user["permissions"]) - {"staff.manage", "clinical.rules"}
+        else set(user["permissions"]) - {"staff.manage", "clinical.rules", "permissions.approve"}
     )
 
 
@@ -635,6 +689,8 @@ def _settings(db, p):
 
 def apply(db, state, action, payload, user, facility_policy=None):
     authorize(user, action, payload, state)
+    if action == "access.setRealName":
+        return _register_real_name(db, user, payload)
     area_check = staff_scope.boundary(db, user, facility_policy)
     if action == "access.create":
         return _create(db, state, payload, user, area_check)
@@ -676,6 +732,8 @@ def project(db, state, user, facility_policy=None):
         uiSettings=json.loads(row["visual"]),
         allowedActions=allowed_actions(user),
     )
+    if user["kind"] in ("owner", "staff"):
+        filtered["signatureRealName"] = real_name(db, user["id"])
     if user["kind"] == "family":
         portal.project(filtered, state, user)
     if user["kind"] == "family" and user.get("familyServices"):
@@ -721,9 +779,12 @@ def project(db, state, user, facility_policy=None):
         )
         paydays = dict(db.execute("SELECT account_id,payday FROM staff_paydays"))
         owner = user["kind"] == "owner"
+        real_names = dict(db.execute("SELECT account_id,real_name FROM account_real_names")) if owner else {}
         filtered.update(
             accounts=[
-                {**a, "allowedActions": allowed_actions(a), **({"payday": paydays[a["id"]]} if a["id"] in paydays else {})}
+                {**a, "allowedActions": allowed_actions(a),
+                 **({"payday": paydays[a["id"]]} if a["id"] in paydays else {}),
+                 **({"signatureRealName": real_names.get(a["id"], "")} if owner and a["kind"] != "family" else {})}
                 for a in accounts
                 if _within_account_scope(user, a, assignable, area_check)
             ],

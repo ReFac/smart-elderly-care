@@ -293,6 +293,23 @@ def require_agent_receipt(db, user, selected, receipt):
         raise ValueError("语音回执与经办人或工作区域不匹配")
 
 
+def require_chat_receipt(db, user, selected, receipt):
+    from ..agents import region
+
+    selected = region.selection(selected) if selected else None
+    reference, _ = chat_voice_context(db, user, selected)
+    if (
+        not isinstance(receipt, str)
+        or len(receipt) != 32
+        or not db.execute(
+            """SELECT 1 FROM media_usage WHERE id=? AND actor=? AND reference=?
+               AND kind='asr' AND state='complete' AND feature='assistant.voiceAsr'""",
+            (receipt, user["id"], reference),
+        ).fetchone()
+    ):
+        raise PermissionError("朗读只用于本人在当前对话里按住说话的语音消息")
+
+
 def transcribe(store, token, reference, raw, authorize, audit_scope=None, *, feature):
     filename, mime, seconds, upload = audio_spec(raw)
 

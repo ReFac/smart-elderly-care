@@ -28,6 +28,7 @@ PERMISSIONS = {
     "voice.confirm": "确认或退回语音变更",
     "audit": "查阅已授权业务的操作日志",
     "staff.manage": "在本人业务权限内管理员工账号",
+    "permissions.approve": "实名签署长者档案临时权限申请",
 }
 PRESETS = {
     "院长": [
@@ -314,6 +315,10 @@ def authorize(user, action, payload, state):
         return
     if action == "account.changePassword":
         return
+    if action.startswith("permissionRequest."):
+        from . import permission_requests
+
+        return permission_requests.authorize(user, action)
     if action == "care.finishTrialFollowup":
         if user["kind"] in ("owner", "staff") and "residents" in user["routes"]:
             return
@@ -410,6 +415,7 @@ def allowed_actions(user):
         action for action, permission in ACTION_GRANTS.items() if has(user, permission)
     ]
     from .operations.dispatch import unrestricted
+    from . import permission_requests
 
     if not has(user, "staff.manage"):
         actions = [a for a in actions if a != "leads.capacity"]
@@ -418,6 +424,10 @@ def allowed_actions(user):
         actions = [a for a in actions if a not in ("ops.publishNotice", "ops.supplyOrder", "ops.importExpenses")]
     if user["kind"] in ("owner", "staff"):
         actions.append("ops.finishSupplyOrder")
+    if permission_requests.requester(user):
+        actions.extend((permission_requests.CREATE, permission_requests.EDIT))
+    if permission_requests.approver(user):
+        actions.append(permission_requests.REVIEW)
     actions.append("account.changePassword")
     if user["kind"] in ("owner", "staff") and "residents" in resolve_routes(user):
         actions.append("care.finishTrialFollowup")
@@ -462,6 +472,7 @@ def allowed_actions(user):
             "access.settings",
             "access.mediaSettings",
             "access.trialSettings",
+            "access.setRealName",
         ]
     from . import campus_access
 
@@ -485,6 +496,10 @@ def can_view_audit(user, action, *, agent_initiator=None, agent_grants=()):
         return has(user, "medical") and has(user, "clinical")
     if action in VISIT_DOCUMENT_ACTIONS:
         return has(user, "medical") and has(user, "medical.write")
+    if action == "permissionRequest.editProfile":
+        return has(user, "intake")
+    if action in ("permissionRequest.create", "permissionRequest.review"):
+        return has(user, "permissions.approve") and has(user, "intake")
     if action.startswith("agent."):
         return (
             action in ACTION_GRANTS

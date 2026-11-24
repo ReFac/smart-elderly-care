@@ -16,6 +16,7 @@
   const state = {
     user: { id: 'stream-fixture', kind: 'staff', permissions: ['assistants'], routes: ['overview'] },
     uiSettings: { institutionName: '演示机构', hiddenRoutes: [] },
+    assistantVoice: {state: 'available', path: '/api/assistant/voice'},
   };
   const ctx = { state, available: () => true, async refreshWorkspace() { return true; } };
   const find = selector => document.querySelector(selector);
@@ -25,6 +26,8 @@
   const turns = [];
   const calls = [];
   const messages = [];
+  const voiceReceipts = [];
+  let transcript = '';
 
   function check(condition, message) {
     if (!condition) throw new Error(message);
@@ -35,12 +38,12 @@
     check(test(), message);
   }
   function wave() {
-    const bytes = new ArrayBuffer(8044);
+    const bytes = new ArrayBuffer(32044);
     const view = new DataView(bytes);
     const words = {0: 'RIFF', 8: 'WAVE', 12: 'fmt ', 36: 'data'};
     for (const [offset, label] of Object.entries(words))
       [...label].forEach((letter, i) => view.setUint8(Number(offset) + i, letter.charCodeAt(0)));
-    const counters = {4: 8036, 16: 16, 24: 8000, 28: 16000, 40: 8000};
+    const counters = {4: 32036, 16: 16, 24: 8000, 28: 16000, 40: 32000};
     for (const [offset, value] of Object.entries(counters)) view.setUint32(Number(offset), value, true);
     for (const [offset, value] of [[20, 1], [22, 1], [32, 2], [34, 16]]) view.setUint16(offset, value, true);
     return new Response(bytes, {headers: {'Content-Type': 'audio/wav'}});
@@ -73,10 +76,17 @@
     if (path === container + '?roomId=fixture-room') {
       return Response.json({scopeKey, generation, messages: [...messages]});
     }
+    if (path === '/api/assistant/voice?roomId=fixture-room') {
+      const receipt = crypto.randomUUID().replaceAll('-', '');
+      voiceReceipts.push(receipt);
+      return Response.json({text: transcript, transcriptId: receipt});
+    }
     if (path === container + '/stream') {
       const payload = JSON.parse(options.body);
       check(options.headers.Accept === 'application/x-ndjson', '使用流式答复接口');
-      check(payload.readAloud === true, '发送时仅传朗读开关');
+      check(payload.readAloud
+        ? payload.voiceTranscriptId === voiceReceipts.at(-1)
+        : !Object.hasOwn(payload, 'voiceTranscriptId'), '只为语音朗读提交转写凭证');
       const turn = {payload, signal: options.signal, done: false};
       turns.push(turn);
       if (payload.text === '兼容完整答复') return Response.json(finalize(turn));
@@ -109,6 +119,7 @@
   const log = () => find('.assistant-log');
   const input = () => find('.assistant-input');
   const panel = () => find('#assistant-chat');
+  const popup = () => find('.assistant-reader');
   function ping(question) {
     input().value = question;
     input().dispatchEvent(new Event('input'));
@@ -119,31 +130,88 @@
     frame(turn, {type: 'text', text: first}, 24);
     frame(turn, {type: 'speech', sentence: 0});
   }
+  async function speak(question) {
+    transcript = question;
+    const mic = find('.assistant-hold');
+    const hold = (type) => mic.dispatchEvent(new KeyboardEvent(type, {key: ' ', bubbles: true}));
+    hold('keydown');
+    await until(() => mic.dataset.phase === 'recording', '按住说话开启录音');
+    check(!find('.assistant-read-option input').disabled, '录音时可以设置朗读');
+    await new Promise(resolve => setTimeout(resolve, 230));
+    hold('keyup');
+    await until(() => mic.dataset.phase === 'idle', '松开完成转写');
+  }
   async function run() {
+    const audioContext = new AudioContext();
+    const oscillator = audioContext.createOscillator();
+    const destination = audioContext.createMediaStreamDestination();
+    oscillator.connect(destination);
+    oscillator.start();
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {configurable: true,
+      value: async () => destination.stream.clone()});
+    localStorage.removeItem('assistant:auto-send:stream-fixture');
     launch.click();
     await until(() => input() && !input().disabled, '打开健康助理');
-    const checkSpeech = find('.assistant-composer-foot label:nth-child(2) input');
-    check(!checkSpeech.checked, '朗读默认关闭');
+    const checkSpeech = find('.assistant-read-option input');
+    check(checkSpeech.disabled && !checkSpeech.checked, '普通文字时朗读默认关闭且不可勾选');
+    const typed = ping('普通文字答复');
+    check(typed.payload.readAloud === false, '普通文字请求关闭朗读');
+    beginSpeech(typed);
+    finish(typed);
+    await until(() => !input().readOnly, '文字请求完成');
+    check(!calls.length && popup().hidden, '文字消息不发起朗读');
+
+    await speak('分段返回');
+    await until(() => input().value === '分段返回' && !checkSpeech.disabled, '转写草稿可以开启朗读');
     checkSpeech.click();
-    const streaming = ping('分段返回');
+    const streaming = ping('分段返回，请缓慢读');
+    check(streaming.payload.readAloud, '手动发送转写与改字后仍可朗读');
     beginSpeech(streaming);
     await until(() => calls.length === 1, '回复仍在生成时已请求朗读');
-    await until(() => log().innerText.includes(first), '回复仍在生成时已展示首段文字');
-    check(calls[0].beforeDone && log().querySelector('.assistant-current') &&
-      !log().innerText.includes(last), '首段文字展示，整条答复尚未结束');
+    const current = () => log().querySelector('.assistant-current');
+    await until(() => current()?.innerText.includes(first), '回复仍在生成时已展示首段文字');
+    check(calls[0].beforeDone && !current().innerText.includes(last), '首段文字展示，整条答复尚未结束');
     calls[0].deliver();
-    await until(() => Boolean(find('audio').getAttribute('src')) && !find('audio').hidden, '首段音频并行就绪');
+    await until(() => popup().dataset.playback === 'playing', '首段音频并行播放');
+    check(!popup().hidden && popup().querySelector('.assistant-reader-wave').children.length > 3 &&
+      !find('audio').controls && !popup().querySelector('progress,input[type=range]'), '声纹窗口替换原生进度条');
+    const toggle = popup().querySelector('.assistant-reader-toggle');
+    check([...popup().querySelectorAll('button')].map(b => b.textContent).join(' ') === '暂停 退出', '朗读浮窗仅有暂停和退出');
+    toggle.click();
+    await until(() => find('audio').paused && toggle.textContent === '继续', '暂停朗读');
+    toggle.click();
+    await until(() => !find('audio').paused && toggle.textContent === '暂停', '继续朗读');
     check(!streaming.done, '播放区显示时未收到完整答复');
+    popup().querySelector('.assistant-reader-close').click();
+    check(popup().hidden && !find('audio').getAttribute('src'), '退出清除播放器');
+    frame(streaming, {type: 'speech', sentence: 1});
     finish(streaming);
     await until(() => !input().readOnly && log().innerText.includes(last), '写回完整答复');
-    check(!log().querySelector('.assistant-current') && calls.length === 1, '完整答复不会重复发起朗读');
+    check(!log().querySelector('.assistant-current') && calls.length === 1, '退出后同一回复不会再次朗读');
 
-    const folded = ping('在收起前开始朗读');
+    const typedAfterSpeech = ping('下一条键盘问题');
+    check(!typedAfterSpeech.payload.readAloud && checkSpeech.disabled, '打开过朗读的语音设置不会带到文字问题');
+    finish(typedAfterSpeech);
+    await until(() => !input().readOnly, '下一条键盘问题完成');
+
+    await speak('准备全部替换的转写');
+    input().setSelectionRange(0, input().value.length);
+    input().dispatchEvent(new InputEvent('beforeinput', {inputType: 'insertFromPaste'}));
+    const replaced = ping('粘贴来的新问题');
+    check(!replaced.payload.readAloud, '完全替换转写内容后按普通文字发送');
+    finish(replaced);
+    await until(() => !input().readOnly, '粘贴问题完成');
+
+    find('.assistant-composer-foot label:first-child input').click();
+    await speak('在收起前开始朗读');
+    await until(() => turns.at(-1).payload.text === '在收起前开始朗读', '自动发送转写');
+    const folded = turns.at(-1);
+    check(folded.payload.readAloud, '自动发送提问沿用语音朗读设置');
     beginSpeech(folded);
     await until(() => calls.length === 2, '第二轮开始朗读');
     find('button[aria-label=收起助理]').click();
     await until(() => calls[1].signal.aborted && panel().hidden, '收起停止正在请求的音频');
-    check(find('audio').hidden && !find('audio').getAttribute('src'), '收起清除播放器');
+    check(popup().hidden && !find('audio').getAttribute('src'), '收起清除播放器');
     frame(folded, {type: 'speech', sentence: 1});
     finish(folded);
     await until(() => !input().readOnly, '收起后完整答复仍写回');
@@ -151,18 +219,22 @@
 
     launch.click();
     await until(() => !input().disabled, '重开同一对话');
-    ping('兼容完整答复');
+    await speak('兼容完整答复');
     await until(() => calls.length === 3 && !input().readOnly, '完整 JSON 答复可使用兼容朗读');
     check(calls[2].payload.part === 0 && !calls[2].beforeDone, '完整 JSON 回复仍从已保存文本读取');
-    checkSpeech.click();
-    await until(() => calls[2].signal.aborted, '取消勾选停止音频');
-    checkSpeech.click();
+    calls[2].deliver();
+    await until(() => !popup().hidden, '已保存答复打开朗读小窗');
+    popup().querySelector('.assistant-reader-close').click();
+    await until(() => calls[2].signal.aborted, '退出停止朗读');
 
-    const discarded = ping('销毁期间的对话');
+    await speak('销毁期间的对话');
+    const discarded = turns.at(-1);
     beginSpeech(discarded);
     await until(() => calls.length === 4, '等待一段可中止的朗读');
     clearChat();
     check(!panel() && discarded.signal.aborted && calls[3].signal.aborted, '销毁助理时中止接收及朗读');
+    oscillator.stop();
+    await audioContext.close();
     document.documentElement.dataset.result = 'pass';
     find('output').textContent = 'PASS';
   }

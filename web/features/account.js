@@ -3,6 +3,7 @@ import { groups } from '../lib/navigation.js';
 import { openEmployment } from './staff-employment.js';
 import { bindFlow, passwordFlow } from './identity.js';
 import { canAct, node, page } from './shared.js';
+import { canOpenPermissionRequests, openPermissionRequests } from './permission-requests.js';
 
 const passwordAction = 'account.changePassword';
 
@@ -16,6 +17,8 @@ function identity(ctx) {
   if (user.kind === 'family') {
     const resident = residents.find((r) => r.id === user.residentId);
     if (resident) details.push(['绑定长者', residentLabel(ctx, resident)]);
+  } else if (ctx.state.signatureRealName || canAct(ctx, 'permissionRequest.review')) {
+    details.push(['签名实名', ctx.state.signatureRealName || '待 Owner 登记']);
   }
   const card = node('section', 'personal-identity', [
     node('div', 'personal-avatar', user.displayName.slice(0, 1)),
@@ -73,6 +76,8 @@ export function accountCenter(ctx) {
   const { routes, permissions } = ctx.state.selfAccess;
   const grants = node('section', 'fx-panel personal-panel', [
     node('h2', 'personal-panel-title', [ctx.ui.icon('shield', 19), '我的权限']),
+    canOpenPermissionRequests(ctx)
+      ? ctx.ui.button('权限申请', () => openPermissionRequests(ctx), 'secondary', 'shield') : null,
     permissions.length
       ? node(
           'ul',

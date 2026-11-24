@@ -12,8 +12,9 @@ from urllib.error import HTTPError, URLError
 from platform_core import provider
 from platform_core.agents import chat
 from platform_core.agents.chat_progress import Progress, sentences
-from platform_core.provider import read_aloud
+from platform_core.provider import media, read_aloud, speech
 from platform_core.store import Conflict, SignedOut, Store, TIMEZONE
+from test_deepseek_media import sample_wav
 
 
 def result(answer="云端答复", kind="", route=""):
@@ -93,8 +94,19 @@ class ChatTests(unittest.TestCase):
         body = self.transport.call_args.args[1]
         return json.loads(body["messages"][1]["content"])["本次可见资料"]
 
+    def voice_receipt(self, picked=None):
+        with closing(self.store.connect()) as db, db:
+            media.grant(db, provider.latest(db)["id"], "asr", 10)
+        with patch.object(media, "read_key", return_value="mock-provider-credential"), patch.object(
+            media, "invoke", return_value={"text": "请说明探访安排", "duration_ms": 900, "request_id": "asr-fixture"}
+        ):
+            return speech.recognize_agent(
+                self.store, self.owner, picked, sample_wav(), True, conversation=True
+            )["transcriptId"]
+
     def test_short_sentence_is_authorized_before_complete_chat_turn(self):
         events, clips = [], []
+        receipt = self.voice_receipt()
         first = "今天的探访安排可以在接待时间表里核对。"
         key = patch.object(read_aloud, "read_key", return_value="mock-provider-credential")
         key.start()
@@ -126,8 +138,8 @@ class ChatTests(unittest.TestCase):
         try:
             with patch("platform_core.provider.deepseek.stream", side_effect=stream):
                 saved = chat.reply(self.store, self.owner, {
-                    "requestId": "in-progress-read", "text": "说下探访安排。"
-                }, progress=progress)
+                    "requestId": "in-progress-read", "text": "说下探访安排。", "region": {},
+                }, progress=progress, voice_receipt=receipt)
             second = sentences(saved["messages"][-1]["content"], final=True)[1]
             read_aloud.listen(self.store, self.owner, {
                 "scopeKey": saved["scopeKey"], "generation": saved["generation"],
@@ -135,8 +147,26 @@ class ChatTests(unittest.TestCase):
             }, transport=lambda _key, content: clips.append(content) or b"voice")
             self.assertEqual(clips, [first, second])
             self.assertEqual([e["type"] for e in events[:3]], ["begin", "text", "speech"])
+            with self.assertRaises(Conflict):
+                chat.reply(self.store, self.owner, {"requestId": "second-use", "text": "再说一次"},
+                           progress=progress, voice_receipt=receipt)
         finally:
             progress.close()
+
+    def test_read_aloud_requires_voice_in_current_scope_before_cloud_call(self):
+        another = self.staff(["care", "voice"], "speaker_two")
+        building = {"buildingId": "building-main"}
+        receipt = self.voice_receipt(building)
+        progress = Progress(self.store, Mock(), speak=True)
+        for token, scope, supplied in [
+            (self.owner, {}, None),
+            (self.owner, {}, receipt),
+            (another, building, receipt),
+        ]:
+            with self.subTest(scope=scope, supplied=bool(supplied)), self.assertRaises(PermissionError):
+                chat.reply(self.store, token, {"requestId": "wrong-source", "text": "你好", "region": scope},
+                           progress=progress, voice_receipt=supplied, transport=self.transport)
+        self.transport.assert_not_called()
 
     def test_conversation_returns_filtered_room_destination(self):
         answer = self.ask("请列出 3 间双人间")
