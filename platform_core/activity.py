@@ -52,6 +52,8 @@ RELATED = {
     "ops.review": ("id", "suggestions"),
 }
 PERSON_ACTIONS = {
+    "care.healthNote",
+    "dossier.signHealthIntro",
     "care.fileArchive",
     "care.dateArchive",
     "ltci.record",

@@ -2,10 +2,14 @@
 
 from .care.records import append_record, text_field
 
-SCOPES = {"careSchedule": "查阅照护工单进度", "medication": "查阅已复核医嘱及给药记录"}
+SCOPES = {
+    "careSchedule": "查阅照护工单进度",
+    "medication": "查阅已复核医嘱及给药记录",
+    "personalHealth": "查看本人的生活简报、时间线与健康简介",
+}
 
 
-def scopes(payload, kind, previous=()):
+def scopes(payload, kind, previous=(), *, portal_self=False):
     if "portalScopes" not in payload:
         return list(previous)
     value = payload["portalScopes"]
@@ -15,7 +19,20 @@ def scopes(payload, kind, previous=()):
         or not all(isinstance(v, str) and v in SCOPES for v in value)
     ):
         raise ValueError("请选择绑定长者账号可查阅的服务范围")
+    if "personalHealth" in value and not portal_self:
+        raise ValueError("个人生活与健康档案仅可授予已核验的长者本人账号")
     return sorted(set(value))
+
+
+def require_personal_health(user, rid):
+    if (
+        user.get("kind") != "family"
+        or not user.get("portalSelf")
+        or not rid
+        or user.get("residentId") != rid
+        or "personalHealth" not in user.get("portalScopes", ())
+    ):
+        raise PermissionError("此账号未获本人生活与健康档案的查阅授权")
 
 
 PAGE_SIZE = 30

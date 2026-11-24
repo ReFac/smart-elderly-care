@@ -144,27 +144,43 @@ class CloudBusinessTests(unittest.TestCase):
                 {"revision": self.store.version(actor)["revision"]},
             )["latest"]
 
+        # Only a reviewed, attributable change is eligible for the clinical section.
+        self.send(
+            "care.resolveVital",
+            {
+                "vitalId": self.store.snapshot(self.token)["data"]["vitals"][0]["id"],
+                "operator": "值班护士",
+                "note": "已现场复核",
+            },
+        )
+
+        def structure(key, body, **options):
+            facts = json.loads(body["messages"][1]["content"])["事实"]
+            reply = self.reply(key, body, **options)
+            reply["choices"][0]["message"]["content"] = json.dumps(
+                {"paragraphs": [[i] for i in range(1, len(facts) + 1)]}
+            )
+            return reply
+
         with patch(
-            "platform_core.provider.deepseek.send", side_effect=self.reply
+            "platform_core.provider.deepseek.send", side_effect=structure
         ) as transport:
             carer = generate(token)
             self.assertIsNone(carer["cough"])
             self.assertEqual(transport.call_count, 1)
-            facts = json.loads(transport.call_args.args[1]["messages"][1]["content"])[
-                "facts"
-            ]
-            self.assertEqual(set(facts), {"planned", "completed", "pending", "overdue"})
+            facts = transport.call_args.args[1]["messages"][1]["content"]
+            for forbidden in ("r001", "planned", "体温", "咳嗽", "值班护士"):
+                self.assertNotIn(forbidden, facts)
             clinical = generate(self.token)
             self.assertEqual(transport.call_count, 2)
-            facts = json.loads(transport.call_args.args[1]["messages"][1]["content"])[
-                "facts"
-            ]
-            self.assertIn("咳嗽观察", facts)
-            self.assertNotIn("r001", str(facts))
+            facts = transport.call_args.args[1]["messages"][1]["content"]
+            self.assertIn("体温", facts)
+            self.assertNotIn("咳嗽", facts)
+            self.assertNotIn("r001", facts)
             self.assertTrue(
                 any(
-                    row.get("source") == "deepseek" and row["permission"] == "clinical"
-                    for row in clinical["suggestions"]
+                    row["source"] == "deepseek" and row["permission"] == "clinical"
+                    for row in clinical["changes"]
                 )
             )
             carer = generate(token)
@@ -175,6 +191,7 @@ class CloudBusinessTests(unittest.TestCase):
                     for x in carer["changes"] + carer["suggestions"]
                 )
             )
+            self.assertNotIn("体温", str(carer))
 
     def test_retry_cache_actual_usage_and_indeterminate_billing(self):
         self.grant()

@@ -17,7 +17,7 @@ from platform_core.agents import chat
 from platform_core.operations import expense_import
 from platform_core.backups import exchange
 from platform_core import access, facility
-from platform_core import lead_intake, medical_visits
+from platform_core import daily_life, lead_intake, medical_visits, resident_health
 from platform_core.provider import round_priorities
 from platform_core.store import Conflict, SignedOut, Store, encode
 
@@ -140,7 +140,30 @@ class Handler(BaseHTTPRequestHandler):
         except (ConnectionResetError, BrokenPipeError):
             pass
 
+    def query_fields(self, allowed):
+        params = parse_qs(urlsplit(self.path).query, max_num_fields=len(allowed))
+        if set(params) - allowed or any(len(values) != 1 for values in params.values()):
+            raise ValueError("筛选参数无效")
+        return {key: values[0] for key, values in params.items()}
+
     def read_resource(self, path):
+        if path == "/api/daily-life/roster":
+            params = self.query_fields({"campusId", "roomId", "day"})
+            return self.send_json(200, daily_life.roster(
+                self.store, self.token(), params.get("campusId", ""), params.get("roomId", ""), params.get("day", "")
+            ))
+        timeline_match = re.fullmatch(r"/api/residents/([A-Za-z0-9_-]{1,100})/daily-life", path)
+        if timeline_match:
+            params = self.query_fields({"start", "end"})
+            return self.send_json(200, daily_life.timeline(
+                self.store, self.token(), timeline_match[1], params.get("start", ""), params.get("end", "")
+            ))
+        health = re.fullmatch(r"/api/residents/([A-Za-z0-9_-]{1,100})/health-profile", path)
+        if health:
+            return self.send_json(200, resident_health.read(self.store, self.token(), health[1]))
+        personal_brief = re.fullmatch(r"/api/residents/([A-Za-z0-9_-]{1,100})/personal-brief", path)
+        if personal_brief:
+            return self.send_json(200, self.store.rounds.personal_brief(self.token(), personal_brief[1]))
         original = re.fullmatch(r"/api/medical-visits/originals/([a-f0-9]{32})", path)
         if original:
             raw, mime = medical_visits.original(self.store, self.token(), original[1])
@@ -439,6 +462,9 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, image, mime)
 
     def write_resource(self, path):
+        health = re.fullmatch(r"/api/residents/([A-Za-z0-9_-]{1,100})/health-profile/draft", path)
+        if health:
+            return self.send_json(200, resident_health.draft(self.store, self.token(), health[1], self.read_json(SMALL_BODY)))
         visit = re.fullmatch(r"/api/residents/([A-Za-z0-9_-]{1,100})/medical-visits/preview", path)
         if visit:
             token = self.token()

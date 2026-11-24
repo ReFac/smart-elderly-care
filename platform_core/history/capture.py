@@ -94,8 +94,12 @@ def watch(db, action):
             WHEN OLD.data IS NOT NEW.data BEGIN
             INSERT INTO history_capture VALUES('workspace','1',OLD.data,NEW.data); END""")
     prefixes = PREFIXES.get(action.partition(".")[0], ())
+    if action in ("care.proposeGroupActivity", "care.confirmGroupActivity"):
+        prefixes = ("daily_life_",)
+    if action in ("care.healthNote", "dossier.signHealthIntro"):
+        prefixes = ("resident_health_notes",)
     if action in ("backup.apply", "history.undo"):
-        prefixes = tuple(k for group in PREFIXES.values() for k in group)
+        prefixes = (*tuple(k for group in PREFIXES.values() for k in group), "daily_life_", "resident_health_notes")
     if not prefixes:
         return
     for (table,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'"):
@@ -211,6 +215,16 @@ def collect(db, current, previous):
             people.add(identity)
         if collection == "facility_rooms":
             rooms.add(identity)
+        if collection == "daily_life_signatures" and source.get("eventId"):
+            # Signing may occur after the original registration or after a move.
+            # Keep the actual event rooms even if nobody was marked present.
+            for campus, room in db.execute(
+                """SELECT DISTINCT e.campusId,i.roomId FROM daily_life_events e
+                JOIN daily_life_invitees i ON i.eventId=e.id WHERE e.id=?""",
+                (source["eventId"],),
+            ):
+                campuses.add(campus)
+                rooms.add(room)
         for key in ("campusId", "campus_id"):
             if source.get(key):
                 campuses.add(source[key])
@@ -231,7 +245,7 @@ def collect(db, current, previous):
         who = source.get("residentId") or source.get("resident_id")
         if who:
             people.add(who)
-        for key in ("roomId", "executionRoomId", "previousRoomId"):
+        for key in ("roomId", "room_id", "executionRoomId", "previousRoomId"):
             if source.get(key):
                 rooms.add(source[key])
         for key in ("bedId", "bed_id", "beforeBedId", "afterBedId", "executionBedId"):

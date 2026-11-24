@@ -270,6 +270,7 @@ class Reader:
                 return False
         if action in (
             "dossier.signSummary",
+            "dossier.signHealthIntro",
             "dossier.reviewDocument",
             "dossier.confirmVisit",
         ) and not policy.has(self.user, "clinical"):
@@ -290,6 +291,10 @@ class Reader:
         if self.user["kind"] == "owner":
             return True
         name = c["collection"]
+        if name.startswith("daily_life_"):
+            return policy.has(self.user, "care") or policy.has(self.user, "care.groupConfirm")
+        if name == "resident_health_notes":
+            return policy.has(self.user, "care") or policy.has(self.user, "medical")
         if name in ("leadContacts", "leadEvents", "visitBookings", "visitSchedulePolicies"):
             if not policy.has(self.user, "intake"):
                 return False

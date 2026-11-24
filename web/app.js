@@ -240,7 +240,7 @@ async function submitChange({ action, url, payload, review = {} }) {
     toast('请先完成当前改动');
     return false;
   }
-  const beforeVersion = revision;
+  const beforeVersion = review.expectedRevision ?? revision;
   const previousEpoch = epoch;
   const prior = state;
   let choice;
@@ -530,6 +530,8 @@ function notices() {
     items.unshift(['待我签收的交班', myPendingHandovers().length, 'care', 'handover']);
   if (unresolvedTrials().length)
     items.unshift(['试住期满待确认入住', unresolvedTrials().length, 'residents', 'trials']);
+  if (state.groupActivityDue)
+    items.unshift(['集体活动待确认', state.groupActivityDue, 'care', 'groupLife']);
   if (myTrialFollowups().length)
     items.unshift(['待我办理的试住回访', myTrialFollowups().length, 'residents', 'trials']);
   if (available('leads') && pendingLeadCalls(state))
@@ -659,6 +661,7 @@ function masthead() {
       hasNewNotice(context()) ||
       myTrialFollowups().length ||
       unresolvedTrials().length ||
+      state.groupActivityDue > 0 ||
       (available('leads') && pendingLeadCalls(state)) ||
       state.supplyOrders?.some(row => row.assigneeId === state.user.id && row.status === '待执行') ||
       (available('inbox') && state.roundsNoticeCount > 0) ||
@@ -857,6 +860,7 @@ async function refresh() {
     if (
       check.revision === revision &&
       check.userId === state.user.id &&
+      check.groupActivityDue === state.groupActivityDue &&
       check.today === state.today
     )
       return;

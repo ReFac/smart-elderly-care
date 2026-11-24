@@ -468,6 +468,209 @@ class RoundsTests(unittest.TestCase):
         self.assertIn("已核对咳嗽时段观测", blockers)
         self.assertIn("已生成的长者巡查简报", blockers)
 
+    def test_daily_life_describes_confirmed_meals_and_observations_without_inventing_normality(
+        self,
+    ):
+        now = self.now.date().isoformat()
+        with closing(self.store.connect()) as db:
+            room = db.execute(
+                "SELECT roomId FROM facility_beds WHERE bedId='b001'"
+            ).fetchone()[0]
+            campus = db.execute("SELECT id FROM facility_campuses LIMIT 1").fetchone()[
+                0
+            ]
+
+        def command(action, **data):
+            self.store.execute(
+                action, data, self.store.version(self.owner)["revision"], self.owner
+            )
+
+        def meal(kind, day, detail, people, **fields):
+            command(
+                "care.confirmGroupActivity",
+                campusId=campus,
+                roomId=room,
+                day=day,
+                kind=kind,
+                startsAt="07:00",
+                endsAt="07:30",
+                details=detail,
+                requestId=kind.encode().hex(),
+                residentIds=people,
+                confirmed=True,
+                **fields,
+            )
+
+        yesterday = (self.now.date() - timedelta(days=1)).isoformat()
+        meal("午餐", yesterday, "萝卜汤", ["r001"])
+        meal(
+            "早餐",
+            now,
+            "小米粥、鸡蛋",
+            ["r001", "r002"],
+            mealIntake={"r001": "喝了半碗小米粥", "r002": "只吃了两个鸡蛋"},
+        )
+        meal("晚餐", yesterday, "牛肉面", ["r002"])
+        command(
+            "care.addTask",
+            residentId="r001",
+            kind="日常照护",
+            date=now,
+            time="07:00",
+            title="协助起床",
+            assignee="当班人员",
+            note="计划请评估睡眠情况",
+        )
+        task = self.store.snapshot(self.owner)["data"]["tasks"][-1]
+        command(
+            "care.completeTask",
+            taskId=task["id"],
+            operator="当班人员",
+            note="和平时一样自己起床。",
+        )
+        report = self.send(self.base + "/generate", {})["latest"]
+        days = {row["day"] for row in report["changes"]}
+        story = "".join(row["text"] for row in report["changes"])
+        self.assertEqual(days, {yesterday, now})
+        for term in (
+            "萝卜汤",
+            "参加了午餐",
+            "早餐喝了半碗小米粥",
+            "和平时一样自己起床",
+        ):
+            self.assertIn(term, story)
+        for term in (
+            "计划请评估",
+            "两个鸡蛋",
+            "牛肉面",
+            "身体正常",
+            "咳嗽",
+            "跌倒",
+            "工单",
+            "执行",
+        ):
+            self.assertNotIn(term, story)
+        self.assertEqual([], report["suggestions"])
+
+    def test_only_noticeable_trend_and_confirmed_fall_reach_person_brief(self):
+        for offset, count in ((1, 10), (2, 10), (3, 10), (0, 11)):
+            self.send(self.base + "/observations", self.observation(offset, count))
+        payload = {
+            "source": "radar",
+            "eventId": "synthetic-fall",
+            "signal": "possible_fall",
+            "bedId": "b002",
+            "observedAt": self.now.replace(hour=9).isoformat(),
+        }
+
+        def command(action, data):
+            self.store.execute(
+                action, data, self.store.version(self.owner)["revision"], self.owner
+            )
+
+        command("gw.ingest", payload)
+        first = self.send(self.base + "/generate", {})["latest"]
+        self.assertEqual(first["cough"]["status"], "elevated")
+        self.assertFalse(first["cough"]["noticeable"])
+        self.assertNotRegex(str(first["changes"] + first["suggestions"]), "咳嗽|跌倒")
+        eid = self.store.snapshot(self.owner)["data"]["gatewayAlerts"][0]["id"]
+        command(
+            "gw.review",
+            {
+                "alertId": eid,
+                "decision": "已核实",
+                "residentId": "r001",
+                "note": "已在现场核对",
+            },
+        )
+        second = self.send(self.base + "/generate", {})["latest"]
+        self.assertIn("发生过一次跌倒", str(second["changes"]))
+        self.assertNotIn(
+            "发生过一次跌倒",
+            str(
+                self.send("/api/rounds/residents/r002/generate", {})["latest"][
+                    "changes"
+                ]
+            ),
+        )
+
+    def test_personal_brief_is_read_only_individually_granted_and_contains_no_internal_evidence(
+        self,
+    ):
+        def action(name, **data):
+            self.store.execute(
+                name, data, self.store.version(self.owner)["revision"], self.owner
+            )
+
+        def view(token, rid="r001"):
+            return self.store.rounds.personal_brief(token, rid)
+
+        for name, personal in [("self-brief", True), ("relative-brief", False)]:
+            action(
+                "access.create",
+                kind="family",
+                portalSelf=personal,
+                username=name,
+                displayName=name,
+                password=self.password,
+                residentId="r001",
+            )
+        myself, user = self.store.login("self-brief", self.password)
+        relative, _ = self.store.login("relative-brief", self.password)
+        for token in [self.owner, relative, myself]:
+            with self.assertRaises(PermissionError):
+                view(token)
+        action("access.update", id=user["id"], portalScopes=["personalHealth"])
+        with self.assertRaises(PermissionError):
+            view(myself, "r002")
+        self.assertEqual(view(myself), {"day": None, "paragraphs": []})
+        now = self.now.date().isoformat()
+
+        def complete(title, note):
+            action(
+                "care.addTask",
+                residentId="r001",
+                kind="日常照护",
+                date=now,
+                time="07:00",
+                title=title,
+                assignee="不能公开的经办人",
+            )
+            task = self.store.snapshot(self.owner)["data"]["tasks"][-1]
+            action(
+                "care.completeTask", taskId=task["id"], operator="机构负责人", note=note
+            )
+
+        complete("协助起床", "早上像平时一样自己起床。")
+        complete("个人观察", "不能公开的经办人说了内部细节 13900002222")
+        report = self.send(self.base + "/generate", {})["latest"]
+        self.assertIn("内部细节", str(report["changes"]))
+        before = self.store.version(myself)["revision"]
+        with patch(
+            "platform_core.rounds.records.interpret",
+            side_effect=AssertionError("should only read"),
+        ):
+            result = view(myself)
+        self.assertEqual(before, self.store.version(myself)["revision"])
+        self.assertEqual(set(result), {"day", "paragraphs"})
+        for item in result["paragraphs"]:
+            self.assertEqual(set(item), {"text", "day"})
+        self.assertIn("像平时一样自己起床", str(result))
+        for forbidden in (
+            "1390000",
+            "经办人",
+            "机构负责人",
+            "dossier",
+            "r001",
+            "evidence",
+            "planned",
+            "内部细节",
+        ):
+            self.assertNotIn(forbidden, str(result))
+        action("access.update", id=user["id"], portalScopes=[])
+        with self.assertRaises(PermissionError):
+            view(myself)
+
     def test_previous_stay_hidden_even_after_return_to_same_bed(self):
         report = self.send(self.base + "/generate", {})["latest"]
         with closing(self.store.connect()) as db, db:

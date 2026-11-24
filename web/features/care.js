@@ -31,6 +31,7 @@ import { followups, referrals } from './care-pathway.js';
 import { medicationReminders, drugRules } from './medication-rules.js';
 import { levels } from './residency.js';
 import { handovers } from './handovers.js';
+import { groupActivities } from './group-activities.js';
 
 const personSearch = (ctx, extra) => ({
   placeholder: '搜索长者或记录',
@@ -523,6 +524,8 @@ export function care(ctx) {
         ['completed', '已完成服务', () => careTimeline(ctx, 'work', '', (id) => serviceProof(ctx, id))],
       ] : []),
       ...(canAct(ctx, 'care.vital') ? [['vitals', '健康体征', () => vitals(ctx)]] : []),
+      ...(canAct(ctx, 'care.proposeGroupActivity') || canAct(ctx, 'care.confirmGroupActivity')
+        ? [['groupLife', '集体活动', () => groupActivities(ctx)]] : []),
       ...(canAct(ctx, 'care.screen')
         ? [
             ['followups', '筛查与随访', () => followups(ctx)],

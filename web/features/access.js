@@ -249,6 +249,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
     const scopeRows = [
       ['careSchedule', '查看照护工单与执行进度'],
       ['medication', '查看已复核医嘱和给药时间'],
+      ['personalHealth', '查看本人的生活简报、时间线与健康简介'],
     ].map(([key, label]) => {
       const control = node('input');
       control.type = 'checkbox';
@@ -257,6 +258,15 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       scopeControls.set(key, control);
       return node('label', 'access-check', [control, node('span', '', label)]);
     });
+    const showPersonalHealth = () => {
+      const control = scopeControls.get('personalHealth');
+      const self = target ? target.portalSelf : portalIdentity.value === 'self';
+      control.disabled = !self;
+      control.closest('label').hidden = !self;
+      if (!self) control.checked = false;
+    };
+    portalIdentity?.addEventListener('change', showPersonalHealth);
+    showPersonalHealth();
     form.append(
       section(
         '绑定账号查阅授权',
@@ -428,6 +438,7 @@ function accounts(ctx) {
             ['已完成照护服务', account.familyServices ? '可查阅近期服务日期和项目' : '未开通查阅'],
             ['照护工单', account.portalScopes.includes('careSchedule') ? '可查阅' : '未开通查阅'],
             ['医嘱与给药', account.portalScopes.includes('medication') ? '可查阅' : '未开通查阅'],
+            ...(account.portalSelf ? [['本人生活与健康档案', account.portalScopes.includes('personalHealth') ? '可查阅' : '未开通查阅']] : []),
           ])
         : null,
       account.kind==='staff' ? facts([['岗位职责',account.staffDuties.join('、') || '待登记']]) : null,

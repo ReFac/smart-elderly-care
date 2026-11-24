@@ -424,7 +424,7 @@ def _create(db, state, p, user, area_check):
     kind, role, grants = _account_definition(user, p)
     campus = _campus(db, user, p, kind)
     family_services = _family_services(p, kind)
-    scopes = portal.scopes(p, kind)
+    scopes = portal.scopes(p, kind, portal_self=role == "入住长者")
     username = _required(p.get("username"), "登录名", 40).lower()
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,39}", username):
         raise ValueError("登录名须为 3–40 位字母、数字、点、下划线或短横线")
@@ -520,7 +520,7 @@ def _update(db, p, target, user):
     )
     campus = _campus(db, user, p, target["kind"], target)
     previous_scopes = target.get("portalScopes", [])
-    scopes = portal.scopes(p, target["kind"], previous_scopes)
+    scopes = portal.scopes(p, target["kind"], previous_scopes, portal_self=target.get("portalSelf", False))
     db.execute(
         "UPDATE accounts SET display_name=?,role=?,permissions=?,enabled=?,family_services=?,portal_scopes=?,campus_id=? WHERE id=?",
         (

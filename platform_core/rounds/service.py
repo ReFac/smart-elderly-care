@@ -7,12 +7,14 @@ import logging
 import re
 from threading import Event, Thread
 
-from .. import access, campus_access, history
+from .. import access, campus_access, history, portal
 from .inputs import check_fields, observe, update_settings
 from .records import (
     active,
     audit,
     card,
+    current_stay,
+    latest,
     inbox_query,
     locate,
     make_report,
@@ -43,6 +45,24 @@ class RoundService:
             return True
         suffix = r"/(mode|generate|observations)" if write else r"(/observations)?"
         return bool(re.fullmatch(r"/api/rounds/residents/" + ID + suffix, path))
+
+    def personal_brief(self, token, rid):
+        with closing(self.store.connect()) as db, db:
+            db.execute("BEGIN")
+            user = self.store.actor(db, token)
+            portal.require_personal_health(user, rid)
+            _, state = workspace(db)
+            person = next(
+                (p for p in state["residents"] if p["id"] == rid and active(p)), None
+            )
+            report = latest(db, current_stay(state, person)) if person else None
+            if not report or report.get("format") != "daily-life-v2":
+                return {"day": None, "paragraphs": []}
+            rows = [
+                {"day": r["day"], "text": r["text"]}
+                for r in report.get("residentEdition", ())
+            ]
+            return {"day": report["day"] if rows else None, "paragraphs": rows}
 
     def read(self, token, path):
         with closing(self.store.connect()) as db, db:
@@ -125,7 +145,7 @@ class RoundService:
             if not unchanged:
                 prepared = (
                     digest,
-                    interpret(self.store, data, digest, clinical=clinical),
+                    interpret(self.store, data, clinical=clinical),
                 )
         with closing(self.store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")

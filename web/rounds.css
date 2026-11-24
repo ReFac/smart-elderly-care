@@ -44,47 +44,50 @@
   font-size: 13px;
   color: var(--muted);
 }
-.rounds-counts,
 .rounds-schedule {
   margin: 0;
   padding: 12px 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
   background: var(--paper);
   border-radius: 8px;
 }
-.rounds-counts > div,
 .rounds-schedule > div {
-  padding: 0 12px;
+  padding: 0 14px;
   border-inline-start: 1px solid var(--line);
 }
-.rounds-counts > div:first-child,
 .rounds-schedule > div:first-child {
   border: 0;
 }
-.rounds-counts dt {
+.rounds-life-day {
+  padding-inline-start: 15px;
+  border-inline-start: 3px solid var(--line);
+}
+.rounds-life-day h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.rounds-life-day h4 small {
+  color: var(--accent);
+}
+.rounds-paragraph p {
+  margin: 8px 0 3px;
+  line-height: 1.8;
+}
+.rounds-life-advice {
+  padding: 12px 15px;
+  background: var(--paper);
+  border-radius: 7px;
+}
+.rounds-handoff {
   font-size: 13px;
   color: var(--muted);
 }
-.rounds-counts dd {
-  margin: 0;
-  font-size: 23px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.rounds-overdue dd {
-  color: #925411;
-}
-.rounds-columns,
 .rounds-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
-.rounds-columns > section {
-  min-width: 0;
-}
-.rounds-findings,
 .rounds-evidence ul,
 .rounds-cloud ol {
   margin: 6px 0 0;
@@ -155,11 +158,7 @@
   .rounds-card {
     padding: 14px;
   }
-  .rounds-columns,
   .rounds-form-grid {
     grid-template-columns: 1fr;
-  }
-  .rounds-counts > div {
-    padding: 0 6px;
   }
 }

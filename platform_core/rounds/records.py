@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from .. import access, activity, campus_access, history
 from .report import build
+from . import narrative
 
 
 def workspace(db):
@@ -95,6 +96,8 @@ def visible_report(report, user):
         return None
     clinical = access.has(user, "clinical")
     output = dict(report)
+    output.pop("staffSignals", None)
+    output.pop("residentEdition", None)
     for field in ("changes", "suggestions"):
         output[field] = [
             item
@@ -144,7 +147,7 @@ def report_source(db, state, person, now, *, clinical):
     from ..provider.generation import fingerprint
 
     data = build(db, state, person, now)
-    digest = fingerprint(["deepseek-v1", data])
+    digest = fingerprint(["daily-life-v2", data])
     previous = db.execute(
         """SELECT fingerprint,json_extract(payload,'$.clinicalReviewed')
            FROM rounds_reports WHERE resident=? AND bed=? AND day=?
@@ -158,50 +161,15 @@ def report_source(db, state, person, now, *, clinical):
     )
 
 
-def interpret(store, data, digest, *, clinical):
-    from ..provider import generation
-
-    # Separate calls prevent clinical observations from appearing in the general-care text.
-    notes = {
-        "care": generation.summarize(
-            store,
-            "rounds-agent",
-            ["rounds", digest, "care"],
-            "今日照护执行情况",
-            data["today"],
-        )
-    }
+def interpret(store, data, *, clinical):
+    rows = narrative.paragraphs(store, data["residentId"], "care", data["dailyFacts"])
     if clinical:
-        codes = {
-            ref["kind"]
-            for item in data["suggestions"]
-            if item["permission"] == "clinical"
-            for ref in item["evidence"]
-        }
-        trend = data["cough"]
-        if codes or trend["status"] != "insufficient":
-            facts = {
-                "档案有风险提示": "resident" in codes,
-                "有体征待复核": "vital" in codes,
-                "咳嗽观察": {
-                    k: trend[k]
-                    for k in (
-                        "status",
-                        "observedMinutes",
-                        "historyDays",
-                        "rate",
-                        "baseline",
-                    )
-                },
-            }
-            notes["clinical"] = generation.summarize(
-                store,
-                "rounds-agent",
-                ["rounds", digest, "clinical"],
-                "近期已核对观察的变化。仅给出有依据的复核建议，不作诊断，不推荐治疗。",
-                facts,
+        rows.extend(
+            narrative.paragraphs(
+                store, data["residentId"], "clinical", data["clinicalFacts"]
             )
-    return {"notes": notes, "clinical": clinical}
+        )
+    return {"changes": rows, "clinical": clinical}
 
 
 def make_report(db, state, person, now, actor, prepared, comment="", *, clinical):
@@ -223,13 +191,20 @@ def make_report(db, state, person, now, actor, prepared, comment="", *, clinical
     data["source"] = "deepseek"
     data["model"] = model_name()
     data["clinicalReviewed"] = clinical
-    for scope, note in prepared[1]["notes"].items():
-        if scope == "clinical" and not clinical:
-            continue
-        field = "changes" if scope == "care" else "suggestions"
-        data[field].insert(
-            0, {"text": note, "evidence": [], "permission": scope, "source": "deepseek"}
-        )
+    data["changes"] = [
+        row for row in prepared[1]["changes"] if clinical or row["permission"] == "care"
+    ]
+    edition = []
+    for row in data["changes"]:
+        text = row.pop("personal", "")
+        if text:
+            edition.append({"day": row["day"], "text": text})
+    data["residentEdition"] = edition
+    for row in data["suggestions"]:
+        row.pop("personal", None)
+    if not clinical:
+        data["suggestions"] = []
+    del data["dailyFacts"], data["clinicalFacts"]
     history.watch(db, "rounds.generate")
     data.update(id=uuid4().hex, generatedAt=now.isoformat())
     db.execute(

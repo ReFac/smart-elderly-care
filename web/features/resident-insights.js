@@ -7,13 +7,9 @@ const evidenceTypes = {
   vital: '体征记录',
   reviewedCough: '已复核咳嗽观察',
   resident: '长者档案',
+  groupActivity: '活动出席确认',
+  reviewedFall: '跌倒现场核实记录',
 };
-const labels = [
-  ['planned', '计划'],
-  ['completed', '已完成'],
-  ['pending', '待执行'],
-  ['overdue', '已过时'],
-];
 export const localStamp = (value) =>
   value
     ? new Intl.DateTimeFormat('zh-CN', {
@@ -39,27 +35,14 @@ export async function roundsWrite(ctx, url, data, revision, review) {
   return result;
 }
 
-export function taskTotals(values) {
-  return node(
-    'dl',
-    'rounds-counts',
-    labels.map(([key, title]) =>
-      node('div', key === 'overdue' && values[key] ? 'rounds-overdue' : '', [
-        node('dt', '', title),
-        node('dd', '', String(values[key] ?? '—')),
-      ]),
-    ),
-  );
-}
-
 function evidenceList(items, empty) {
   if (!items.length) return node('p', 'fx-muted', empty);
   return node(
-    'ul',
+    'div',
     'rounds-findings',
     items.map((item) => {
       const list = item.evidence || [];
-      return node('li', '', [
+      return node('div', 'rounds-paragraph', [
         node('p', '', item.text),
         list.length
           ? node('details', 'rounds-evidence', [
@@ -128,6 +111,38 @@ function observationForm(ctx, name, url, submit) {
       );
     },
   });
+}
+
+function dayHeading(ctx, date) {
+  const current = today(ctx);
+  const yesterday = new Date(Date.parse(current + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10);
+  const label = new Intl.DateTimeFormat('zh-CN', {
+    month: 'long', day: 'numeric', weekday: 'long', timeZone: 'Asia/Shanghai',
+  }).format(new Date(date + 'T12:00:00+08:00'));
+  const relative = date === current ? '今天' : date === yesterday ? '昨天' : '';
+  return node('h4', '', [node('time', '', label), relative ? node('small', '', relative) : null]);
+}
+
+export function residentDailyReadOnly(ctx, residentId) {
+  const panel = node('section', 'rounds-card');
+  const heading = node('h3', '', '我这两天的生活');
+  panel.append(heading, node('p', 'fx-muted', '正在读取生活简报…'));
+  async function read() {
+    try {
+      const report = await ctx.get('/api/residents/' + encodeURIComponent(residentId) + '/personal-brief');
+      const rows = report.paragraphs || [];
+      const days = [...new Set(rows.map(r => r.day))].sort().reverse();
+      panel.replaceChildren(heading, ...days.map(day => node('section', 'rounds-life-day', [
+        dayHeading(ctx, day), ...rows.filter(r => r.day === day).map(r => node('p', '', r.text)),
+      ])));
+      if (!days.length) panel.append(node('p', 'fx-muted', '暂时还没有可查看的生活简报。'));
+      else panel.append(node('small', 'fx-muted', '简报由 AI 根据已核实的记录整理。如有疑问，可向护理人员核对。'));
+    } catch (error) {
+      panel.replaceChildren(heading, node('p', 'fx-muted', error.message), btn(ctx, '重新读取', read));
+    }
+  }
+  read();
+  return panel;
 }
 
 export function residentInsights(ctx, residentId) {
@@ -215,8 +230,8 @@ export function residentInsights(ctx, residentId) {
                   title: '生成巡查简报',
                   target: name,
                   fields: [
-                    ['依据', '最新照护工单及获授权的已复核观察'],
-                    ['执行', '由 AI 助理生成简报，保留资料依据'],
+                    ['依据', '这位长者今天和昨天的用餐、活动和个人观察记录'],
+                    ['生成内容', '按日期整理，保留每段的来源'],
                   ],
                 },
               ),
@@ -228,38 +243,33 @@ export function residentInsights(ctx, residentId) {
         ? btn(ctx, '登记观察', () => observationForm(ctx, name, url, submit))
         : null,
     );
-    const contents = report
-      ? [
-          node('div', 'rounds-day', [
-            node('strong', '', report.day === today(ctx) ? '今日状况' : '最近一次状况'),
-            node('time', '', report.day),
-          ]),
-          taskTotals(report.today),
-          node('div', 'rounds-columns', [
-            node('section', '', [
-              node('h4', '', '近期变化'),
-              evidenceList(report.changes, '当前简报暂无新的已核实变化。'),
-            ]),
-            node('section', '', [
-              node('h4', '', '近期建议'),
-              evidenceList(report.suggestions, '现有记录未产生待核对建议。'),
-            ]),
-          ]),
-        ]
-      : [node('p', 'rounds-empty', '尚无巡查简报。生成后可查看今日工单、近期变化及核对依据。')];
-    if (report?.cough) {
+    const contents = [];
+    const currentFormat = report?.format === 'daily-life-v2';
+    if (currentFormat) {
+      const dates = [...new Set(report.changes.map(row => row.day))].sort().reverse();
+      for (const date of dates) {
+        const rows = report.changes.filter(row => row.day === date);
+        contents.push(node('section', 'rounds-life-day', [
+          dayHeading(ctx, date),
+          evidenceList(rows, ''),
+        ]));
+      }
+      if (report.suggestions.length) contents.push(node('section', 'rounds-life-advice', [
+        node('h4', '', '接下来留意'), evidenceList(report.suggestions, ''),
+      ]));
+    } else {
+      contents.push(node('p', 'rounds-empty', report
+        ? '这份简报来自旧版护理统计。点击「更新简报」，即可查看近期的生活记录。'
+        : '生成后可查看最近两天已记录的起居、三餐和活动。'));
+    }
+    if (currentFormat && report.cough?.noticeable) {
       const c = report.cough;
       contents.push(
         node('details', 'rounds-observation', [
           node(
             'summary',
             '',
-            '个人咳嗽趋势 · ' +
-              {
-                elevated: '高于近期基线，待核对',
-                stable: '未高于近期基线',
-                insufficient: '可比数据不足',
-              }[c.status],
+            '查看咳嗽变化的观察依据',
           ),
           node(
             'p',
@@ -321,8 +331,12 @@ export function residentInsights(ctx, residentId) {
         ]),
       );
     }
-    if (report && info.canGenerate && hasGrant(ctx, 'assistants') && hasGrant(ctx, 'care')) {
-      contents.push(priorityPanel(ctx, url, report, () => info.revision, load));
+    if (currentFormat && report.today.pending && info.canGenerate && hasGrant(ctx, 'assistants') && hasGrant(ctx, 'care')) {
+      const extra = node('details', 'rounds-handoff', [node('summary', '', '护理交班工具')]);
+      extra.addEventListener('toggle', () => {
+        if (extra.open && extra.childElementCount === 1) extra.append(priorityPanel(ctx, url, report, () => info.revision, load));
+      });
+      contents.push(extra);
     }
     box.replaceChildren(
       head,

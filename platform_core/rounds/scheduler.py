@@ -137,7 +137,7 @@ def tick(store, halt):
                             db, state, person, now, clinical=True
                         )
                 if person and not unchanged:
-                    prepared = (digest, interpret(store, data, digest, clinical=True))
+                    prepared = (digest, interpret(store, data, clinical=True))
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     owned = db.execute(

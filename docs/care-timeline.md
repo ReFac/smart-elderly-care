@@ -21,4 +21,8 @@
 
 ## 接口
 
+在「照护服务 → 集体活动」选择分院、房间和实际日期，登记三餐或其他集体活动。活动结束后，护士长或获授权员工打开铃铛的「集体活动待确认」，逐人核对默认全选的名单。未参加者没有出席记录；当餐供应的菜品与个人实际食用的品种、份量可分别登记。档案的「生活时间线」按活动发生时的房号、日期和时间查看，可调整截止日期回看过往一周。[集体活动确认窗](previews/group-meal-confirm.jpg)
+
+`GET /api/daily-life/roster` 按经办权限、院区、房间和日期返回候选名单。使用 `care.proposeGroupActivity` 提交登记，经授权使用 `care.confirmGroupActivity` 签认。`GET /api/residents/{id}/daily-life?start=YYYY-MM-DD&end=YYYY-MM-DD` 返回该长者在所选日期内参加过的已确认活动。批次与每位参与者的记录一同保存在机构加密备份。
+
 `GET /api/care-timeline/work`、`GET /api/care-timeline/resident/{id}` 和 `GET /api/care-timeline/room/{id}` 共用 `day`、`q`、`offset`、`revision` 筛选。翻页传入首屏返回的版本，如其间有人提交新业务，重新读取第一页。修改通过带版本与操作说明的 `care.timelineSettings` 命令提交。

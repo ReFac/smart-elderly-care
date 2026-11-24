@@ -12,6 +12,7 @@ from .operations import expense_import
 from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, staff_employment, storage_assets
 from . import lead_contacts, lead_intake, medical_visits, people_labels, visit_schedule
+from . import daily_life, resident_health
 from .bootstrap import empty_workspace
 from .care import trial_expiry, trial_followups
 from . import backups, history, rounds
@@ -108,6 +109,8 @@ class Store:
                 access.migrate_branding(db)
             dossier.init(db)
             medical_visits.init(db)
+            resident_health.init(db)
+            daily_life.init(db)
             archive_retention.init(db)
             rounds_family.init(db)
             gateways.init(db)
@@ -182,6 +185,7 @@ class Store:
             user = self.actor(db, token)
             return {
                 "userId": user["id"],
+                "groupActivityDue": daily_life.pending_count(db, None, user, self.now()),
                 "today": self.now().date().isoformat(),
                 "revision": db.execute(
                     "SELECT revision FROM workspace WHERE id=1"
@@ -351,6 +355,7 @@ class Store:
                 else []
             )
             people_labels.project(db, state, data, user, logs)
+            data["groupActivityDue"] = daily_life.pending_count(db, state, user, self.now())
             return {
                 "revision": row["revision"],
                 "today": today,
@@ -844,6 +849,12 @@ class Store:
                     summary = lead_contacts.command(db, data, user, action, payload, now)
                 elif action == "dossier.confirmVisit":
                     summary = medical_visits.confirm(db, data, payload, user, now)
+                elif action == "care.proposeGroupActivity":
+                    summary = daily_life.propose(db, data, user, payload, now)
+                elif action == "care.confirmGroupActivity":
+                    summary = daily_life.confirm(db, data, user, payload, now)
+                elif action in ("care.healthNote", "dossier.signHealthIntro"):
+                    summary = resident_health.command(db, data, user, action, payload, now)
                 elif action == "care.timelineSettings":
                     summary = care_timeline.configure(db, data, user, payload)
                 elif action in ("access.staffContract", "access.staffPayday"):

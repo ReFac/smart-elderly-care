@@ -3,6 +3,10 @@ import { button, el, icon } from './ui.js';
 import { detail } from './dialogs.js';
 
 const titles = {
+  'care.proposeGroupActivity': '登记集体活动',
+  'care.confirmGroupActivity': '确认集体活动参加名单',
+  'care.healthNote': '记录个人健康情况',
+  'dossier.signHealthIntro': '签认个人健康简介',
   'ops.supplyOrder': '发布物资工单',
   'ops.publishNotice': '发布全员通知',
   'ops.finishSupplyOrder': '完成物资工单',

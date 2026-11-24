@@ -4,6 +4,7 @@ PERMISSIONS = {
     "residents": "查阅长者基本档案",
     "intake": "意向客户、接待、入住和床位管理",
     "care": "评估、照护和工单执行",
+    "care.groupConfirm": "核对集体活动参加名单并签认",
     "clinical": "体征、异常、医嘱和用药复核",
     "clinical.rules": "维护经专业核准的用药核查规则",
     "medical": "查阅医疗文档原件",
@@ -54,6 +55,7 @@ PRESETS = {
     "财务": ["finance", "reports"],
     "自定义": [],
 }
+PRESETS["护士长"] = [*PRESETS["护士"], "care.groupConfirm"]
 # Empty grants is still a valid employee account.
 ROUTE_GRANTS = {
     "overview": (),
@@ -63,7 +65,7 @@ ROUTE_GRANTS = {
     "leads": ("intake",),
     "residents": ("residents", "intake", "care", "clinical"),
     "assessments": ("care",),
-    "care": ("care", "clinical"),
+    "care": ("care", "clinical", "care.groupConfirm"),
     "medications": ("clinical",),
     "beds": ("intake", "care", "clinical", "residents"),
     "rooms": ("intake", "care", "clinical", "residents"),
@@ -113,6 +115,10 @@ ACTION_GRANTS = {
     "care.completeTask": "care",
     "care.quality": "care",
     "care.handover": "care",
+    "care.proposeGroupActivity": "care",
+    "care.confirmGroupActivity": "care.groupConfirm",
+    "care.healthNote": "care",
+    "dossier.signHealthIntro": "medical",
     "care.acceptHandover": "care",
     "care.withdrawHandover": "care",
     "care.addMedication": "clinical",
@@ -347,7 +353,7 @@ def authorize(user, action, payload, state):
     if action in ("dossier.reviewDocument", "dossier.confirmVisit"):
         require(user, "clinical")
         require(user, "medical")
-    if action == "dossier.signSummary":
+    if action in ("dossier.signSummary", "dossier.signHealthIntro"):
         require(user, "clinical")
     if permission == "clinical.rules":
         require(user, "clinical")
@@ -391,7 +397,7 @@ def allowed_actions(user):
         actions = [
             a
             for a in actions
-            if a not in ("dossier.reviewDocument", "dossier.signSummary", "dossier.confirmVisit")
+            if a not in ("dossier.reviewDocument", "dossier.signSummary", "dossier.confirmVisit", "dossier.signHealthIntro")
         ]
     if not has(user, "clinical"):
         actions = [a for a in actions if ACTION_GRANTS.get(a) != "clinical.rules"]
@@ -430,6 +436,8 @@ def can_view_audit(user, action, *, agent_initiator=None, agent_grants=()):
         return has(user, "intake")
     if action == "family.consent":
         return has(user, "relatives") and has(user, "family.share")
+    if action == "dossier.signHealthIntro":
+        return has(user, "medical") and has(user, "clinical")
     if action.startswith("agent."):
         return (
             action in ACTION_GRANTS

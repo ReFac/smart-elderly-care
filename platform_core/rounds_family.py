@@ -133,7 +133,8 @@ def deliver(db, state, report, now):
     today = {field: report["today"][field] for field in CARE_FIELDS}
     if any(type(v) is not int or v < 0 for v in today.values()):
         raise ValueError("巡查简报的工单统计无效")
-    elevated = (report.get("cough") or {}).get("status") == "elevated"
+    trend = report.get("cough") or {}
+    elevated = trend.get("noticeable", trend.get("status") == "elevated")
     content = json.dumps(
         {"today": today, "coughIncreased": elevated}, ensure_ascii=False
     )

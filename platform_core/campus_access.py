@@ -138,6 +138,9 @@ def projection(db, state, user):
 
 
 def authorize_command(db, user, action, payload, state):
+    if action in ("care.proposeGroupActivity", "care.confirmGroupActivity"):
+        # The complete roster is checked against the event's actual campus and rooms.
+        return
     if action.startswith("leads."):
         # The contact and booking commands resolve their actual campus before each write.
         return

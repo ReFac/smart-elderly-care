@@ -21,6 +21,11 @@ MUTABLE = {
     "rounds_policy": "机构巡查排程设置",
 }
 ORIGINALS = {
+    "resident_health_notes": "长者健康简介和个人谈话记录",
+    "daily_life_events": "集体活动登记",
+    "daily_life_invitees": "活动候选名单",
+    "daily_life_signatures": "活动签认凭证",
+    "daily_life_attendance": "个人活动与进食记录",
     "dossier_visit_records": "已签认就诊病例",
     "dossier_visit_originals": "就诊附件原件",
     "staff_contract_originals": "劳动合同原件",
@@ -121,6 +126,11 @@ def completed(rows):
 
 
 OPTIONAL_TABLES = {
+    "resident_health_notes",
+    "daily_life_events",
+    "daily_life_invitees",
+    "daily_life_signatures",
+    "daily_life_attendance",
     "dossier_visit_records",
     "dossier_visit_originals",
     "staff_paydays",

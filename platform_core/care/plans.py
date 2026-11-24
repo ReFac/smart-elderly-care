@@ -237,6 +237,7 @@ def complete_task(state, p, today):
         operator=operator,
         **({"operatorId": p["operatorId"]} if p.get("operatorId") else {}),
         completedAt=today,
+        completionNote=text_field(p.get("note"), "执行记录"),
         note=text_field(p.get("note") or task.get("note"), "执行记录"),
         checkedBedId=p.get("bedId") or "",
         checkedCardCode=p.get("cardCode") or "",

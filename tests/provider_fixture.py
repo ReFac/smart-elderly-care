@@ -27,3 +27,13 @@ def simulate_narration(case):
     )
     model.start()
     case.addCleanup(model.stop)
+
+    # Test the report workflow with all resident facts, one paragraph per fact.
+    editor = patch(
+        "platform_core.rounds.narrative.arrange",
+        side_effect=lambda store, rid, scope, rows: [
+            [i] for i in range(1, len(rows) + 1)
+        ],
+    )
+    editor.start()
+    case.addCleanup(editor.stop)

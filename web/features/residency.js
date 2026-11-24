@@ -6,6 +6,8 @@ import {
 import { displayAmount } from './profile-controls.js';
 import { roomsPage } from './rooms.js';
 import { residentInsights } from './resident-insights.js';
+import { healthProfile } from './resident-health.js';
+import { dailyTimeline } from './daily-timeline.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import {
   hasGrant,
@@ -200,6 +202,8 @@ export function profile(ctx, row) {
   }
   if (row.status === '在住' && hasGrant(ctx, 'care', 'clinical'))
     summary.append(residentInsights(ctx, row.id));
+  if (hasGrant(ctx, 'care', 'clinical', 'medical')) summary.append(healthProfile(ctx, row));
+  if (hasGrant(ctx, 'care', 'clinical')) summary.append(dailyTimeline(ctx, row));
   add(
     summary,
     facts([
