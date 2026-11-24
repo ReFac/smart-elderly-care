@@ -121,8 +121,8 @@ COLLECTION_GRANTS = {
     "reports": "reports",
 }
 DEFAULT_UI = {
-    "brandName": "颐和医养",
-    "institutionName": "颐和康养中心",
+    "brandName": "安康医养平台",
+    "institutionName": "安康家园",
     "theme": "forest",
     "hiddenRoutes": [],
 }

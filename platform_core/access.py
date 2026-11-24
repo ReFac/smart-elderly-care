@@ -144,6 +144,19 @@ def init(db):
         )
 
 
+def migrate_branding(db):
+    visual = json.loads(
+        db.execute("SELECT visual FROM institution_settings WHERE id=1").fetchone()[0]
+    )
+    for key, old in (("brandName", "颐和医养"), ("institutionName", "颐和康养中心")):
+        if visual.get(key) == old:
+            visual[key] = DEFAULT_UI[key]
+    db.execute(
+        "UPDATE institution_settings SET visual=? WHERE id=1",
+        (json.dumps(visual, ensure_ascii=False),),
+    )
+
+
 def _public(row):
     user = {
         "id": row["id"],

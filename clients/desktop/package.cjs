@@ -26,7 +26,7 @@ async function packageApplication() {
     JSON.stringify(
       {
         name: 'yihe-care-desktop',
-        productName: '颐和医养',
+        productName: '安康医养平台',
         version,
         main: 'main.cjs',
       },

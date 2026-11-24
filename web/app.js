@@ -18,6 +18,7 @@ const { el, icon, button, toast } = ui;
 const root = document.getElementById('app');
 
 let state, revision, route;
+let branding = {};
 let epoch = 0,
   refreshing = false;
 const seenAlerts = new Set();
@@ -41,7 +42,7 @@ function signedOut() {
   closeMenu();
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   document.documentElement.removeAttribute('data-theme');
-  document.title = '登录 · 机构工作台';
+  document.title = '登录 · ' + (branding.brandName || '安康医养平台');
   root.replaceChildren(
     loginScreen(async (username, password) => {
       const response = await fetch('/api/auth/login', {
@@ -54,7 +55,7 @@ function signedOut() {
       await readState();
       render();
       return true;
-    })
+    }, branding)
   );
 }
 async function get(path) {
@@ -83,6 +84,7 @@ async function signOut() {
 function applySnapshot(snapshot) {
   state = { ...snapshot.data, today: snapshot.today, audit: snapshot.audit };
   revision = snapshot.revision;
+  branding = state.uiSettings;
   document.documentElement.dataset.theme = state.uiSettings.theme;
   const bucket = 'nh-alerts:' + state.user.id;
   if (!seenAlerts.size) {
@@ -388,7 +390,7 @@ function masthead() {
   mark.src = '/assets/mark.svg';
   mark.alt = '';
   const words = el('span', 'brand-words');
-  words.append(el('strong', '', state.uiSettings.brandName), el('small', '', '智慧医养管理平台'));
+  words.append(el('strong', '', state.uiSettings.brandName), el('small', '', state.uiSettings.institutionName));
   brand.append(mark, words);
   const categories = el('nav', 'primary-nav');
   categories.setAttribute('aria-label', '业务分区');
@@ -504,6 +506,7 @@ function failed(error) {
 
 async function load() {
   try {
+    branding = await get('/api/branding');
     if (await readState()) render();
   } catch (error) {
     failed(error);

@@ -125,6 +125,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def read_resource(self, path):
         token = self.token()
+        if path == "/api/branding":
+            return self.send_json(200, self.store.branding())
         if path == "/api/health":
             return self.send_json(200, {"status": "ok"})
         if path == "/api/version":
@@ -228,7 +230,7 @@ class InvalidMedia(ValueError):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="颐和医养 · 机构工作台")
+    parser = argparse.ArgumentParser(description="安康医养平台 · 机构工作台")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(
         "--db", type=Path, default=ROOT / ".local" / "workspace.sqlite3"
@@ -254,7 +256,7 @@ def main():
     store = Store(args.db)
     handler = partial(Handler, store=store, public_origin=origin)
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
-        print(f"颐和医养已启动  http://127.0.0.1:{server.server_port}", flush=True)
+        print(f"安康医养平台已启动  http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

@@ -22,7 +22,7 @@ const webPreferences = {
 
 async function showWorkspace(target) {
   const win = new BrowserWindow({
-    title: '颐和医养',
+    title: '安康医养平台',
     width: 1320,
     height: 900,
     minWidth: 700,

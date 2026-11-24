@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from . import access, activity, agents, care, dossier, gateways, operations
 
 TIMEZONE = ZoneInfo("Asia/Shanghai")
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class Conflict(Exception):
@@ -45,7 +45,7 @@ class Store:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("BEGIN IMMEDIATE")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, SCHEMA_VERSION):
                 raise RuntimeError(f"数据库版本 {version} 需要迁移")
             db.execute(
                 "CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, data TEXT NOT NULL)"
@@ -56,6 +56,8 @@ class Store:
                 data = operations.seed(day, care.seed(day))
                 db.execute("INSERT INTO workspace VALUES (1, 0, ?)", (encode(data),))
             access.init(db)
+            if version < 4:
+                access.migrate_branding(db)
             dossier.init(db)
             gateways.init(db)
             agents.init(db)
@@ -119,6 +121,15 @@ class Store:
                 "data": data,
                 "audit": logs,
             }
+
+    def branding(self):
+        with closing(self.connect()) as db:
+            visual = json.loads(
+                db.execute(
+                    "SELECT visual FROM institution_settings WHERE id=1"
+                ).fetchone()[0]
+            )
+            return {key: visual[key] for key in ("brandName", "institutionName")}
 
     def activity(self, token, **filters):
         with closing(self.connect()) as db, db:

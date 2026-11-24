@@ -118,12 +118,12 @@ export function loginScreen(onLogin, branding = {}) {
   mark.src = '/assets/mark.svg';
   mark.alt = '';
   hero.append(
-    node('div', 'access-brand', [mark, node('strong', '', branding.brandName || '颐和医养')])
+    node('div', 'access-brand', [mark, node('strong', '', branding.brandName || '安康医养平台')])
   );
   const product = node('div', 'access-product');
   product.append(
-    node('span', 'access-edition', branding.institutionName || '机构版'),
-    node('h1', '', ['智慧医养', node('br'), '管理平台']),
+    node('span', 'access-edition', branding.institutionName || '安康家园'),
+    node('h1', '', branding.brandName || '安康医养平台'),
     careFlowFigure()
   );
   hero.append(product);
