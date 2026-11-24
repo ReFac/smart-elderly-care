@@ -1,4 +1,5 @@
 import { node, table, named, badge, btn, link, choose } from './shared.js';
+import { showHandover } from './handovers.js';
 
 const statuses = { awaiting_approval: '待确认', published: '已发布', cancelled: '已取消' };
 const names = {
@@ -43,16 +44,19 @@ function composer(ctx, tools) {
   title.htmlFor = 'agent-goal';
   input.id = 'agent-goal';
   const examples = node('div', 'agent-examples');
-  for (const t of tools) {
-    const b = node('button', 'agent-example', [ctx.ui.icon(icons[t.agent], 14), example[t.agent]]);
+  function addExample(agent, goal) {
+    const b = node('button', 'agent-example', [ctx.ui.icon(icons[agent], 14), goal]);
     b.type = 'button';
     b.addEventListener('click', () => {
-      input.value = example[t.agent];
+      input.value = goal;
       requestId = undefined;
       input.focus();
     });
     examples.append(b);
   }
+  for (const t of tools) addExample(t.agent, example[t.agent]);
+  if (tools.some((t) => t.optionalTools?.some((tool) => tool.id === 'handover.pending')))
+    addExample('care', '查看我待签收的交班');
   const scope = node('select', 'fx-input');
   scope.setAttribute('aria-label', '委派范围');
   scope.add(new Option('自动分派', 'auto'));
@@ -163,14 +167,31 @@ export async function showRun(ctx, row) {
   for (const a of data.artifacts) {
     const sources = node('details', 'agent-evidence');
     sources.append(node('summary', '', '查看依据（' + a.evidence.length + ' 项）'));
-    for (const item of a.evidence)
-      sources.append(
-        node('p', '', [
-          node('strong', '', item.label),
-          ' · ' + item.value,
-          node('small', '', item.recordIds.join('、') || '本期无单据'),
-        ])
-      );
+    for (const item of a.evidence) {
+      const entry = node('div', 'agent-source', [node('strong', '', item.label), ' · ' + item.value]);
+      if (a.tool === 'handover.pending' && item.recordIds.length) {
+        for (const id of item.recordIds) {
+          const handover = ctx.state.handovers.find((r) => r.id === id);
+          if (!handover || handover.assigneeId !== ctx.state.user.id) {
+            entry.append(node('small', '', id));
+            continue;
+          }
+          const label = ['核对交班', handover.date, handover.senderName, id.slice(-6)].join(' · ');
+          entry.append(link(ctx, label, async () => {
+            try {
+              const row = await ctx.get('/api/agent/runs/' + data.id + '/handovers/' + id);
+              if (dialog.open) {
+                dialog.close();
+                showHandover(ctx, row);
+              }
+            } catch (error) {
+              ctx.toast(error.message);
+            }
+          }));
+        }
+      } else entry.append(node('small', '', item.recordIds.join('、') || '本期无单据'));
+      sources.append(entry);
+    }
     results.append(
       node('article', 'agent-artifact', [
         node('small', '', names[a.agent]),

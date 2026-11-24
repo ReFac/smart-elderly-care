@@ -250,6 +250,7 @@ def apply(db, state, action, payload, user, now, revision, planning=None):
             log,
             provider_plan=planning,
             member_ids=frozenset(resolved["residentIds"]) if resolved else None,
+            actor_id=user["id"],
         )
         db.execute(
             "UPDATE agent_runs SET artifacts=? WHERE id=?",

@@ -1,6 +1,6 @@
 """Provider-neutral extension contracts. The installed implementation runs in-process."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 
@@ -21,7 +21,7 @@ SPECIALISTS = (
         "care",
         "care.review",
         ("residents", "assessments", "tasks"),
-        ("照护", "护理", "交班", "工单", "评估"),
+        ("照护", "护理", "交班", "交接", "签收", "接班", "工单", "评估"),
     ),
     Specialist(
         "inventory",
@@ -39,6 +39,13 @@ SPECIALISTS = (
         ("bills",),
         ("财务", "账单", "欠费", "经营", "营收", "结算"),
     ),
+)
+
+HANDOVER_TOOL = replace(
+    next(s for s in SPECIALISTS if s.key == "care"),
+    tool="handover.pending",
+    collections=("handovers",),
+    keywords=("签收", "待接班"),
 )
 
 
@@ -84,6 +91,17 @@ def contract(user, available):
         }
         for item in available
     ]
+    for tool in tools:
+        if tool["agent"] == HANDOVER_TOOL.key:
+            tool["optionalTools"] = [
+                {
+                    "id": HANDOVER_TOOL.tool,
+                    "collections": list(HANDOVER_TOOL.collections),
+                    "scope": "assigned_to_current_actor",
+                    "effect": "read",
+                    "cloudTokens": 0,
+                }
+            ]
     adapters = [
         {
             "id": "mcp-tools",

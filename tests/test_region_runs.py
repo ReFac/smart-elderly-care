@@ -251,6 +251,121 @@ class RegionRuns(unittest.TestCase):
             self.assertNotIn(excluded, sent)
         mock.assert_called_once()
 
+    def test_assigned_pending_handovers_are_bounded_to_actor_location_and_source_fields(
+        self,
+    ):
+        def command(token, action, payload):
+            self.store.execute(
+                action, payload, self.store.version(token)["revision"], token
+            )
+
+        command(
+            self.token,
+            "access.create",
+            {
+                "username": "oncoming",
+                "displayName": "接班人甲",
+                "password": "handover-local-fixture",
+                "kind": "staff",
+                "role": "护士",
+            },
+        )
+        nurse, account = self.store.login("oncoming", "handover-local-fixture")
+
+        def assign(resident="", sender=None, receiver=None):
+            command(
+                sender or self.token,
+                "care.handover",
+                {
+                    "assigneeId": (receiver or account)["id"],
+                    "residentId": resident,
+                    "note": "手写交班要点不得出现在工具输入内",
+                },
+            )
+            return self.store.snapshot(self.token)["data"]["handovers"][-1]["id"]
+
+        own = self.ids[0]
+        matching = [assign(own) for _ in range(12)]
+        same_room = assign(self.ids[1])
+        assign(self.outsider)
+        assign()
+        assign(own, sender=nurse, receiver=self.owner)
+        signed = assign(own)
+        command(nurse, "care.acceptHandover", {"handoverId": signed})
+        withdrawn = assign(own)
+        command(
+            self.token,
+            "care.withdrawHandover",
+            {"handoverId": withdrawn, "reason": "班次调整"},
+        )
+        before = self.store.snapshot(nurse)["data"]["handovers"]
+
+        original = runtime.LocalTools.collect
+
+        def verify_inputs(provider, spec, records, resident, day):
+            self.assertEqual(set(records), {"handovers"})
+            self.assertTrue(
+                all(
+                    set(r) == {"id", "residentId", "date"} for r in records["handovers"]
+                )
+            )
+            return original(provider, spec, records, resident, day)
+
+        def artifact(goal, **fields):
+            command(
+                nurse,
+                "agent.start",
+                {
+                    "requestId": goal,
+                    "goal": goal,
+                    "region": {"roomId": self.room},
+                    **fields,
+                },
+            )
+            runs = self.store.agent_resource(nurse, "runs")["runs"]
+            detail = self.store.agent_resource(nurse, "runs", runs[0]["id"])
+            self.assertEqual(detail["status"], "awaiting_approval")
+            self.assertEqual(len(detail["artifacts"]), 1)
+            return detail["artifacts"][0]
+
+        with patch.object(runtime.LocalTools, "collect", verify_inputs):
+            for goal, fields, expected in (
+                ("查看本房待接班", {}, [*matching, same_room]),
+                ("查看本人待签收", {"residentId": own}, matching),
+            ):
+                with self.subTest(goal=goal):
+                    item = artifact(goal, **fields)
+                    self.assertEqual(item["tool"], "handover.pending")
+                    self.assertEqual(len(item["evidence"]), 1)
+                    ref = item["evidence"][0]
+                    self.assertEqual(ref["source"], "handovers")
+                    self.assertEqual(ref["recordIds"], expected[-10:][::-1])
+                    self.assertIn(str(len(expected)), ref["value"])
+                    self.assertIn(str(len(expected)), item["detail"])
+                    rendered = json.dumps(item, ensure_ascii=False)
+                    for private in ("手写交班要点", "体征", "接班人甲", "总管理员"):
+                        self.assertNotIn(private, rendered)
+        self.assertEqual(artifact("核对护理工单")["tool"], "care.review")
+        self.assertEqual(self.store.snapshot(nurse)["data"]["handovers"], before)
+
+        runs = self.store.agent_resource(nurse, "runs")["runs"]
+        source_run = next(r["id"] for r in runs if r["goal"] == "查看本人待签收")
+        cited_id = matching[-1]
+        self.assertEqual(
+            self.store.agent_handover(nurse, source_run, cited_id)["status"], "待签收"
+        )
+        with self.assertRaises(FileNotFoundError):
+            self.store.agent_handover(nurse, source_run, same_room)
+        with self.assertRaises(FileNotFoundError):
+            self.store.agent_handover(self.token, source_run, cited_id)
+        command(nurse, "care.acceptHandover", {"handoverId": cited_id})
+        self.assertEqual(
+            self.store.agent_handover(nurse, source_run, cited_id)["status"], "已签收"
+        )
+        command(self.token, "care.discharge", {"residentId": own})
+        with self.assertRaises(FileNotFoundError):
+            self.store.agent_handover(nurse, source_run, cited_id)
+
     def test_scope_is_enforced_on_tool_input_before_output_validation(self):
         spec = next(s for s in agents.specialists(self.staff) if s.key == "care")
         scoped = runtime.scoped_records(self.data, spec, "", frozenset(self.ids))

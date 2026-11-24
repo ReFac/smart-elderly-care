@@ -131,6 +131,8 @@ class Handler(BaseHTTPRequestHandler):
         geo = ("buildingId", "floorId", "roomId")
         if path == "/api/facility":
             return self.send_json(200, self.store.facility_resource(token, "directory"))
+        if path == "/api/care/handover-recipients":
+            return self.send_json(200, self.store.handover_recipients(token))
         if path in (
             "/api/facility/search",
             "/api/facility/tour",
@@ -187,6 +189,13 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/agent/capabilities", "/api/agent/runs"):
             return self.send_json(
                 200, self.store.agent_resource(token, path.rsplit("/", 1)[1])
+            )
+        match = re.fullmatch(
+            r"/api/agent/runs/(run-[a-f0-9]{32})/handovers/([a-f0-9]{32})", path
+        )
+        if match:
+            return self.send_json(
+                200, self.store.agent_handover(token, *match.groups())
             )
         match = re.fullmatch(r"/api/agent/runs/(run-[a-f0-9]{32})", path)
         if match:

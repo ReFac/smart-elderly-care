@@ -1,6 +1,7 @@
 """Dispatch bounded specialist work, then return evidence and a human-review checkpoint."""
 
 from .contracts import (
+    HANDOVER_TOOL,
     LocalPlanner,
     Planner,
     SPECIALISTS,
@@ -21,6 +22,7 @@ FIELDS = {
     "residents": ("id", "name", "status", "level"),
     "assessments": ("id", "residentId", "date", "level", "reviewDate"),
     "tasks": ("id", "residentId", "date", "time", "status", "title", "assignee"),
+    "handovers": ("id", "residentId", "date"),
     "inventory": ("id", "name", "quantity", "minimum", "unit"),
     "transactions": ("id", "itemId", "date", "quantity", "type"),
     "bills": (
@@ -40,10 +42,18 @@ FIELDS = {
 }
 
 
-def scoped_records(state, spec, resident_id, member_ids=None):
+def scoped_records(state, spec, resident_id, member_ids=None, *, actor_id=None):
     data = {}
     for collection in spec.collections:
         records = state[collection]
+        if collection == "handovers":
+            records = [
+                row
+                for row in records
+                if actor_id
+                and row.get("assigneeId") == actor_id
+                and row.get("status") == "待签收"
+            ]
         key = "id" if collection == "residents" else "residentId"
         if member_ids is not None:
             if spec.key not in {"care", "finance"}:
@@ -112,7 +122,23 @@ def validate_artifact(artifact, spec, resident_id, allowed_ids):
 
 class LocalTools:
     def collect(self, specialist, records, resident_id, day):
-        if specialist.key == "care" and not resident_id:
+        if specialist.tool == HANDOVER_TOOL.tool:
+            pending = records["handovers"]
+            # Entries are appended in creation order. Cap citations in the saved brief.
+            result = (
+                resident_id,
+                "核对发起人待签收的交班",
+                f"当前范围内有 {len(pending)} 条交班等待发起人签收。",
+                [
+                    cite_records(
+                        "handovers",
+                        "待签收交班（最近 10 条）",
+                        pending[-10:][::-1],
+                        f"共 {len(pending)} 条",
+                    )
+                ],
+            )
+        elif specialist.key == "care" and not resident_id:
             due = sorted(
                 (
                     r
@@ -158,6 +184,7 @@ def execute(
     tools: ToolProvider | None = None,
     provider_plan: dict | None = None,
     member_ids: frozenset | None = None,
+    actor_id: str | None = None,
 ):
     allowed = {s.key: s for s in available}
     planned = (
@@ -184,9 +211,13 @@ def execute(
     provider = tools or LocalTools()
     for key in planned:
         spec = allowed[key]
+        if key == HANDOVER_TOOL.key and any(
+            word in goal for word in HANDOVER_TOOL.keywords
+        ):
+            spec = HANDOVER_TOOL
         trace.append(key, "handoff", "接收" + spec.title + "子任务", "coordinator")
         target = resident_id if spec.key == "care" else ""
-        inputs = scoped_records(state, spec, target, member_ids)
+        inputs = scoped_records(state, spec, target, member_ids, actor_id=actor_id)
         allowed_ids = {
             name: {row["id"] for row in rows} for name, rows in inputs.items()
         }

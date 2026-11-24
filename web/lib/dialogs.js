@@ -48,11 +48,17 @@ export function formDialog({
   fields,
   onSubmit,
   description,
+  content,
   submitLabel: submitLabel = '保存',
 }) {
   const dialog = modal(title);
   const form = el('form', 'dialog-form');
   if (description) form.append(el('p', 'form-description', description));
+  if (content) {
+    const body = el('div', 'form-content');
+    body.append(content);
+    form.append(body);
+  }
   const controls = [];
   for (const field of fields) {
     const label = el('label', 'field');
@@ -114,6 +120,6 @@ export function formDialog({
   });
   dialog.append(form);
   dialog.showModal();
-  controls[0]?.focus();
+  if (!content) controls[0]?.focus();
   return dialog;
 }

@@ -81,6 +81,8 @@ ACTION_GRANTS = {
     "care.completeTask": "care",
     "care.quality": "care",
     "care.handover": "care",
+    "care.acceptHandover": "care",
+    "care.withdrawHandover": "care",
     "care.addMedication": "clinical",
     "care.giveMedication": "clinical",
     "care.reviewMedication": "clinical",

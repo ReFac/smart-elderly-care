@@ -251,11 +251,13 @@ export function table(
   const picker = node('select', 'fx-input');
   if (filter) {
     picker.setAttribute('aria-label', filter.label || '筛选状态');
-    ['', ...new Set(rows.map(filter.value).filter(Boolean))].forEach((value) => {
+    const values = filter.options || [...new Set(rows.map(filter.value).filter(Boolean))];
+    ['', ...values].forEach((value) => {
       const opt = node('option', '', value || filter.all || '全部状态');
       opt.value = value;
       picker.append(opt);
     });
+    picker.value = filter.initial || '';
   }
   const searchBox = node('label', 'fx-table-search', [ctx.ui.icon('search', 16), input]);
   add(tools, search ? searchBox : null, filter ? picker : null);
@@ -293,7 +295,9 @@ export function table(
           String(search?.value(row) || '')
             .toLocaleLowerCase()
             .includes(needle)) &&
-        (!filter || !picker.value || filter.value(row) === picker.value)
+        (!filter ||
+          !picker.value ||
+          (filter.matches ? filter.matches(row, picker.value) : filter.value(row) === picker.value))
     );
     count.textContent = subset.length + ' 条';
     const pages = Math.max(1, Math.ceil(subset.length / pageSize));

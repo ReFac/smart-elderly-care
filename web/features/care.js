@@ -23,6 +23,7 @@ import {
   nextDay,
 } from './shared.js';
 import { levels } from './residency.js';
+import { handovers } from './handovers.js';
 
 const personSearch = (ctx, extra) => ({
   placeholder: '搜索长者或记录',
@@ -469,65 +470,6 @@ function vitals(ctx) {
   });
 }
 
-function handover(ctx) {
-  const optionalResident = residentField(ctx);
-  optionalResident.required = false;
-  optionalResident.options.unshift({
-    value: '',
-    label: '全院交班',
-  });
-  return table(ctx, {
-    title: '交班记录',
-    rows: byRecent(ctx.state.handovers),
-    search: {
-      placeholder: '搜索接班人或记录',
-      value: (r) => r.assignee + ' ' + r.note + ' ' + r.summary,
-    },
-    action: btn(ctx, '登记交班', () =>
-      runForm(ctx, {
-        title: '登记交班',
-        action: 'care.handover',
-        description: '系统汇总本日工单和异常体征，请补充交接要点并确认。',
-        fields: [optionalResident, field('assignee', '接班人员'), memo('note', '交接要点', true)],
-      })
-    ),
-    cols: [
-      {
-        label: '日期',
-        view: (r) => r.date,
-      },
-      {
-        label: '接班人',
-        view: (r) => r.assignee,
-      },
-      {
-        label: '服务对象',
-        view: (r) => (r.residentId ? residentName(ctx, r.residentId) : '全院'),
-      },
-      {
-        label: '交接要点',
-        view: (r) => r.note,
-      },
-      {
-        label: '操作',
-        align: 'end',
-        view: (r) =>
-          link(ctx, '查看交班', () =>
-            ctx.detail(
-              '交班摘要',
-              facts([
-                ['日期', r.date],
-                ['接班人', r.assignee],
-                ['业务摘要', r.summary],
-                ['交接要点', r.note],
-              ])
-            )
-          ),
-      },
-    ],
-  });
-}
-
 export function care(ctx) {
   return page(
     ctx,
@@ -537,7 +479,7 @@ export function care(ctx) {
     tabs('care', [
       ...(canAct(ctx, 'care.completeTask') ? [['tasks', '照护工单', () => taskHistory(ctx)]] : []),
       ...(canAct(ctx, 'care.vital') ? [['vitals', '健康体征', () => vitals(ctx)]] : []),
-      ...(canAct(ctx, 'care.handover') ? [['handover', '班次交接', () => handover(ctx)]] : []),
+      ...(canAct(ctx, 'care.handover') ? [['handover', '班次交接', () => handovers(ctx)]] : []),
     ])
   );
 }

@@ -322,6 +322,10 @@ function searchDialog() {
   input.focus();
 }
 
+function myPendingHandovers(data = state) {
+  return data.handovers.filter((r) => r.status === '待签收' && r.assigneeId === data.user.id);
+}
+
 function notices() {
   const list = el('div', 'notice-list');
   const items = [
@@ -335,6 +339,8 @@ function notices() {
       'stock',
     ],
   ];
+  if (permitted('care'))
+    items.unshift(['待我签收的交班', myPendingHandovers().length, 'care', 'handover']);
   if (available('inbox')) {
     if (permitted('alerts'))
       items.unshift([
@@ -434,6 +440,7 @@ function masthead() {
     const bell = button('', notices, 'icon', 'bell');
     bell.setAttribute('aria-label', '待处理事项');
     if (
+      (available('care') && myPendingHandovers().length) ||
       (state.gatewayAlerts || []).some((r) => r.status === '待复核') ||
       (state.voiceQueue || []).length ||
       [...state.plans, ...state.vitals, ...state.medications].some((r) => r.status === '待复核') ||
@@ -596,7 +603,14 @@ async function refresh() {
             (r) => r.id === d.dataset.agentRunId && r.status === 'awaiting_approval'
           )
       );
-      if (!obsolete && !settled) return;
+      const received = dialogs.some(
+        (d) =>
+          (d.dataset.handoverId &&
+            !myPendingHandovers(snapshot.data).some((r) => r.id === d.dataset.handoverId)) ||
+          (d.dataset.pendingHandoverId &&
+            !snapshot.data.handovers.some((r) => r.id === d.dataset.pendingHandoverId && r.status === '待签收'))
+      );
+      if (!obsolete && !settled && !received) return;
     }
     dialogs.forEach((d) => d.close());
     applySnapshot(snapshot);

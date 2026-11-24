@@ -540,6 +540,7 @@ svg {
   gap: 15px;
 }
 .form-description,
+.form-content,
 .dialog-form .field:has(textarea),
 .dialog-form > .field:only-of-type,
 .dialog-actions,

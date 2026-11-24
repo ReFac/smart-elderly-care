@@ -17,6 +17,7 @@ from . import (
     dossier,
     facility,
     gateways,
+    handovers,
     operations,
     provider,
 )
@@ -137,6 +138,10 @@ class Store:
             ).fetchone()
             today = self.now().date().isoformat()
             data = access.project(db, json.loads(row["data"]), user)
+            data["handovers"] = [
+                handovers.visible(record, access.has(user, "clinical"))
+                for record in data.get("handovers", ())
+            ]
             if user.get("facilityScope"):
                 data["suggestions"] = [
                     item
@@ -174,6 +179,48 @@ class Store:
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
             return activity.page(db, self.actor(db, token), **filters)
+
+    def handover_recipients(self, token):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            return handovers.recipients(db, self.actor(db, token))
+
+    def agent_handover(self, token, run_id, handover_id):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            user = self.actor(db, token)
+            access.require(user, "care")
+            run = agents.detail(db, user, run_id)
+            cited = any(
+                handover_id in item["recordIds"]
+                for artifact in run["artifacts"]
+                if artifact["tool"] == "handover.pending"
+                for item in artifact["evidence"]
+                if item["source"] == "handovers"
+            )
+            if not cited:
+                raise FileNotFoundError("未找到本次简报可核对的交班")
+            state = json.loads(
+                db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
+            )
+            record = next(
+                (
+                    r
+                    for r in state["handovers"]
+                    if r["id"] == handover_id and r.get("assigneeId") == user["id"]
+                ),
+                None,
+            )
+            if record is None:
+                raise FileNotFoundError("未找到本次简报可核对的交班")
+            if run["region"]:
+                region = {
+                    k: run["region"][k] for k in ("buildingId", "floorId", "roomId")
+                }
+                current = facility.scope(db, state, user, **region)
+                if record["residentId"] not in current["residentIds"]:
+                    raise FileNotFoundError("长者目前不在该简报的区域内")
+            return handovers.visible(record, access.has(user, "clinical"))
 
     def photo(self, token, doc_id):
         with closing(self.connect()) as db, db:
@@ -371,7 +418,13 @@ class Store:
             previous = activity.locate(db, data, action, payload, user)
             domain = action.partition(".")[0]
             try:
-                if domain in ("ops", "care"):
+                if action == "care.handover":
+                    summary = handovers.create(db, data, payload, user, now)
+                elif action == "care.acceptHandover":
+                    summary = handovers.accept(data, payload, user, now)
+                elif action == "care.withdrawHandover":
+                    summary = handovers.withdraw(data, payload, user, now)
+                elif domain in ("ops", "care"):
                     fields = dict(payload)
                     actor_fields = {
                         "care.completeTask": "operator",

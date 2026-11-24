@@ -31,6 +31,8 @@ RELATED = {
     "care.giveMedication": ("medicationId", "medications"),
     "care.reviewMedication": ("medicationId", "medications"),
     "care.resolveVital": ("vitalId", "vitals"),
+    "care.acceptHandover": ("handoverId", "handovers"),
+    "care.withdrawHandover": ("handoverId", "handovers"),
     "ops.pay": ("billId", "bills"),
     "ops.review": ("id", "suggestions"),
 }

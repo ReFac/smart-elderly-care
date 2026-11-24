@@ -156,9 +156,13 @@
   color: var(--accent);
   font-weight: 600;
 }
-.agent-evidence p {
+.agent-evidence p,
+.agent-source {
   padding: 6px 0;
   border-bottom: 1px solid var(--line);
+}
+.agent-source button {
+  margin: 3px 3px 0 0;
 }
 .agent-evidence small {
   color: var(--muted);
