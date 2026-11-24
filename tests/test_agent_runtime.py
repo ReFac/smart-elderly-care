@@ -400,7 +400,7 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(caps["runtime"], "local-rules")
         self.assertEqual(
             {a["id"] for a in caps["adapters"]},
-            {"deepseek-planner", "mcp-tools", "a2a-delegate", "trace-export"},
+            {"mcp-tools", "a2a-delegate", "trace-export"},
         )
         for adapter in caps["adapters"]:
             code, answer = request("POST", adapter["path"], self.owner)

@@ -117,7 +117,7 @@ def detail(db, user, run_id):
     }
 
 
-def apply(db, state, action, payload, user, now, revision):
+def apply(db, state, action, payload, user, now, revision, planning=None):
     at = now.isoformat(timespec="seconds")
     today = now.date().isoformat()
     if action == "agent.start":
@@ -127,9 +127,12 @@ def apply(db, state, action, payload, user, now, revision):
         scope = payload.get("scope", "auto")
         if not isinstance(resident, str) or not isinstance(scope, str):
             raise ValueError("任务范围无效")
-        args = json.dumps(
-            dict(goal=goal, residentId=resident, scope=scope), ensure_ascii=False
-        )
+        arguments = dict(goal=goal, residentId=resident, scope=scope)
+        if payload.get("planning", "local") not in ("platform", "local"):
+            raise ValueError("规划模式无效")
+        if payload.get("planning") == "platform":
+            arguments["planning"] = "platform"
+        args = json.dumps(arguments, ensure_ascii=False)
         prior = db.execute(
             "SELECT * FROM agent_runs WHERE actor=? AND request=?",
             (user["id"], request),
@@ -156,8 +159,23 @@ def apply(db, state, action, payload, user, now, revision):
         )
         log = Trace(db, run_id, at)
         log.append("coordinator", "run.started", "开始处理委托")
+        if planning:
+            log.append(
+                "coordinator",
+                "planner.selected",
+                planning["model"]
+                if planning["mode"] == "deepseek"
+                else "本地规则 · " + planning["reason"],
+            )
         outputs = runtime.execute(
-            goal, specialists(user), scope, state, resident, today, log
+            goal,
+            specialists(user),
+            scope,
+            state,
+            resident,
+            today,
+            log,
+            provider_plan=planning,
         )
         db.execute(
             "UPDATE agent_runs SET artifacts=? WHERE id=?",

@@ -104,15 +104,6 @@ def contract(user, available):
             "output": ["acknowledgedThrough"],
         },
     ]
-    if user["kind"] == "owner":
-        adapters.append(
-            {
-                "id": "deepseek-planner",
-                "operation": "propose_plan",
-                "input": ["goal", "allowedTools", "maxSteps"],
-                "output": ["specialistIds"],
-            }
-        )
     return {
         "version": "1.0",
         "runtime": "local-rules",

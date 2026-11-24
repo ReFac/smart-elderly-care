@@ -1,16 +1,5 @@
 import { icon } from '../lib/ui.js';
-import {
-  node,
-  page,
-  table,
-  choose,
-  btn,
-  link,
-  badge,
-  named,
-  section,
-  facts,
-} from './shared.js';
+import { node, page, table, choose, btn, link, badge, named, section, facts } from './shared.js';
 import { routes } from '../lib/navigation.js';
 
 function inputField(label, name, value = '', options = {}) {
@@ -394,7 +383,7 @@ function accounts(ctx) {
 
 function settings(ctx) {
   const visual = ctx.state.uiSettings,
-    config = ctx.state.settings;
+    config = ctx.state.agentCapabilities?.plan || {};
   const appearance = node('form', 'access-settings');
   const [brandRow, brand] = inputField('平台名称', 'brandName', visual.brandName, { max: 30 });
   const [orgRow, org] = inputField('机构名称', 'institutionName', visual.institutionName, {
@@ -444,37 +433,31 @@ function settings(ctx) {
       hiddenRoutes: routeChoices.map((x) => x[0]).filter((r) => !visible.read().includes(r)),
     })
   );
-  const deep = node('form', 'access-settings access-provider');
-  const [enableRow, enabled] = selectField(
-    '接口开关',
-    [
-      ['off', '关闭'],
-      ['on', '启用预留接口'],
-    ],
-    config.deepseekEnabled ? 'on' : 'off'
-  );
-  const [modelRow, model] = inputField('模型标识', 'model', config.deepseekModel, { max: 80 });
-  const credential = node('div', 'access-credential', [
-    node('span', '', [icon('shield', 17), '服务端凭据']),
-    node('strong', '', config.deepseekKeyPresent ? '已配置' : '待配置'),
+  const states = {
+    available: '已开通',
+    inactive: '未开通或已到期',
+    exhausted: '本期额度已用完',
+    unconfigured: '等待平台配置',
+    no_scope: '岗位未授权',
+  };
+  const deep = node('section', 'access-settings access-provider', [
+    node('h2', 'access-settings-heading', [icon('spark', 21), '平台 AI 套餐']),
+    node('div', 'access-credential', [
+      node('span', '', config.planName || '机构订阅'),
+      node('strong', '', states[config.state] || '待配置'),
+    ]),
+    facts([
+      ['服务模型', config.model || 'deepseek-flash'],
+      ['本期额度', String(config.tokenLimit || 0) + ' tokens'],
+      ['已用 / 预留', String(config.tokensUsed || 0) + ' / ' + String(config.tokensReserved || 0)],
+      ['有效期至', config.expiresOn || '—'],
+    ]),
+    node('p', 'fx-muted', '云端规划按机构另购套餐启用。开通、续期与额度调整由平台运营方办理。'),
   ]);
-  deep.append(
-    node('h2', 'access-settings-heading', [icon('spark', 21), 'DeepSeek 接口']),
-    credential,
-    node('p', 'fx-muted', '服务端读取 DEEPSEEK_API_KEY。当前阶段保留模型接口。'),
-    enableRow,
-    modelRow
-  );
-  saveForm(deep, '保存接口设置', () =>
-    ctx.command('access.settings', {
-      deepseekEnabled: enabled.value === 'on',
-      deepseekModel: model.value,
-    })
-  );
   const result = page(
     ctx,
     '机构设置',
-    '调整工作台外观与总管理员专属的模型接入设置。',
+    '调整机构工作台外观，查看平台 AI 套餐与用量。',
     null,
     node('div', 'access-settings-grid', [appearance, deep])
   );

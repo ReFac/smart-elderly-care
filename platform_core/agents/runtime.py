@@ -120,7 +120,7 @@ class LocalTools:
             count = len({r["residentId"] for r in due})
             result = (
                 "",
-                "复核全院到期照护工单",
+                "复核范围内到期照护工单",
                 f"截至 {day} 有 {len(due)} 项到期工单待执行，涉及 {count} 位长者。",
                 [cite_records("tasks", "到期工单", due, f"{len(due)} 项")],
             )
@@ -152,6 +152,7 @@ def execute(
     trace: TraceSink,
     planner: Planner | None = None,
     tools: ToolProvider | None = None,
+    provider_plan: dict | None = None,
 ):
     allowed = {s.key: s for s in available}
     planned = (
@@ -159,6 +160,8 @@ def execute(
         if scope == "auto"
         else [scope]
     )
+    if provider_plan and provider_plan["mode"] == "deepseek":
+        planned = provider_plan["specialistIds"]
     if (
         not planned
         or len(planned) > len(SPECIALISTS)

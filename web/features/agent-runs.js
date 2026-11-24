@@ -10,6 +10,7 @@ const names = {
 const icons = { care: 'care', inventory: 'box', finance: 'chart' };
 const events = {
   'run.started': '接单',
+  'planner.selected': '选择规划器',
   'plan.created': '拟定计划',
   handoff: '分派任务',
   'tool.called': '读取工具',
@@ -69,7 +70,12 @@ function composer(ctx, tools) {
   });
   const start = node('button', 'btn btn-primary', [ctx.ui.icon('spark', 16), '开始协作']);
   start.type = 'submit';
-  const controls = node('div', 'agent-controls', [scope, resident, start]);
+  const plan = ctx.state.agentCapabilities.plan;
+  const mode = node('select', 'fx-input');
+  mode.setAttribute('aria-label', '规划方式');
+  mode.add(new Option('本地 · 节省额度', 'local'));
+  if (plan?.available) mode.add(new Option('平台 AI · 按用量', 'platform'));
+  const controls = node('div', 'agent-controls', [scope, resident, mode, start]);
   let requestId;
   const freshId = () =>
     Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
@@ -92,6 +98,7 @@ function composer(ctx, tools) {
         goal: input.value.trim(),
         requestId,
         scope: scope.value,
+        planning: mode.value,
         residentId: resident.value,
       });
     } finally {
@@ -114,7 +121,15 @@ function teamPanel(ctx, tools) {
       ])
     );
   }
-  panel.append(node('p', 'agent-engine', '执行方式 · 本地规则'));
+  panel.append(
+    node(
+      'p',
+      'agent-engine',
+      ctx.state.agentCapabilities.plan?.available
+        ? '本地规则 · 已开通平台 AI'
+        : '本地规则 · 云端规划需机构套餐'
+    )
+  );
   return panel;
 }
 

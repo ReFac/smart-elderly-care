@@ -6,6 +6,7 @@ from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -253,6 +254,9 @@ def main():
             or parsed.fragment
         ):
             parser.error("--public-origin 需要 HTTPS 根域名")
+    os.environ.setdefault(
+        "NH_DEEPSEEK_KEY_FILE", str(ROOT / ".local" / "platform" / "deepseek.key")
+    )
     store = Store(args.db)
     handler = partial(Handler, store=store, public_origin=origin)
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:

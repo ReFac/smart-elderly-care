@@ -7,7 +7,7 @@ from pathlib import Path
 import sqlite3
 from zoneinfo import ZoneInfo
 
-from . import access, activity, agents, care, dossier, gateways, operations
+from . import access, activity, agents, care, dossier, gateways, operations, provider
 
 TIMEZONE = ZoneInfo("Asia/Shanghai")
 SCHEMA_VERSION = 4
@@ -61,6 +61,7 @@ class Store:
             dossier.init(db)
             gateways.init(db)
             agents.init(db)
+            provider.init(db)
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     def connect(self):
@@ -109,7 +110,7 @@ class Store:
             gateways.project(db, data, user)
             if access.has(user, "assistants"):
                 data["agentRuns"] = agents.listing(db, user)
-                data["agentCapabilities"] = agents.capabilities(user)
+                data["agentCapabilities"] = self.agent_capabilities(db, user)
             logs = (
                 activity.page(db, user, limit=100)["rows"]
                 if access.has(user, "audit")
@@ -141,13 +142,19 @@ class Store:
             db.execute("BEGIN")
             return dossier.photo(db, doc_id, viewer(db, token))
 
+    def agent_capabilities(self, db, user):
+        result = agents.capabilities(user)
+        result["plan"] = provider.status(db, user, self.now())
+        result["planningModes"] = ["local", "platform"]
+        return result
+
     def agent_resource(self, token, name, run_id=None):
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
             user = viewer(db, token)
             access.require(user, "assistants")
             if name == "capabilities":
-                return agents.capabilities(user)
+                return self.agent_capabilities(db, user)
             if name == "runs" and run_id is None:
                 return {"runs": agents.listing(db, user)}
             return agents.detail(db, user, run_id)
@@ -172,7 +179,46 @@ class Store:
                 raise FileNotFoundError("未登记或无权查看此接口")
             return record
 
+    def plan_agent(self, payload, revision, token):
+        def authorize(db):
+            actor = viewer(db, token)
+            access.require(actor, "assistants")
+            row = db.execute("SELECT revision FROM workspace WHERE id=1").fetchone()
+            if type(revision) is not int or revision != row["revision"]:
+                raise Conflict("数据已更新，请核对最新内容后重新提交")
+            return actor
+
+        if payload.get("scope", "auto") != "auto":
+            return {
+                "mode": "local",
+                "reason": "explicit_scope",
+                "model": "",
+                "specialistIds": [],
+            }
+        with closing(self.connect()) as db:
+            user = authorize(db)
+            prior = db.execute(
+                "SELECT 1 FROM agent_runs WHERE actor=? AND request=?",
+                (user["id"], payload.get("requestId")),
+            ).fetchone()
+            if prior:
+                return None
+        return provider.plan(
+            self.connect,
+            authorize,
+            payload.get("goal"),
+            payload.get("requestId"),
+            now=self.now(),
+        )
+
     def execute(self, action, payload, revision, token):
+        planning = None
+        if (
+            action == "agent.start"
+            and isinstance(payload, dict)
+            and payload.get("planning") == "platform"
+        ):
+            planning = self.plan_agent(payload, revision, token)
         with closing(self.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             user = viewer(db, token)
@@ -210,7 +256,7 @@ class Store:
                     summary = module.apply(data, action, fields, today)
                 elif domain == "agent":
                     summary, run_id = agents.apply(
-                        db, data, action, payload, user, now, revision
+                        db, data, action, payload, user, now, revision, planning
                     )
                 elif domain == "access":
                     summary = access.apply(db, data, action, payload, user)

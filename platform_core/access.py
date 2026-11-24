@@ -369,7 +369,7 @@ def _change_password(db, p):
 def _settings(db, p):
     row = db.execute("SELECT * FROM institution_settings WHERE id=1").fetchone()
     visual = json.loads(row["visual"])
-    known = set(DEFAULT_UI) | {"deepseekEnabled", "deepseekModel"}
+    known = set(DEFAULT_UI)
     if not p or set(p) - known:
         raise ValueError("设置内容无效")
     for key in ("brandName", "institutionName"):
@@ -386,23 +386,11 @@ def _settings(db, p):
         ):
             raise ValueError("可见模块设置无效")
         visual["hiddenRoutes"] = list(dict.fromkeys(routes))
-    enabled = p.get("deepseekEnabled", bool(row["deepseek_enabled"]))
-    model = p.get("deepseekModel", row["deepseek_model"])
-    if (
-        type(enabled) is not bool
-        or not isinstance(model, str)
-        or not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", model)
-    ):
-        raise ValueError("DeepSeek 模型标识或开关无效")
     db.execute(
-        "UPDATE institution_settings SET visual=?,deepseek_enabled=?,deepseek_model=? WHERE id=1",
-        (json.dumps(visual, ensure_ascii=False), int(enabled), model),
+        "UPDATE institution_settings SET visual=? WHERE id=1",
+        (json.dumps(visual, ensure_ascii=False),),
     )
-    return (
-        "更新机构界面设置"
-        if not any(k.startswith("deepseek") for k in p)
-        else "更新总管理员专属 DeepSeek 接口设置"
-    )
+    return "更新机构界面设置"
 
 
 def apply(db, state, action, payload, user):
@@ -436,10 +424,5 @@ def project(db, state, user):
             ],
             permissionOptions=PERMISSIONS,
             rolePresets=PRESETS,
-            settings={
-                "deepseekEnabled": bool(row["deepseek_enabled"]),
-                "deepseekModel": row["deepseek_model"],
-                "deepseekKeyPresent": bool(os.environ.get("DEEPSEEK_API_KEY")),
-            },
         )
     return filtered

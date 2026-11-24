@@ -176,7 +176,7 @@ class AccountPermissions(unittest.TestCase):
         self.assertFalse(access.can_view_audit(staff, "access.update"))
         self.assertFalse(access.can_view_audit(staff, "ops.review"))
 
-    def test_owner_model_controls_and_public_appearance_do_not_publish_secret(self):
+    def test_appearance_edit_cannot_replace_platform_credentials_or_entitlement(self):
         _, staff = self.create()
         with patch.dict(
             os.environ, {"DEEPSEEK_API_KEY": "test-value-must-stay-in-environment"}
@@ -185,16 +185,20 @@ class AccountPermissions(unittest.TestCase):
                 "brandName": "机构演示",
                 "theme": "ocean",
                 "hiddenRoutes": ["inventory"],
-                "deepseekEnabled": True,
-                "deepseekModel": "test-model",
             }
             with self.assertRaises(PermissionError):
                 access.apply(self.db, self.state, "access.settings", payload, staff)
             access.apply(self.db, self.state, "access.settings", payload, self.owner)
             admin = access.project(self.db, self.state, self.owner)
             public = access.project(self.db, self.state, staff)
-            self.assertTrue(admin["settings"]["deepseekKeyPresent"])
-            self.assertEqual(admin["settings"]["deepseekModel"], "test-model")
+            for override in (
+                {"deepseekEnabled": True},
+                {"deepseekModel": "client-choice"},
+            ):
+                with self.assertRaises(ValueError):
+                    access.apply(
+                        self.db, self.state, "access.settings", override, self.owner
+                    )
             self.assertEqual(public["uiSettings"]["hiddenRoutes"], ["inventory"])
             self.assertNotIn("settings", public)
             self.assertNotIn("test-value-must-stay-in-environment", str(admin))
