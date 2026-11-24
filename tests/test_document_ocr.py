@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 from provider_fixture import isolate_credentials
+from test_medical_visits import fixture_visit
 from platform_core import document_ocr, provider
 from platform_core.provider import media
 from platform_core.store import Store
@@ -73,6 +74,9 @@ class DocumentOcrTests(unittest.TestCase):
 
     def command(self, action, payload, actor=None):
         token = actor or self.owner
+        if action == "dossier.document" and "visitId" not in payload:
+            visit = fixture_visit(self.store, token, payload["residentId"], payload["eventDate"])
+            payload = {**payload, "visitId": visit}
         return self.store.execute(
             action,
             {**payload, "consent": True} if action == "dossier.ocr" else payload,

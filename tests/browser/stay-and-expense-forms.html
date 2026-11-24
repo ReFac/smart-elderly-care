@@ -80,6 +80,17 @@
       formal.review.expectedRevision === 4 && formal.review.fields.some(([label]) => label === '入住押金'), '转正可自选账单日且确认包含费用明细');
     await until(() => !form());
 
+    ctx.state.allowedActions.push('ops.pay');
+    allocate(ctx, person);
+    controls = form().elements;
+    check(controls.depositMonths.value === '1' && controls.reminderDays.disabled &&
+      form().textContent.includes('合同到期或动用押金时提醒'), '已设押金时仅提示到期或冲抵');
+    change(controls.depositMonths, '0');
+    check(!controls.reminderDays.disabled && controls.securityMode.options[0].textContent === '按约定提醒',
+      '免押时仍可设置账单提醒');
+    form().closest('dialog').close();
+    await until(() => !form());
+
     const rows = ['ready','duplicate','review','excluded'].map((status, i) => ({
       rowNumber: i+2, status, date:'2026-01-31', amount:10, payee:'演练', reason:status,
     }));

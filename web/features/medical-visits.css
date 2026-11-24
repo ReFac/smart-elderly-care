@@ -76,3 +76,9 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
+.medical-visit-linked-documents { border-top: 1px solid var(--line); padding-top: 12px; }
+.medical-visit-linked-documents h3 { margin: 0 0 5px; }
+.medical-visit-document-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; flex-wrap: wrap; }
+.medical-visit-document-row + .medical-visit-document-row { border-top: 1px solid var(--line); }
+.medical-visit-document-row .fx-named { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.medical-visit-unlinked { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }

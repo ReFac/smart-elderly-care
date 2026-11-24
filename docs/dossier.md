@@ -14,7 +14,7 @@
 
 员工按岗位权限获取字段。基本资料维护需要 `intake`，查阅需要 `residents` 或 `intake`。家庭与经济资料另需 `relatives`。亲属本人和总管理员可查阅完整身份证号，有亲属联络权限的员工看到掩码。普通员工无法代替亲属修改该档案。总管理员代录时，服务端从账号表核对家属身份和绑定关系。
 
-从长者名册和床位打开的简易档案只显示常用资料、健康简介和近期变化。点标题栏的「打开详细档案」，在左侧切换「登记资料」「医疗资料」和「疗养院时间线」。登记资料包括入住、家庭和获授权的收费明细。医疗资料首先显示每次就诊及补充记录，然后列出既往医疗文书。疗养院时间线显示已签认的用餐与集体活动，以及岗位获准查看的护理和入住历史。个人与医疗档案名册直接打开医疗资料，伙食记录链接直接定位到对应的一餐。
+从长者名册和床位打开的简易档案只显示常用资料、健康简介和近期变化。点标题栏的「打开详细档案」，在左侧切换「登记资料」「医疗资料」和「疗养院时间线」。登记资料包括入住、家庭和获授权的收费明细。医疗资料按每次就诊显示原病例、补充记录和属于该次就诊的文书。疗养院时间线显示已签认的用餐与集体活动，以及岗位获准查看的护理和入住历史。个人与医疗档案名册直接打开医疗资料，伙食记录链接直接定位到对应的一餐。
 
 ## 地区与经济资料
 
@@ -57,10 +57,11 @@
 
 ## 归档行为
 
-1. 在长者详细档案内选择「存档医疗文书」。填写文书实际发生日期与来源，可从照片库选图、使用手机相机拍摄，也可整份上传多页 PDF。每份原件最大 8 MiB。选择 OCR 时，提交前会显示实际页数和预计使用额度。
+1. 在长者详细档案内打开对应就诊病例，选择「补充医疗文书」。填写文书实际发生日期与来源，可从照片库选图、使用手机相机拍摄，也可整份上传多页 PDF。每份原件最大 8 MiB。选择 OCR 时，提交前会显示实际页数和预计使用额度。
 2. 核对并填写原文事实。可采用经人工核对的转录，也可以手工描述。归档账户即为本次核对人。
 3. 提交时一次生成结构化概括，包含文书日期、类型、来源、文字来源、原文事实、待核实事项和核对人。系统保存填写内容和登录身份，形成固定版本。之后打开详情直接读取该版本。
-4. 时间线按文书发生日期倒序，同日按入库先后倒序。详情可查存档日、原图或 PDF 各页，也可下载完整的 PDF 原件。数据库保存的原件与上传字节一致。手工录入时，原件、签认概括和审计记录同时归档。选择 DeepSeek OCR 时，先留存原件，再单独核对并签认概括。
+4. 就诊详情内可查补充文书、存档日、原图或 PDF 各页，也可下载完整的 PDF 原件。数据库保存的原件与上传字节一致。手工录入时，原件、签认概括和病例关联同时归档。选择 DeepSeek OCR 时，先留存原件并关联病例，再核对签认概括。
+5. 历史原件缺少病例关联时，从病例列表打开「待归入病历的历史资料」，核对后明确选择该长者原有的就诊。若历史病例尚未录入，先补录病例再关联。同一天的多次就诊各有独立编号，经办人按原始资料确认归属。关联操作保留旧原件和概括，登记经办人及时间并纳入加密备份。
 
 护士核实后的跌倒处置进入同一长者的「护理复核与历史摘要」，保留发生时间、房间、复核人和处置说明。
 
@@ -73,13 +74,14 @@
 | `POST /api/commands · family.subscribe` | 家属设置绑定长者的站内订阅意愿 | 亲属本人 |
 | `POST /api/commands · family.read` | 标记指定 `messageId` 已读，服务端重新核对本人、长者及有效授权 | 收件亲属本人 |
 | `POST /api/commands · dossier.relative` | 家属编辑自己的联系方式、证件和关系。业主可代录已绑定账号 | 家属本人、总管理员 |
-| `POST /api/commands · dossier.document` | 校验、留存原件及首次概括 | `medical.write` |
+| `POST /api/commands · dossier.document` | 在指定就诊病例中留存原件及首次概括 | `medical`、`medical.write` |
+| `POST /api/commands · dossier.linkVisitDocument` | 以 `residentId`、`visitId` 和 `documentId` 将存量文书明确归入病例 | `medical`、`medical.write` |
 | `GET /api/documents/{id}/image` | 按服务端会话授权返回原始 JPEG 或 PNG | `medical` |
 | `GET /api/state` | 读取按岗位投影的 `dossierProfiles`、`medicalDocuments`、`relativeProfiles` | 服务端逐集合、字段核对 |
 
 `dossier.profile` 的 `familyContact` 可向当前长者的家庭名册添加成员，携带成员 `id` 可编辑，携带 `id` 及 `remove: true` 可移除。`GET /api/state` 为有权登记者返回 `familyRoundRecipients`，为家属本人返回含订阅意愿、长者授权状态与可查简报的 `familyRoundInbox`。
 
-归档命令传入 `requestId`、`residentId`、`eventDate`、`category`、`source`、`description` 和可选 `pending`。原件内容使用 `imageBase64`，可附 `mime` 与 `filename`。PDF 类型为 `application/pdf`，可先将原始二进制以该类型提交至 `POST /api/residents/{id}/document-pages` 核页。客户端收到数据版本冲突后，先读取最新快照，再决定是否用原请求编号提交。相同输入复用现有文书，相同原件带不同描述时返回校验错误。同一张图在不同长者名下分别留存证据。机构按原图哈希复用转录，每份档案单独核对身份、签署概括并保留回填凭证。
+归档命令传入 `requestId`、`residentId`、`visitId`、`eventDate`、`category`、`source`、`description` 和可选 `pending`。`visitId` 是该长者已签认的原就诊编号。原件内容使用 `imageBase64`，可附 `mime` 与 `filename`。PDF 类型为 `application/pdf`，可先将原始二进制以该类型提交至 `POST /api/residents/{id}/document-pages` 核页。客户端收到数据版本冲突后，先读取最新快照，再决定是否用原请求编号提交。相同输入复用同一病例内的文书，相同原件带不同描述或归属时返回校验错误。同一张图在不同长者名下分别留存证据。机构按原图哈希复用转录，每份档案单独核对身份、签署概括并保留回填凭证。
 
 医疗文书表存储 SHA-256、原图和概括版本。读取列表只查询元数据，数据库触发器阻止应用更新或删除已归档行。原件归档的持久性还取决于 SQLite 文件的备份和恢复。
 
@@ -89,7 +91,7 @@
 
 | 接口 | 权限 | 用途 |
 | --- | --- | --- |
-| `dossier.document`，`method=DeepSeek OCR` | `medical.write` | 保存完整原件、来源与日期 |
+| `dossier.document`，`method=DeepSeek OCR` | `medical`、`medical.write` | 在指定病例保存完整原件、来源与日期 |
 | `dossier.ocr` | `medical.write` | 核验分院授权与发送确认，按图像复用转录 |
 | `GET /api/documents/{id}/ocr` | `medical` | 按需读取原文行、可用的位置与候选 |
 | `dossier.reviewDocument` | `medical.write`、`medical`、`clinical` | 签认概括以及选定的档案字段 |

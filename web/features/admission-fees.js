@@ -13,12 +13,17 @@ const offlineMethods = {
 };
 const amountInCents = (value) => Math.round(Number(value || 0) * 100);
 
-export function billingPolicyFields({ reminderDays = 3, securityMode = 'none', depositMonths = 1 } = {}) {
+export function billingPolicyFields(
+  { reminderDays = 3, securityMode = 'none', depositMonths = 1 } = {},
+  { hideReminder = false } = {},
+) {
   return [
-    field('reminderDays', '出账前几天提醒', { type: 'number', min: 0, max: 30, step: 1, value: reminderDays }),
+    ...(!hideReminder ? [field('reminderDays', '出账前几天提醒', {
+      type: 'number', min: 0, max: 30, step: 1, value: reminderDays,
+    })] : []),
     select('securityMode', '逾期账单处理', [
-      { value: 'none', label: depositMonths ? '只提醒，押金单独保管' : '按约定提醒' },
-      ...(depositMonths ? [{ value: 'overdue', label: '到期未交可动用押金，并继续提醒' }] : []),
+      { value: 'none', label: depositMonths ? '押金单独保管' : '按约定提醒' },
+      ...(depositMonths ? [{ value: 'overdue', label: '到期未交可动用押金，冲抵时提醒' }] : []),
     ], { value: securityMode }),
   ];
 }
@@ -103,7 +108,7 @@ export function admissionFinance(ctx, action, toPayload) {
     const result = toPayload(terms);
     if (terms.paymentMode && finance) {
       result.depositMonths = Number(terms.depositMonths);
-      result.reminderDays = Number(terms.reminderDays);
+      result.reminderDays = Number(terms.reminderDays ?? 3);
       result.feeItems = extras?.read() || [];
     }
     if (terms.paymentMode === 'offline') {
@@ -164,18 +169,20 @@ export function admissionFinance(ctx, action, toPayload) {
   function showFormFields() {
     const { elements } = form;
     const formal = elements.stayType?.value !== 'trial';
-    for (const name of financeNames) setVisible(name, formal);
-    for (const name of offlineNames) setVisible(name, formal && elements.paymentMode.value === 'offline');
     const waiveSecurity = elements.depositMonths?.value === '0';
+    for (const name of financeNames) setVisible(name, formal && (name !== 'reminderDays' || waiveSecurity));
+    for (const name of offlineNames) setVisible(name, formal && elements.paymentMode.value === 'offline');
     if (finance) {
       if (waiveSecurity) elements.securityMode.value = 'none';
+      elements.securityMode.options[0].textContent = waiveSecurity ? '按约定提醒' : '押金单独保管';
       elements.securityMode.options[1].disabled = waiveSecurity;
     }
     const transferEnabled = formal && !waiveSecurity && elements.paymentMode.value === 'standard' && finance;
     securityChoice.hidden = securityTransfer.disabled = !transferEnabled;
     if (!transferEnabled) securityTransfer.checked = false;
     methodHint.hidden = !formal;
-    methodHint.textContent = formal ? [!finance ? '按默认约定押 1 个月、提前 3 天提醒。' : '',
+    methodHint.textContent = formal ? [!finance ? '默认押 1 个月。' : '',
+      !waiveSecurity ? '合同到期或动用押金时提醒。' : '',
       paymentModes[elements.paymentMode.value][1]].filter(Boolean).join(' ') : '';
     if (extras) {
       if (formal) quoteBox.before(extras.element);

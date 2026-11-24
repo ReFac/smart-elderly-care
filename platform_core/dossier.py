@@ -341,7 +341,7 @@ def photo_payload(p, *, allow_pdf=False):
     return raw, mime, hashlib.sha256(raw).hexdigest()
 
 
-def archive_document(db, state, p, user, today):
+def archive_document(db, state, p, user, today, *, return_id=False):
     access.require(user, "medical.write")
     resident = lookup(state, "residents", p.get("residentId"))
     rid = resident["id"]
@@ -369,13 +369,14 @@ def archive_document(db, state, p, user, today):
         pack([kind, event_date, source, method, description, pending, digest]).encode()
     ).hexdigest()
     match = db.execute(
-        """SELECT fingerprint FROM dossier_documents WHERE resident_id=? AND
+        """SELECT id,fingerprint FROM dossier_documents WHERE resident_id=? AND
                        (request_id=? OR fingerprint=? OR image_hash=?)""",
         (rid, key, fingerprint, digest),
     ).fetchall()
     if match:
-        if all(row[0] == fingerprint for row in match):
-            return f"确认长者 {rid} 的文书已存档，沿用原概括"
+        if all(row[1] == fingerprint for row in match):
+            message = f"确认长者 {rid} 的文书已存档，沿用原概括"
+            return (message, match[0][0]) if return_id else message
         raise ValueError("该请求编号或原图已存档，请查看已有概括")
     summary = {
         "eventDate": event_date,
@@ -398,12 +399,13 @@ def archive_document(db, state, p, user, today):
     }
     if raw:
         meta["pageCount"] = pdf_original.pages(raw) if mime == "application/pdf" else 1
+    did = uuid.uuid4().hex
     db.execute(
         """INSERT INTO dossier_documents
                (id,resident_id,request_id,fingerprint,event_date,recorded_date,metadata,mime,original,image_hash)
                VALUES(?,?,?,?,?,?,?,?,?,?)""",
         (
-            uuid.uuid4().hex,
+            did,
             rid,
             key,
             fingerprint,
@@ -415,11 +417,12 @@ def archive_document(db, state, p, user, today):
             digest,
         ),
     )
-    return (
+    message = (
         f"为长者 {rid} 留存医疗原件，等待识别"
         if staging
         else f"为长者 {rid} 存档医疗文书并保存概括"
     )
+    return (message, did) if return_id else message
 
 
 def review_document(db, state, p, user, today):
@@ -569,7 +572,6 @@ HANDLERS = {
     "dossier.signSummary": sign_summary,
     "dossier.reviewDocument": review_document,
     "dossier.profile": edit_profile,
-    "dossier.document": archive_document,
     "dossier.relative": edit_relative,
 }
 

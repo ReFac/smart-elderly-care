@@ -411,18 +411,20 @@ def release_bed(state, resident, today, note):
 
 
 def renew(state, p, today):
+    from ..operations import contract_renewal
+
     resident = get_resident(state, p.get("residentId"))
     if resident.get("stayType") == "trial":
         raise ValueError("试住长者请在转正式时确定合同期限。")
     if not resident.get("endDate"):
         raise ValueError("当前合同为无期限，无需续住。")
     if p.get("endDate") == "":
-        resident["endDate"] = ""
+        contract_renewal.record(state, resident, "", today, source="manual")
         return f"将{resident['name']}的入住合同续为无期限"
     end_date = iso_date(p.get("endDate"), "续住到期日")
     if end_date <= max(today, resident["endDate"]):
         raise ValueError("续住到期日须晚于今天及当前到期日。")
-    resident["endDate"] = end_date
+    contract_renewal.record(state, resident, end_date, today, source="manual")
     return f"将{resident['name']}的入住期限延长至{end_date}"
 
 

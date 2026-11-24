@@ -48,6 +48,12 @@ import { bedCard, familyPreview, bedside } from './bedcard.js';
 
 export const levels = ['自理', '半失能', '失能'];
 
+const renewalReasons = {
+  expired: '合同已到期',
+  securityUsed: '已动用押金',
+  upcoming: '合同即将到期',
+};
+
 export function admit(ctx, defaults = {}) {
   allocate(
     ctx,
@@ -123,7 +129,10 @@ function renew(ctx, row) {
   const min = nextDay(row.endDate > today(ctx) ? row.endDate : today(ctx));
   const dialog = ctx.dialog({
     title: '续住登记',
-    description: residentLabel(ctx, row) + ' · 原合同到期日 ' + row.endDate,
+    description: [
+      residentLabel(ctx, row), '原合同到期日 ' + row.endDate,
+      row.renewalReminder && renewalReasons[row.renewalReminder.reason],
+    ].filter(Boolean).join(' · '),
     fields: contractFields(min, min),
     submitLabel: '核对续住',
     onSubmit: ({ contractTerm, endDate }) =>
@@ -253,6 +262,13 @@ export function residencyDetails(ctx, row) {
     if (!isTrial(row) && canAct(ctx, 'care.discharge')) actions.append(btn(ctx, '退住', () => discharge(ctx, row)));
   }
   if (actions.childElementCount) enrollment.append(actions);
+  if (row.renewalHistory?.length) {
+    const entries = [...row.renewalHistory].sort((a, b) => b.date.localeCompare(a.date));
+    enrollment.append(disclosure('续住记录', records(entries, (entry) => named(
+      entry.source === 'payment' ? '缴费到账 · 自动续住' : '人工续住',
+      [entry.date, (entry.previousEndDate || '无期限') + ' → ' + (entry.endDate || '无期限')].join(' · '),
+    )), entries.length));
+  }
   const block = (title, key, grants, describe) => {
     if (!hasGrant(ctx, ...grants)) return null;
     const entries = byRecent((ctx.state[key] || []).filter(item => item.residentId === row.id));
@@ -309,12 +325,19 @@ export function residents(ctx) {
       '到期续住',
       () =>
         table(ctx, {
-          title: '到期及未来 30 天到期的档案',
-          rows: expiringContracts(ctx.state.residents, today(ctx)),
+          title: '续住提醒',
+          rows: renewalReminders(ctx.state.residents),
+          empty: '当前没有需要核对的续住事项。',
+          search: { placeholder: '搜索长者姓名', value: (r) => residentLabel(ctx, r) },
           cols: [
             { label: '长者', view: (r) => residentAnchor(ctx, r) },
-            { label: '合同到期', view: (r) => r.endDate },
-            { label: '办理', view: (r) => link(ctx, '续住', () => renew(ctx, r)) }
+            { label: '合同到期', view: (r) => r.endDate || '无期限' },
+            { label: '提醒原因', view: (r) => named(
+              renewalReasons[r.renewalReminder.reason], r.renewalReminder.at,
+            ) },
+            { label: '办理', align: 'end', view: (r) => r.endDate
+              ? link(ctx, '续住', () => renew(ctx, r))
+              : link(ctx, '查看入住资料', () => openDossier(ctx, r)) },
           ]
         })
     ]);
@@ -336,6 +359,10 @@ const bedViewSorts = [
 const bedNumbers = new Intl.Collator('zh-CN', {numeric: true, sensitivity: 'base'});
 let bedViewPreference;
 
+export function reopenBedFilter() {
+  if (bedViewPreference) bedViewPreference.request = '';
+}
+
 function allBeds(ctx) {
   const personFor = new Map(active(ctx).map(person => [person.bedId, person]));
   if (bedViewPreference?.userId !== ctx.state.user.id)
@@ -345,10 +372,10 @@ function allBeds(ctx) {
     };
   const view = bedViewPreference;
   const params = new URLSearchParams(location.hash.split('?')[1]);
-  const requested = ['capacity', 'limit', 'campus', 'building', 'floor', 'room'].map(key => params.get(key));
+  const requested = ['capacity', 'limit', 'campus', 'building', 'floor', 'room', 'status'].map(key => params.get(key));
   const key = JSON.stringify(requested);
   if (requested.some(Boolean) && view.request !== key) {
-    const [capacity, limit, campus, building, floor, room] = requested;
+    const [capacity, limit, campus, building, floor, room, status] = requested;
     view.request = key;
     view.capacity = /^[1-9]$|^1[0-2]$/.test(capacity || '') ? capacity : '';
     view.limit = /^[1-9]$|^[12][0-9]$|^30$/.test(limit || '') ? Number(limit) : 0;
@@ -356,13 +383,15 @@ function allBeds(ctx) {
     view.floor = floor || '';
     view.room = room || '';
     view.building = building || '';
-    view.area = view.query = view.status = '';
+    view.area = view.query = '';
+    view.status = { vacant: '空闲', occupied: '已入住' }[status] || '';
   } else if (!requested.some(Boolean) && view.request) {
     view.request = '';
     view.limit = 0;
     view.campus = view.floor = view.room = '';
   }
   let selectedRooms = null;
+  let checkedBuildings = false;
   const directory = new Map();
   const places = new Map();
   const unmapped = '__unmapped__';
@@ -467,6 +496,8 @@ function allBeds(ctx) {
     const list = [...directory].sort((a, b) => sortText(a[1], b[1]));
     if ([...places.values()].some(r => r.buildingId === unmapped))
       list.push([unmapped, '位置待登记']);
+    if (view.building && !list.some(([id]) => id === view.building))
+      list.push([view.building, checkedBuildings ? '指定楼栋暂不可查看' : '正在核对指定楼栋…']);
     view.building = choices(building, list, '全部楼栋', view.building);
   }
   const areaKey = room => room.areaId || scopeText(room.buildingId, room.areaPath || '未分区');
@@ -612,7 +643,13 @@ function allBeds(ctx) {
     button.addEventListener('click', () => { view.status = value; draw(); });
     statusBar.append(button);
   }
-  building.addEventListener('change', () => { view.building = building.value; view.limit = 0; fillAreas(); draw(); });
+  building.addEventListener('change', () => {
+    view.building = building.value;
+    view.campus = view.floor = view.room = '';
+    view.limit = 0;
+    fillAreas();
+    draw();
+  });
   area.addEventListener('change', () => { view.area = area.value; draw(); });
   capacity.addEventListener('change', () => { view.capacity = capacity.value; view.limit = 0; draw(); });
   order.addEventListener('change', () => { view.order = order.value; draw(); });
@@ -628,6 +665,7 @@ function allBeds(ctx) {
   // Include empty buildings in the selector without making the bed cards wait for a second response.
   ctx.get('/api/facility').then(result => {
     if (!panel.isConnected) return;
+    checkedBuildings = true;
     for (const item of result.buildings) directory.set(item.id, scopeText(item.campusName, item.name));
     fillBuildings();
     fillAreas();
@@ -660,11 +698,8 @@ export function beds(ctx) {
     ])
   );
 }
-export function expiringContracts(residents, day) {
-  const cutoff = new Date(day + 'T00:00:00Z');
-  cutoff.setUTCDate(cutoff.getUTCDate() + 30);
-  const limit = cutoff.toISOString().slice(0, 10);
+export function renewalReminders(residents) {
   return residents
-    .filter((r) => r.status === '在住' && !isTrial(r) && r.endDate && r.endDate <= limit)
-    .sort((a, b) => a.endDate.localeCompare(b.endDate));
+    .filter((r) => r.status === '在住' && !isTrial(r) && renewalReasons[r.renewalReminder?.reason])
+    .sort((a, b) => a.renewalReminder.at.localeCompare(b.renewalReminder.at));
 }

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from . import access_policy as access, campus_access, daily_life
 from .backups import PERIOD, slot_for
 from .care.residency import TRIAL_PENDING
+from .operations import contract_renewal
 from .operations.billing_cycles import pending_periods
 from .rounds.records import policy as rounds_policy
 
@@ -130,24 +131,21 @@ def overview(db, state, user, now):
         )
     if access.has(user, "intake"):
         people = scoped["residents"]
-        renewal_limit = (now.date() + timedelta(days=30)).isoformat()
+        used = contract_renewal.security_used_today(scoped, day)
         renewals = [
-            p["endDate"]
+            reminder
             for p in people
-            if p["status"] == "在住"
-            and p.get("stayType") != "trial"
-            and p.get("endDate")
-            and p["endDate"] <= renewal_limit
+            if (reminder := contract_renewal.reminder_for(p, day, used.get(p["id"])))
         ]
         add(
             "contract-renewal",
             "入住合同到期续住",
-            "提前 30 天提醒",
-            "有期限的正式入住合同即将到期或已经到期时，列入续住待办。",
+            "按押金及合同约定提醒",
+            "设置了押金的长者在合同到期或押金冲抵时提醒。其他固定期限合同提前 30 天列入续住待办。",
             "residents",
             "renew",
             count=len(renewals),
-            next_at=min((end for end in renewals if end >= day), default=None),
+            next_at=min((row["at"] for row in renewals if row["at"] >= day), default=None),
         )
         add(
             "trial-decision",

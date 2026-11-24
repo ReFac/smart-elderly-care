@@ -3,7 +3,7 @@
 from datetime import date
 from decimal import Decimal
 
-from . import billing_cycles, payment_terms
+from . import billing_cycles, contract_renewal, payment_terms
 from .charges import invoice_lines, line
 from .records import (
     currency_amount,
@@ -42,6 +42,7 @@ def credit(state, bill, amount, method, today):
         date=today,
     )
     state["payments"].insert(0, row)
+    contract_renewal.after_credit(state, bill, row, today)
     return row
 
 

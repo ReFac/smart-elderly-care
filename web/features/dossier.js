@@ -9,7 +9,8 @@ import { editResident } from './profile-editor.js';
 import { displayAmount, loadProfileChoices, regionPicker } from './profile-controls.js';
 import { contactBook } from './family-contacts.js';
 import { familyInbox, familyRecipients } from './family-rounds.js';
-import { careTimeline, scopedHistoryButton } from './care-timeline.js';
+import { careTimeline } from './care-timeline.js';
+import { recentChanges } from './recent-changes.js';
 import { previewSummary } from './dossier-summary.js';
 import { asBase64, originalViewer } from './document-original.js';
 import { pendingDocument, recognizeDocument, reviewReceipt } from './document-ocr.js';
@@ -302,16 +303,17 @@ function options(items) {
 
 export { asBase64 };
 
-function newDocument(ctx, resident) {
+function newDocument(ctx, resident, visit, reopenVisit) {
   const form = node('form', 'fx-profile fx-document-form');
   const event = node('input');
   event.type = 'date';
-  event.value = today(ctx);
+  event.value = visit.fields.eventDate;
   event.max = today(ctx);
   const kind = options(categories);
   const source = node('input');
   source.maxLength = 200;
   source.placeholder = '例如医院名称、科室或既往病历来源';
+  source.value = visit.fields.facility || '';
   const inpatient=resident.status==='在住';
   const method = options(inpatient ? ['手工描述','DeepSeek OCR','人工核对的 OCR 转录'] : ['手工描述']);
   const consent = node('input');
@@ -379,6 +381,8 @@ function newDocument(ctx, resident) {
   const group = (title, ...items) =>
     node('fieldset', 'fx-form-group', [node('legend', '', title), ...items]);
   form.append(
+    facts([['归入就诊记录', [visit.fields.eventDate, visit.fields.facility, visit.fields.department]
+      .filter(Boolean).join(' · ')]]),
     group(
       '文书信息',
       label('文书发生日期', event, true),
@@ -429,6 +433,7 @@ function newDocument(ctx, resident) {
       const pages = inspected?.pages;
       const payload = {
         residentId: resident.id,
+        visitId: visit.id,
         requestId: key,
         eventDate: event.value,
         category: kind.value,
@@ -468,19 +473,23 @@ function newDocument(ctx, resident) {
       if (archived === false)
         err.textContent =
           document.querySelector('#announcer')?.textContent || '存档失败，请核对后重试。';
-      else if (archived && imageHash)
-        await recognizeDocument(ctx, resident.id, { imageHash }, true);
+      else if (archived) {
+        if (imageHash)
+          await recognizeDocument(ctx, resident.id, { imageHash }, true, reopenVisit);
+        else
+          reopenVisit?.();
+      }
     } catch (error) {
       err.textContent = error.message;
     } finally {
       submit.disabled = false;
     }
   });
-  ctx.detail('为' + residentLabel(ctx, resident) + '存档医疗文书', form).addEventListener('close', () => inspection?.abort(), { once: true });
+  ctx.detail('补充本次就诊的医疗文书', form).addEventListener('close', () => inspection?.abort(), { once: true });
 }
 
-function showDocument(ctx, doc) {
-  if (!doc.summary && doc.ocr) return pendingDocument(ctx, doc);
+function showDocument(ctx, doc, reopenVisit) {
+  if (!doc.summary && doc.ocr) return pendingDocument(ctx, doc, reopenVisit);
   const s = doc.summary;
   const view = node('article', 'fx-document fx-profile', [
     node('header', 'fx-document-head', [
@@ -505,71 +514,6 @@ function showDocument(ctx, doc) {
   if (doc.hasImage) add(sheet, section('文书原件', originalViewer(doc).element));
   if (doc.reviewedPages?.length) add(transcription, facts([['逐页核对', '已核对全部 ' + doc.reviewedPages.length + ' 页']]));
   ctx.detail('文书概括', view);
-}
-
-function timeline(ctx, resident, actions) {
-  const rows = (ctx.state.medicalDocuments || []).filter((d) => d.residentId === resident.id);
-  const panel = node('section', 'fx-timeline');
-  const title = node('h3', '', [ctx.ui.icon('file', 18), '既往医疗文书']);
-  const count = node('span', 'fx-count');
-  const year = node('select', 'fx-input');
-  year.setAttribute('aria-label', '选择文书年份');
-  year.add(new Option('全部年份', ''));
-  for (const y of [...new Set(rows.map((r) => r.eventDate.slice(0, 4)))].sort().reverse())
-    year.add(new Option(y + ' 年', y));
-  const category = node('select', 'fx-input');
-  category.setAttribute('aria-label', '选择文书类别');
-  category.add(new Option('全部类型', ''));
-  for (const cat of [...new Set(rows.map((r) => r.category))]) category.add(new Option(cat, cat));
-  const input = node('input', 'fx-input');
-  input.type = 'search';
-  input.placeholder = '搜索日期、类型或来源';
-  input.setAttribute('aria-label', input.placeholder);
-  const items = node('div', 'fx-time-list');
-  const refresh = () => {
-    const needle = input.value.trim().toLocaleLowerCase();
-    const selected = rows.filter(
-      (r) =>
-        (!year.value || r.eventDate.startsWith(year.value)) &&
-        (!category.value || r.category === category.value) &&
-        [r.eventDate, r.category, r.source].join(' ').toLocaleLowerCase().includes(needle)
-    );
-    count.textContent = selected.length + ' 份';
-    items.replaceChildren();
-    let current = '';
-    for (const r of selected) {
-      const y = r.eventDate.slice(0, 4);
-      if (current !== y) {
-        items.append(node('h4', 'fx-time-year', y + ' 年'));
-        current = y;
-      }
-      const date = node('time', 'fx-time-date', r.eventDate.slice(5));
-      date.dateTime = r.eventDate;
-      items.append(
-        node('article', 'fx-time-row', [
-          date,
-          node(
-            'div',
-            'fx-time-entry',
-            named(r.category, [r.source, r.recordedDate + ' 存档'].filter(Boolean).join(' · '))
-          ),
-          link(ctx, r.summary ? '查看概括' : '查看待核对原件', () => showDocument(ctx, r))
-        ])
-      );
-    }
-    if (!selected.length)
-      items.append(node('p', 'fx-empty', rows.length ? '没有匹配的文书' : '尚无医疗文书'));
-  };
-  input.addEventListener('input', refresh);
-  for (const picker of [year, category]) picker.addEventListener('change', refresh);
-  const tools = node('div', 'fx-table-tools', [
-    node('label', 'fx-table-search', [ctx.ui.icon('search', 15), input]),
-    year,
-    category
-  ]);
-  panel.append(node('header', 'fx-timeline-head', [title, count, actions]), tools, items);
-  refresh();
-  return panel;
 }
 
 function showKin(ctx, resident, readOnly=false) {
@@ -646,19 +590,25 @@ function registrationDetails(ctx, resident, profile, archived, stay) {
 
 function medicalDetails(ctx, resident, archived, stay) {
   const content = node('div', 'fx-profile');
-  const actions = choose();
-  if (!archived && allowed(ctx, 'medical.write'))
-    actions.append(btn(ctx, '存档医疗文书', () => newDocument(ctx, resident)));
-  if (resident.status === '在住' && ctx.state.allowedActions.includes('dossier.signSummary'))
-    actions.append(btn(ctx, '核对动态档案摘要', () => previewSummary(ctx, resident, showDocument)));
-  if (allowed(ctx, 'medical')) {
-    content.append(
-      visitHistory(ctx, resident, archived ? null : openVisitEditor),
-      timeline(ctx, resident, actions.childElementCount ? actions : null)
+  const reopen = live => {
+    const current = live.state.residents.find(row => row.id === resident.id);
+    if (!current) return;
+    const existing = [...document.querySelectorAll('.resident-dossier-dialog[open]')].find(
+      dialog => dialog.dataset.roundsResidentId === resident.id
     );
-  } else if (actions.childElementCount) {
-    content.append(actions);
+    if (existing) existing.querySelector('[data-dossier-tab="medical"]')?.click();
+    else openDossier(live, current, undefined, 'medical');
+  };
+  if (allowed(ctx, 'medical')) {
+    content.append(visitHistory(ctx, resident, archived ? null : openVisitEditor, {
+      open: showDocument,
+      add: !archived ? newDocument : null,
+      reopen,
+    }));
   }
+  if (resident.status === '在住' && ctx.state.allowedActions.includes('dossier.signSummary'))
+    content.append(node('div', 'resident-dossier-actions',
+      btn(ctx, '核对动态档案摘要', () => previewSummary(ctx, resident, showDocument))));
   if (allowed(ctx, 'clinical') || allowed(ctx, 'medical')) {
     if (resident.summary)
       content.append(section('当前档案摘要', node('p', '', resident.summary)));
@@ -773,7 +723,7 @@ function dossierViews(ctx, views, requested) {
   return node('div', 'resident-dossier-grid', [nav, contents]);
 }
 
-export function openDossier(ctx, resident, lifeEvent, initialSection) {
+function dossierSections(ctx, resident, lifeEvent, initialSection) {
   const profile = (ctx.state.dossierProfiles || []).find((p) => p.residentId === resident.id) || {};
   const archived = ['已退住', '归档', '已归档', '已出院', '归档到期'].includes(resident.status);
   const stay = residencyDetails(ctx, resident);
@@ -784,12 +734,51 @@ export function openDossier(ctx, resident, lifeEvent, initialSection) {
     views.push(['medical', '医疗资料', 'heart', () => medicalDetails(ctx, resident, archived, stay)]);
   if (stay.history || resident.status !== '归档到期' && hasGrant(ctx, 'care', 'clinical', 'care.groupConfirm', 'residents', 'medical'))
     views.push(['timeline', '疗养院时间线', 'calendar', () => wellnessTimeline(ctx, resident, archived, stay, lifeEvent)]);
-  const recentChanges = scopedHistoryButton(ctx, 'resident', resident.id);
+  return views.length
+    ? dossierViews(ctx, views, initialSection)
+    : node('p', 'fx-muted', '当前岗位没有可查阅的详细资料。');
+}
+
+export function openDossier(ctx, resident, lifeEvent, initialSection) {
+  const sections = node('div', '', dossierSections(ctx, resident, lifeEvent, lifeEvent ? 'timeline' : initialSection));
+  const history = node('section', 'resident-dossier-history');
+  history.id = 'resident-dossier-' + ++nextDossierPanel + '-history';
+  history.hidden = true;
+  const identity = recordIdentity(ctx, resident, resident.level);
+  const toggle = ctx.available('history') && ctx.state.user.kind !== 'family'
+    ? btn(ctx, '最近改动', () => {
+      const open = history.hidden;
+      history.hidden = !open;
+      sections.hidden = open;
+      toggle.textContent = open ? '返回档案' : '最近改动';
+      toggle.setAttribute('aria-expanded', String(open));
+      if (open) {
+        history.replaceChildren(recentChanges(ctx.current?.() || ctx, {
+          residentId: resident.id,
+          onUndo: () => {
+            const current = ctx.current();
+            const latest = current.state.residents.find(row => row.id === resident.id);
+            if (!latest) return;
+            const previous = sections.querySelector('[aria-selected=true]')?.dataset.dossierTab;
+            header.firstElementChild.replaceWith(recordIdentity(current, latest, latest.level));
+            sections.replaceChildren(dossierSections(current, latest, lifeEvent, previous));
+          },
+        }));
+      } else {
+        history.replaceChildren();
+      }
+      history.closest('dialog')?.scrollTo({ top: 0 });
+    })
+    : null;
+  if (toggle) {
+    toggle.setAttribute('aria-controls', history.id);
+    toggle.setAttribute('aria-expanded', 'false');
+  }
+  const header = node('header', 'fx-dossier-head', [identity, toggle]);
   const body = node('div', 'fx-profile fx-dossier', [
-    node('header', 'fx-dossier-head', [recordIdentity(ctx, resident, resident.level), recentChanges]),
-    views.length
-      ? dossierViews(ctx, views, lifeEvent ? 'timeline' : initialSection)
-      : node('p', 'fx-muted', '当前岗位没有可查阅的详细资料。'),
+    header,
+    sections,
+    history,
   ]);
   const dialog = ctx.detail('长者详细档案', body);
   dialog.classList.add('resident-dossier-dialog');

@@ -219,9 +219,10 @@ class Store:
             ]
             lead_contacts.reconcile_callbacks(db, state, self.now())
             data = access.project(db, state, user, self.facility_policy)
-            from .operations import billing_lifecycle
+            from .operations import billing_lifecycle, contract_renewal
 
             billing_lifecycle.project(state, data, user, today)
+            contract_renewal.project(state, data, user, today)
             if access.has(user, "intake") or access.has(user, "finance"):
                 from .operations.admission_finance import project_status
 
@@ -955,6 +956,10 @@ class Store:
                     summary = medication_reports.record(db, data, user, payload, now)
                 elif action == "dossier.confirmVisit":
                     summary = medical_visits.confirm(db, data, payload, user, now)
+                elif action == "dossier.document":
+                    summary = medical_visits.archive_document(db, data, payload, user, now)
+                elif action == "dossier.linkVisitDocument":
+                    summary = medical_visits.link_document(db, data, payload, user, now)
                 elif action == "care.proposeGroupActivity":
                     summary = daily_life.propose(db, data, user, payload, now)
                 elif action == "care.confirmGroupActivity":

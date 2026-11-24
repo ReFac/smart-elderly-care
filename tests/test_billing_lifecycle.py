@@ -75,7 +75,8 @@ class BillingLifecycleTests(unittest.TestCase):
     def tick(self):
         return billing_lifecycle.tick(self.store)
 
-    def test_advance_due_and_next_day_allocation_are_recorded_once(self):
+    def test_deposit_waits_for_expiry_or_next_day_withdrawal(self):
+        self.resident["endDate"] = "2026-11-25"
         self.seed(
             [
                 self.bill("monthly"),
@@ -83,7 +84,7 @@ class BillingLifecycleTests(unittest.TestCase):
                 self.bill("trial", kind="trial"),
             ]
         )
-        self.assertEqual(self.tick(), 1)
+        self.assertEqual(self.tick(), 0)
         self.assertEqual(self.tick(), 0)
         self.day("2026-11-24")
         self.assertEqual(self.tick(), 0)
@@ -94,12 +95,11 @@ class BillingLifecycleTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             self.assertEqual(sorted(pool.map(lambda _: self.tick(), (0, 1))), [0, 2])
         revision, data = self.state()
-        self.assertEqual(revision, 3)
+        self.assertEqual(revision, 2)
         self.assertEqual(
             [(n["kind"], n["billingDate"], n["date"]) for n in data["billingNotices"]],
             [
-                ("advance", "2026-11-25", "2026-11-22"),
-                ("due", "2026-11-25", "2026-11-25"),
+                ("contractExpired", "2026-11-25", "2026-11-25"),
                 ("security", "2026-11-25", "2026-11-26"),
             ],
         )
@@ -118,7 +118,7 @@ class BillingLifecycleTests(unittest.TestCase):
                    WHERE a.action=? ORDER BY a.revision""",
                 (billing_lifecycle.ACTION,),
             ).fetchall()
-        self.assertEqual([row["residentId"] for row in audited], ["person-a"] * 3)
+        self.assertEqual([row["residentId"] for row in audited], ["person-a"] * 2)
         self.assertEqual(
             {row["collection"] for row in json.loads(audited[-1]["changes"])},
             {"billingNotices", "bills", "payments"},
@@ -130,7 +130,7 @@ class BillingLifecycleTests(unittest.TestCase):
         other = {
             **self.resident,
             "id": "person-b",
-            "admissionTerms": admission_finance.terms({"reminderDays": 0}),
+            "admissionTerms": admission_finance.terms({"reminderDays": 0, "depositMonths": 0}),
         }
         trial = {**self.resident, "id": "person-trial", "stayType": "trial"}
         discharged = {**self.resident, "id": "person-discharged", "status": "已退住"}
@@ -147,11 +147,11 @@ class BillingLifecycleTests(unittest.TestCase):
             [self.resident, other, trial, discharged],
         )
         self.day("2026-11-27")
-        self.assertEqual(self.tick(), 7)
+        self.assertEqual(self.tick(), 5)
         self.assertEqual(self.tick(), 0)
         _, data = self.state()
         due = [n for n in data["billingNotices"] if n["kind"] == "due"]
-        self.assertEqual({n["billId"] for n in due}, {"old", "new", "other"})
+        self.assertEqual({n["billId"] for n in due}, {"other"})
         self.assertEqual({n["date"] for n in due}, {"2026-11-27"})
         self.assertEqual(
             {p["billId"]: p["amount"] for p in data["payments"]},
@@ -162,11 +162,13 @@ class BillingLifecycleTests(unittest.TestCase):
     def test_cross_resident_deposit_is_not_used_or_disclosed_and_failed_transaction_retries(
         self,
     ):
+        self.resident["endDate"] = "2026-11-26"
         other = {"id": "person-b", "name": "外部档案", "status": "未入住"}
         valid = {
             **self.resident,
             "id": "person-c",
             "admissionPayment": {"securityBillId": "valid-deposit"},
+            "endDate": "",
         }
         self.seed(
             [
@@ -197,7 +199,7 @@ class BillingLifecycleTests(unittest.TestCase):
         self.assertEqual(revision, 0)
         self.assertEqual(rolled_back.get("billingNotices", []), [])
         self.assertEqual(rolled_back["payments"], [])
-        self.assertEqual(self.tick(), 5)
+        self.assertEqual(self.tick(), 4)
         _, data = self.state()
         issues = [n for n in data["billingNotices"] if n["kind"] == "securityIssue"]
         self.assertEqual(
@@ -216,7 +218,7 @@ class BillingLifecycleTests(unittest.TestCase):
             "portalScopes": ["billingNotices"],
         }
         projected = visible(family, [self.resident["id"], "person-c"])
-        self.assertEqual([notice["kind"] for notice in projected], ["due"])
+        self.assertEqual([notice["kind"] for notice in projected], ["contractExpired"])
         self.assertEqual(set(projected[0]), set(billing_lifecycle.FAMILY_FIELDS))
         self.assertEqual(
             visible({**family, "portalScopes": []}, [self.resident["id"]]), []
@@ -231,7 +233,7 @@ class BillingLifecycleTests(unittest.TestCase):
         finance = visible(
             {"kind": "staff", "permissions": ["finance"]}, [self.resident["id"]]
         )
-        self.assertEqual({n["kind"] for n in finance}, {"due", "securityIssue"})
+        self.assertEqual({n["kind"] for n in finance}, {"contractExpired", "securityIssue"})
         owner = visible({"kind": "owner"}, [self.resident["id"], valid["id"]])
         self.assertEqual(
             {n["residentId"] for n in owner}, {self.resident["id"], valid["id"]}
@@ -247,6 +249,7 @@ class BillingLifecycleTests(unittest.TestCase):
     def test_reminder_created_before_invoice_links_after_issue_without_replacing_history(
         self,
     ):
+        self.resident.update(admissionTerms=admission_finance.terms({"depositMonths": 0}), admissionPayment={})
         self.seed([])
         self.day("2026-11-25")
         self.assertEqual(self.tick(), 1)

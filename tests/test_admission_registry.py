@@ -176,6 +176,7 @@ class AdmissionRegistryTests(unittest.TestCase):
     def test_unseen_expired_archive_on_encrypted_restore_leaves_only_evidence(self):
         from platform_core.backups import exchange
         from test_dossier import DOCUMENT, PNG
+        from test_medical_visits import fixture_visit
         import base64
 
         from platform_core import secure_storage
@@ -198,9 +199,11 @@ class AdmissionRegistryTests(unittest.TestCase):
 
         command("care.register", name="还原旧档样本")
         pid = donor.snapshot(token)["data"]["residents"][-1]["id"]
+        event_date = self.now.date().isoformat()
+        visit_id = fixture_visit(donor, token, pid, event_date)
         command(
             "dossier.document",
-            **{**DOCUMENT, "residentId": pid, "eventDate": self.now.date().isoformat()},
+            **{**DOCUMENT, "residentId": pid, "eventDate": event_date, "visitId": visit_id},
         )
         command(
             "care.fileArchive", residentId=pid, archiveDate=self.now.date().isoformat()

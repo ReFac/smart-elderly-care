@@ -16,6 +16,22 @@
   z-index: 2;
   flex-wrap: wrap;
 }
+.history-embedded {
+  display: grid;
+  gap: 12px;
+}
+.history-embedded-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.history-embedded-heading h3,
+.history-embedded-heading p {
+  margin: 0;
+}
+.history-embedded .history-list {
+  max-height: 44vh;
+}
 .history-tools > .btn[aria-pressed='true'] {
   border-color: var(--blue, #2459b7);
   color: #1a4da5;
@@ -282,6 +298,9 @@
     grid-template-columns: 1fr;
   }
   .history-list {
+    max-height: 30vh;
+  }
+  .history-embedded .history-list {
     max-height: 30vh;
   }
   .history-list-column {

@@ -150,6 +150,32 @@ class ChatTests(unittest.TestCase):
         self.assertTrue(matched["房号"])
         self.assertLessEqual(len(matched["房号"]), 3)
 
+    def test_natural_language_applies_authorized_bed_filters(self):
+        result = self.ask("选出“床位管理”，然后筛选“主楼”的 2 层空床")
+        reply = result["messages"][-1]
+        self.assertEqual(reply["action"]["kind"], "navigate")
+        self.assertEqual(reply["action"]["params"], {
+            "campus": "campus-main", "building": "building-main", "floor": "floor-2",
+            "status": "vacant",
+        })
+        saved = chat.read(self.store, self.owner)["messages"][-1]
+        self.assertEqual(saved["pageLinks"], reply["pageLinks"])
+
+    def test_missing_and_ambiguous_bed_filters_do_not_open_unfiltered_page(self):
+        unmatched = self.ask("打开床位管理并筛选不存在楼的空床")["messages"][-1]
+        self.assertEqual(unmatched["pageLinks"], [])
+        self.assertEqual(unmatched["action"]["kind"], "viewFilters")
+        self.command("facility.addCampus", {"name": "测试分院"})
+        campus = next(c["id"] for c in self.store.facility_resource(self.owner, "directory")["campuses"]
+                      if c["name"] == "测试分院")
+        self.command("facility.addBuilding", {"name": "主楼", "campusId": campus})
+        duplicate = self.ask("床位管理筛选主楼", "show-ambiguous")["messages"][-1]
+        self.assertEqual(duplicate["action"]["kind"], "viewFilters")
+        self.assertEqual(len(duplicate["pageLinks"]), 2)
+        self.assertEqual(len({p["params"]["campus"] for p in duplicate["pageLinks"]}), 2)
+        wrong = self.ask("床位管理筛选二号主楼", "not-a-building-alias")["messages"][-1]
+        self.assertEqual(wrong["pageLinks"], [])
+
     def test_cloud_evidence_action_rechecks_scope_and_bills_synthesis(self):
         def choose(_key, body):
             tools = {entry["function"]["name"] for entry in body["tools"]}

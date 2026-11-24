@@ -324,6 +324,7 @@ class Reader:
             "dossier_document_reviews",
             "dossier_visit_records",
             "dossier_visit_originals",
+            "dossier_visit_documents",
         ):
             return policy.has(self.user, "medical")
         if name in policy.COLLECTION_GRANTS and name != "handovers":

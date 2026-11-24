@@ -9,7 +9,7 @@ function input(label, control) {
   return node('label', 'field', [node('span', '', label), control]);
 }
 
-export async function reviewOcr(ctx, doc) {
+export async function reviewOcr(ctx, doc, reopenVisit) {
   try {
     doc = { ...doc, ocr: await ctx.get('/api/documents/' + encodeURIComponent(doc.id) + '/ocr') };
   } catch (error) {
@@ -183,7 +183,7 @@ export async function reviewOcr(ctx, doc) {
           page: Number(c.origin.value.split(':')[0]),
           line: Number(c.origin.value.split(':')[1]) || null
         }));
-      await ctx.command('dossier.reviewDocument', {
+      const saved = await ctx.command('dossier.reviewDocument', {
         residentId: resident.id,
         documentId: doc.id,
         verifiedName: identity.value,
@@ -197,6 +197,7 @@ export async function reviewOcr(ctx, doc) {
         changes,
         ...(totalPages > 1 ? { reviewedPages: [...checked].sort((a, b) => a - b) } : {}),
       });
+      if (saved) reopenVisit?.();
     } finally {
       submit.disabled = false;
     }
@@ -204,11 +205,10 @@ export async function reviewOcr(ctx, doc) {
   ctx.detail('核对文书与回填档案', form);
 }
 
-export async function recognizeDocument(ctx, residentId, reference, confirmed = false) {
-  if (
-    !(await ctx.command('dossier.ocr', { residentId, ...reference, consent: true }, { confirmed }))
-  )
-    return;
+export async function recognizeDocument(ctx, residentId, reference, confirmed = false, reopenVisit) {
+  const processed = await ctx.command('dossier.ocr', { residentId, ...reference, consent: true }, { confirmed });
+  reopenVisit?.();
+  if (!processed) return;
   const snapshot = await ctx.get('/api/state');
   if (snapshot.data.user.id !== ctx.state.user.id) return;
   if (!snapshot.data.allowedActions.includes('dossier.reviewDocument')) return;
@@ -217,10 +217,10 @@ export async function recognizeDocument(ctx, residentId, reference, confirmed = 
       d.residentId === residentId &&
       (reference.documentId ? d.id === reference.documentId : d.imageHash === reference.imageHash)
   );
-  if (doc && !doc.summary) reviewOcr({ ...ctx, state: snapshot.data }, doc);
+  if (doc && !doc.summary) reviewOcr({ ...ctx, state: snapshot.data }, doc, reopenVisit);
 }
 
-export function pendingDocument(ctx, doc) {
+export function pendingDocument(ctx, doc, reopenVisit) {
   const body = node('div', 'fx-profile', [
     facts([
       ['文书类型', doc.category],
@@ -247,7 +247,7 @@ export function pendingDocument(ctx, doc) {
               fields: [],
               submitLabel: '确认并发送',
               onSubmit: async () => {
-                await recognizeDocument(ctx, doc.residentId, { documentId: doc.id }, true);
+                await recognizeDocument(ctx, doc.residentId, { documentId: doc.id }, true, reopenVisit);
                 return true;
               }
             }),
@@ -257,7 +257,7 @@ export function pendingDocument(ctx, doc) {
     if (ctx.state.allowedActions.includes('dossier.reviewDocument'))
       body.append(
         btn(ctx, doc.ocr.state === 'recognized' ? '核对原文与回填' : '按原件手工补录', () =>
-          reviewOcr(ctx, doc)
+          reviewOcr(ctx, doc, reopenVisit)
         )
       );
   }

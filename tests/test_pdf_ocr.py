@@ -65,6 +65,8 @@ class PdfTests(unittest.TestCase):
             document_ocr.parse_result(receipt, 1000, 1000, 6)
 
     def test_archival_pages_quota_and_last_page_evidence(self):
+        from test_medical_visits import fixture_visit
+
         raw = synthetic_pdf(6)
         with tempfile.TemporaryDirectory() as location:
             isolate_credentials(self, location)
@@ -82,14 +84,17 @@ class PdfTests(unittest.TestCase):
             self.assertTrue(pdf_original.render_page(raw, 6).startswith(b"\x89PNG"))
             with self.assertRaises(ValueError):
                 pdf_original.pages(b"%PDF-1.5\ninvalid")
+            event_date = store.now().date().isoformat()
+            visit_id = fixture_visit(store, owner, "r001", event_date)
             command(
                 "dossier.document",
                 {
                     "residentId": "r001",
+                    "visitId": visit_id,
                     "requestId": "six-pages",
                     "source": "模拟文件",
                     "category": "出院小结",
-                    "eventDate": store.now().date().isoformat(),
+                    "eventDate": event_date,
                     "method": document_ocr.METHOD,
                     "filename": "sample.pdf",
                     "mime": "application/pdf",

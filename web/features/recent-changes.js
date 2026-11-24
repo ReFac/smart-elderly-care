@@ -51,7 +51,7 @@ function renderValue(value) {
   );
 }
 
-function displayField(ctx, collection, key, value) {
+function displayField(ctx, collection, key, value, embedded) {
   const list = {
     campusId: ctx.state.campusOptions,
     residentId: ctx.state.residents,
@@ -60,7 +60,8 @@ function displayField(ctx, collection, key, value) {
     assigneeId: ctx.state.accounts,
   }[key];
   const match = list?.find((row) => row.id === value);
-  if (match && key === 'residentId') return [fieldLabel(key), residentAnchor(ctx, match)];
+  if (match && key === 'residentId')
+    return [fieldLabel(key), embedded ? residentLabel(ctx, match) : residentAnchor(ctx, match)];
   if (match && key === 'assigneeId') return [fieldLabel(key), staffLabel(ctx, match)];
   const display =
     match?.name || match?.label || match?.title || match?.displayName || renderValue(value);
@@ -72,14 +73,14 @@ function displayField(ctx, collection, key, value) {
   return [label, text];
 }
 
-function comparison(ctx, change) {
+function comparison(ctx, change, embedded) {
   const complete =
     change.kind === 'add' ? change.after : change.kind === 'remove' ? change.before : null;
   if (!change.field && complete && typeof complete === 'object' && !Array.isArray(complete)) {
     const list = node('dl', 'history-record-values');
     for (const [key, value] of Object.entries(complete)) {
       if (key === 'id' && value === change.entityId) continue;
-      const [name, text] = displayField(ctx, change.collection, key, value);
+      const [name, text] = displayField(ctx, change.collection, key, value, embedded);
       list.append(node('div', '', [node('dt', '', name), node('dd', '', text)]));
     }
     return node('section', 'history-record history-record-' + change.kind, [
@@ -96,14 +97,14 @@ function comparison(ctx, change) {
   ]) {
     const value = node('div', 'history-value history-' + key, [
       node('span', 'history-side-label', title),
-      displayField(ctx, change.collection, change.field?.split('/').at(-1), change[key])[1],
+      displayField(ctx, change.collection, change.field?.split('/').at(-1), change[key], embedded)[1],
     ]);
     item.append(value);
   }
   return item;
 }
 
-function inspector(ctx, change) {
+function inspector(ctx, change, embedded, undo) {
   const title = node('h2', '', recordTitle(change));
   const head = node('header', 'history-inspector-head', [
     node('div', 'history-version', [ctx.ui.icon('clock', 15), '版本 ' + change.revision]),
@@ -158,7 +159,7 @@ function inspector(ctx, change) {
           node('small', '', first.entityId || ''),
           node('span', 'fx-count', group.length + ' 项'),
         ]),
-        ...group.map((c) => comparison(ctx, c)),
+        ...group.map((c) => comparison(ctx, c, embedded)),
       );
       content.append(block);
     }
@@ -173,21 +174,22 @@ function inspector(ctx, change) {
       ),
     );
   const footer = node('div', 'history-inspector-actions');
-  const person = ctx.state.residents?.find((row) => row.id === change.residentId);
-  if (person && ctx.available('dossier'))
-    footer.append(btn(ctx, '打开长者档案', () => openDossier(ctx, person)));
-  if (change.roomId && ctx.available('rooms'))
-    footer.append(btn(ctx, '定位到房间', () => goToRoom(ctx, change.roomId)));
-
-  if (change.rollbackPointId && ctx.available('settings'))
-    footer.append(
-      btn(ctx, '查看恢复前保护点', () => {
-        ctx.go('settings', 'backups');
-        openBackupPoint(ctx, change.rollbackPointId);
-      }),
-    );
+  if (!embedded) {
+    const person = ctx.state.residents?.find((row) => row.id === change.residentId);
+    if (person && ctx.available('dossier'))
+      footer.append(btn(ctx, '打开长者档案', () => openDossier(ctx, person)));
+    if (change.roomId && ctx.available('rooms'))
+      footer.append(btn(ctx, '定位到房间', () => goToRoom(ctx, change.roomId)));
+    if (change.rollbackPointId && ctx.available('settings'))
+      footer.append(
+        btn(ctx, '查看恢复前保护点', () => {
+          ctx.go('settings', 'backups');
+          openBackupPoint(ctx, change.rollbackPointId);
+        }),
+      );
+  }
   if (change.undoable)
-    footer.append(btn(ctx, '撤销这次改动', () => ctx.undoRevision(change), 'secondary', 'undo'));
+    footer.append(btn(ctx, '撤销这次改动', () => undo(change), 'secondary', 'undo'));
   else if (change.undoReason) footer.append(node('small', 'fx-muted', change.undoReason));
   content.append(footer);
   return content;
@@ -201,8 +203,9 @@ function optionPicker(label, choices, current) {
   return control;
 }
 
-export function recentChanges(ctx) {
-  const scope = ctx.historyScope;
+export function recentChanges(ctx, { residentId, onUndo } = {}) {
+  const embedded = Boolean(residentId);
+  const scope = embedded ? { residentId } : ctx.historyScope;
   const timeline = node('div', 'history-list');
   const pane = node('div', 'history-pane');
   const more = btn(ctx, '加载更早改动', () => load(true));
@@ -218,7 +221,7 @@ export function recentChanges(ctx) {
   const actors = new Map([[ctx.state.user.id, staffLabel(ctx, ctx.state.user)]]);
   for (const person of ctx.state.accounts || []) actors.set(person.id, staffLabel(ctx, person));
   const byUser = optionPicker('操作人', [['', '全部操作人'], ...actors], scope.actorId);
-  const byPerson = optionPicker(
+  const byPerson = embedded ? null : optionPicker(
     '长者',
     [['', '全部长者'], ...(ctx.state.residents || []).map((r) => [r.id, residentLabel(ctx, r)])],
     scope.residentId,
@@ -266,14 +269,15 @@ export function recentChanges(ctx) {
   const clear = btn(ctx, '清除筛选', () => {
     Object.assign(scope, {
       actorId: '',
-      residentId: '',
+      residentId: residentId || '',
       roomId: '',
       roomLabel: '',
       day: '',
       q: '',
       revision: null,
     });
-    byUser.value = byPerson.value = roomInput.value = dayInput.value = search.value = '';
+    byUser.value = roomInput.value = dayInput.value = search.value = '';
+    if (byPerson) byPerson.value = '';
     matches.replaceChildren();
     load(false);
   });
@@ -282,7 +286,7 @@ export function recentChanges(ctx) {
     node('summary', '', [ctx.ui.icon('search', 16), '筛选记录']),
     node('div', 'history-filter-fields', [
       wrap('操作人', byUser),
-      wrap('长者', byPerson),
+      byPerson ? wrap('长者', byPerson) : null,
       wrap('变更日期', dayInput),
       ...(ctx.available('rooms')
         ? [node('div', 'history-room-search', [wrap('房间', roomInput), matches])]
@@ -325,11 +329,12 @@ export function recentChanges(ctx) {
     scope.revision = null;
     load(false);
   };
-  byPerson.onchange = () => {
-    scope.residentId = byPerson.value;
-    scope.revision = null;
-    load(false);
-  };
+  if (byPerson)
+    byPerson.onchange = () => {
+      scope.residentId = byPerson.value;
+      scope.revision = null;
+      load(false);
+    };
   const my = btn(ctx, '我的改动', () => {
     scope.actorId = scope.actorId === ctx.state.user.id ? '' : ctx.state.user.id;
     byUser.value = scope.actorId;
@@ -342,7 +347,7 @@ export function recentChanges(ctx) {
       scope.q,
       scope.day,
       scope.actorId && (actors.get(scope.actorId) || '指定操作人'),
-      scope.residentId && residentLabel(ctx, scope.residentId),
+      !embedded && scope.residentId && residentLabel(ctx, scope.residentId),
       scope.roomId && (scope.roomLabel || '指定房间'),
     ].filter(Boolean);
     roomLabel.textContent = labels.join(' / ');
@@ -376,16 +381,28 @@ export function recentChanges(ctx) {
     more.hidden = !cursor;
   }
   async function select(id) {
+    const focused = timeline.contains(document.activeElement);
     scope.revision = id;
     drawList();
+    if (focused) timeline.querySelector('.history-item[aria-current=true]')?.focus({ preventScroll: true });
     const seq = ++detailSeq;
     pane.replaceChildren(node('p', 'history-note', '正在读取变更详情…'));
     try {
       const response = await ctx.get('/api/history/' + id);
-      if (seq === detailSeq && pane.isConnected) pane.replaceChildren(inspector(ctx, response));
+      if (seq === detailSeq && pane.isConnected)
+        pane.replaceChildren(inspector(ctx.current?.() || ctx, response, embedded, undo));
     } catch (e) {
       if (seq === detailSeq) pane.replaceChildren(node('p', 'history-note', e.message));
     }
+  }
+  async function undo(change) {
+    const saved = await ctx.undoRevision(change, embedded ? split.closest('dialog') : undefined);
+    if (!embedded || !split.isConnected) return;
+    if (saved === false) return load(false);
+    if (!saved) return;
+    onUndo?.();
+    scope.revision = saved.revision;
+    await load(false);
   }
   async function load(append) {
     const seq = ++sequence,
@@ -425,7 +442,14 @@ export function recentChanges(ctx) {
     node('div', 'history-tools', [my, filters, roomLabel]),
     searchForm,
   ]);
-  const screen = page(
+  const screen = embedded ? node('div', 'history-embedded', [
+    node('header', 'history-embedded-heading', [
+      node('h3', '', '最近改动'),
+      node('p', 'fx-muted', '当前长者 · 最近 60 天'),
+    ]),
+    toolbar,
+    split,
+  ]) : page(
     ctx,
     '最近改动',
     '查看最近 60 天的变更说明、经办人和修改前后的内容。',

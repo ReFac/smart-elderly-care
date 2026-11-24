@@ -41,6 +41,7 @@ ORIGINALS = {
     "staff_contract_versions": "员工合同留存版本",
     "dossier_documents": "医疗原件",
     "dossier_document_reviews": "文书签认",
+    "dossier_visit_documents": "医疗文书与就诊病例关联",
     "storage_assets": "环境与历史原件",
     "protected_documents": "签发的加密文书",
     "rounds_observations": "已核对咳嗽时段观测",
@@ -57,6 +58,7 @@ PROTECTED = {
     "payments": "收款凭证",
     "bills": "账单",
     "billingNotices": "已发送的缴费提醒",
+    "contractRenewals": "合同续住凭证",
     "paymentOrders": "支付订单",
     "channelReceipts": "渠道回执",
     "deposits": "预存余额",
@@ -94,7 +96,10 @@ LABELS = {
 }
 
 
-RECEPTION_COLLECTIONS = ("leadContacts", "leadEvents", "visitBookings", "visitSchedulePolicies", "billingNotices")
+RECEPTION_COLLECTIONS = (
+    "leadContacts", "leadEvents", "visitBookings", "visitSchedulePolicies",
+    "billingNotices",
+)
 
 
 def with_reception_collections(state):
@@ -148,6 +153,7 @@ OPTIONAL_TABLES = {
     "daily_life_attendance",
     "dossier_visit_records",
     "dossier_visit_originals",
+    "dossier_visit_documents",
     "staff_paydays",
     "staff_contract_originals",
     "staff_contract_versions",
@@ -185,8 +191,12 @@ def describe(db):
         "incoming", "SELECT id FROM {s}.facility_site"
     ):
         raise ValueError("备份所属机构与本机构不一致")
-    source = with_reception_collections(json.loads(field("incoming", "SELECT data FROM {s}.workspace WHERE id=1")))
-    live = json.loads(field("main", "SELECT data FROM {s}.workspace WHERE id=1"))
+    workspace = "SELECT data FROM {s}.workspace WHERE id=1"
+    source = with_reception_collections(json.loads(field("incoming", workspace)))
+    live = json.loads(field("main", workspace))
+    # Renewal history is allocated on the first renewal. An absent ledger is empty.
+    source.setdefault("contractRenewals", [])
+    live.setdefault("contractRenewals", [])
     changes = []
     blockers = []
     expired_ids = {r[0] for r in db.execute("SELECT resident FROM archive_expirations")}

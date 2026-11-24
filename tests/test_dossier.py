@@ -62,6 +62,8 @@ class DossierTest(unittest.TestCase):
 
     def save(self, action, fields, user=OWNER):
         with self.db:
+            if action == "document":
+                return dossier.archive_document(self.db, self.state, fields, user, TODAY)
             return dossier.apply(
                 self.db, self.state, "dossier." + action, fields, user, TODAY
             )

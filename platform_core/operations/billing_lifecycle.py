@@ -7,7 +7,7 @@ import json
 from zoneinfo import ZoneInfo
 
 from .. import access_policy
-from . import admission_finance
+from . import admission_finance, contract_renewal
 from .records import parse_day
 
 LOCAL = ZoneInfo("Asia/Shanghai")
@@ -21,6 +21,7 @@ SERVICE = {
 NOTICES = {
     "advance": ("月费缴费提醒", "请在本期约定账单日核对账单并办理缴费。"),
     "due": ("月费账单日", "本期已到约定账单日，请核对缴费情况。"),
+    "contractExpired": ("入住合同到期", "固定期限的入住合同已到期，请核对续住安排。"),
     "security": (
         "已办理押金冲抵",
         "本期月费已使用押金冲抵，请联系机构核对本期账单及押金余额。",
@@ -90,17 +91,21 @@ def _monthly_bills(state, residents, today):
 def _process(state, recorded, resident, bills, today):
     rid = resident["id"]
     by_date = {bill["billingDate"]: bill for bill in bills}
-    reminders = set(admission_finance.reminder_dates(resident, today))
-    # Catch up after downtime, including the day an overdue invoice is first entered.
-    reminders.update(
-        (bill["billingDate"], "due")
-        for bill in bills
-        if bill["balance"] > 0 or bill["billingDate"] == today
-    )
-    count = sum(
-        _notice(state, recorded, rid, day, today, kind, by_date.get(day))
-        for day, kind in sorted(reminders)
-    )
+    if contract_renewal.has_security(resident):
+        end = resident.get("endDate")
+        count = _notice(state, recorded, rid, end, today, "contractExpired") if end and end <= today else 0
+    else:
+        reminders = set(admission_finance.reminder_dates(resident, today))
+        # Catch up after downtime, including the day an overdue invoice is first entered.
+        reminders.update(
+            (bill["billingDate"], "due")
+            for bill in bills
+            if bill["balance"] > 0 or bill["billingDate"] == today
+        )
+        count = sum(
+            _notice(state, recorded, rid, day, today, kind, by_date.get(day))
+            for day, kind in sorted(reminders)
+        )
     allocations = 0
     for bill in bills:
         day = bill["billingDate"]
@@ -184,11 +189,14 @@ def project(state, data, user, today):
         fields = FINANCE_FIELDS
     else:
         return
+    with_security = {r["id"] for r in state["residents"] if contract_renewal.has_security(r)}
     rows = [
         access_policy.select_fields(row, fields)
         for row in state.get("billingNotices", ())
         if row["residentId"] in visible
         and row["date"] <= today
+        and not (row["residentId"] in with_security and row["date"] == today
+                 and row["kind"] in ("advance", "due"))
         and (not family or row["kind"] != "securityIssue")
     ]
     if not family:
@@ -199,7 +207,7 @@ def project(state, data, user, today):
         }
         for row in rows:
             billed = bills.get((row["residentId"], row["billingDate"]))
-            if billed and not row.get("billId"):
+            if billed and not row.get("billId") and row["kind"] in ("advance", "due", "security"):
                 row["billId"] = billed
     data["billingNotices"] = sorted(
         rows, key=lambda row: (row["date"], row["billingDate"], row["id"]), reverse=True

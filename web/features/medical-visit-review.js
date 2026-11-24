@@ -176,6 +176,12 @@ function visitContent(ctx, record) {
 
 export function visitsFor(ctx, residentId) {
   const records = (ctx.state.medicalVisits || []).filter(row => row.residentId === residentId);
+  const documents = new Map();
+  for (const row of ctx.state.medicalDocuments || []) {
+    if (row.residentId !== residentId || !row.visitId) continue;
+    if (!documents.has(row.visitId)) documents.set(row.visitId, []);
+    documents.get(row.visitId).push(row);
+  }
   const byDate = (a, b) => (b.recordedAt || '').localeCompare(a.recordedAt || '');
   const children = new Map();
   for (const row of records) {
@@ -184,12 +190,44 @@ export function visitsFor(ctx, residentId) {
     children.get(row.parentVisitId).push(row);
   }
   return records.filter(row => !row.parentVisitId).sort((a,b) => b.fields.eventDate.localeCompare(a.fields.eventDate) || byDate(a,b))
-    .map(row => ({...row, supplements: (children.get(row.id) || []).sort(byDate)}));
+    .map(row => ({...row, supplements: (children.get(row.id) || []).sort(byDate),
+      documents: documents.get(row.id) || []}));
 }
 
-function showVisit(ctx, person, record, openEditor) {
+function documentLabel(doc) {
+  return [doc.category, doc.eventDate, doc.source].filter(Boolean).join(' · ');
+}
+
+function encounterLabel(record) {
+  const fields = record.fields;
+  return [fields.eventDate, fields.facility, fields.department, fields.diagnosis || fields.reason]
+    .filter(Boolean).join(' · ');
+}
+
+function documentRows(ctx, docs, onOpen, onLink, reopenVisit) {
+  return node('div', 'medical-visit-document-rows', docs.map(doc => node('article', 'medical-visit-document-row', [
+    node('div', 'fx-named', [
+      node('strong', '', doc.category),
+      node('small', '', [doc.eventDate, doc.source].filter(Boolean).join(' · ')),
+    ]),
+    onOpen ? btn(ctx, doc.summary ? '查看文书与原件' : '查看待核对原件', () => onOpen(ctx, doc, reopenVisit), 'ghost') : null,
+    onLink ? btn(ctx, '选择所属病例', () => onLink(doc)) : null,
+  ])));
+}
+
+function showVisit(ctx, person, record, openEditor, documents = {}) {
   const body = node('article', 'medical-visit-detail');
   body.dataset.visitDetail = person.id;
+  function reopenVisit() {
+    const live = ctx.current?.() || ctx;
+    const current = visitsFor(live, person.id).find(row => row.id === record.id);
+    if (!current) return;
+    const openCase = [...document.querySelectorAll('dialog[data-dossier-visit-id][open]')].find(
+      dialog => dialog.dataset.dossierVisitId === record.id);
+    if (openCase) return;
+    documents.reopen?.(live);
+    showVisit(live, person, current, openEditor, documents);
+  }
   function draw() {
     const live = ctx.current?.() || ctx;
     const current = visitsFor(live, person.id).find(row => row.id === record.id);
@@ -204,20 +242,84 @@ function showVisit(ctx, person, record, openEditor) {
       ]));
     body.replaceChildren(...[
       node('p', 'medical-visit-target', [live.ui.icon('folder', 18), residentLabel(live, person)]),
-      openEditor && canAct(live, 'dossier.confirmVisit')
-        ? node('div', 'medical-visit-actions', btn(live, '补充本次就诊', () => openEditor(live, person, 'ai', record.id))) : null,
+      node('div', 'medical-visit-actions', [
+        openEditor && canAct(live, 'dossier.confirmVisit')
+          ? btn(live, '补充本次就诊', () => openEditor(live, person, 'ai', record.id)) : null,
+        documents.add && canAct(live, 'dossier.document')
+          ? btn(live, '补充医疗文书', () => documents.add(live, person, current, reopenVisit), 'primary') : null,
+      ]),
       visitContent(live, current),
       ...details,
+      current.documents.length ? node('section', 'medical-visit-linked-documents', [
+        node('h3', '', '本次就诊的补充文书'),
+        documentRows(live, current.documents, documents.open, null, reopenVisit),
+      ]) : null,
     ].filter(Boolean));
   }
   body.addEventListener('visit-saved', draw);
   draw();
   const dialog = ctx.detail('就诊病例详情', body);
   dialog.dataset.roundsResidentId = person.id;
+  dialog.dataset.dossierVisitId = record.id;
   return dialog;
 }
 
-export function visitHistory(ctx, person, openEditor) {
+function showUnlinkedDocuments(ctx, person, docs, visits, openEditor, documents) {
+  const body = node('div', 'fx-profile');
+  function chooseVisit(doc) {
+    const live = ctx.current?.() || ctx;
+    const available = visitsFor(live, person.id);
+    const select = node('select', 'fx-input');
+    select.required = true;
+    select.add(new Option('请选择核对过的原就诊', ''));
+    for (const visit of available) select.add(new Option(encounterLabel(visit), visit.id));
+    const error = node('p', 'form-error');
+    error.setAttribute('role', 'alert');
+    const submit = node('button', 'btn btn-primary', '提交关联');
+    submit.type = 'submit';
+    const form = node('form', 'fx-profile', [
+      facts([['医疗文书', documentLabel(doc)]]),
+      node('label', 'field', [node('span', '', '归入就诊病例'), select]),
+      error,
+      node('div', 'dialog-actions', submit),
+    ]);
+    const dialog = live.detail('将历史文书归入病历', form);
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const selected = available.find(visit => visit.id === select.value);
+      if (!selected || submit.disabled) return;
+      submit.disabled = true;
+      try {
+        const saved = await live.command('dossier.linkVisitDocument', {
+          residentId: person.id, documentId: doc.id, visitId: selected.id,
+        }, {
+          title: '确认将历史文书归入病历',
+          fields: [['医疗文书', documentLabel(doc)], ['所属就诊', encounterLabel(selected)]],
+        });
+        if (!saved) {
+          error.textContent = '文书未关联，请核对所选病例后重试。';
+          return;
+        }
+        if (dialog.open) dialog.close();
+        const latest = live.current?.() || live;
+        documents.reopen?.(latest);
+        showVisit(latest, person, selected, openEditor, documents);
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  }
+  if (documents.add && canAct(ctx, 'dossier.linkVisitDocument')) {
+    body.append(node('p', 'fx-muted', visits.length
+      ? '先核对旧原件，再手动选择该文书所属的就诊病例。'
+      : '录入对应的历史就诊病例后，再为这些存量原件选择归属。'));
+  }
+  body.append(documentRows(ctx, docs, documents.open,
+    documents.add && visits.length && canAct(ctx, 'dossier.linkVisitDocument') ? chooseVisit : null));
+  ctx.detail('待归入病历的历史资料', body);
+}
+
+export function visitHistory(ctx, person, openEditor, documents = {}) {
   const panel = node('section', 'medical-visit-history');
   panel.dataset.visitHistory = person.id;
   const search = node('input', 'fx-input');
@@ -235,6 +337,9 @@ export function visitHistory(ctx, person, openEditor) {
       return;
     }
     const rows = visitsFor(live, person.id);
+    const unlinked = (live.state.medicalDocuments || []).filter(doc =>
+      doc.residentId === person.id && !doc.visitId
+    );
     const actions = openEditor && canAct(live, 'dossier.confirmVisit') ? node('div', 'medical-visit-actions', [
       btn(live, '手动录入病例', () => openEditor(live, person, 'manual')),
       btn(live, '上传就诊资料', () => openEditor(live, person, 'ai'), 'primary'),
@@ -247,22 +352,25 @@ export function visitHistory(ctx, person, openEditor) {
     ]);
     renderRows = () => {
       const query = search.value.trim().toLocaleLowerCase();
-      const filtered = rows.filter(row =>
+      const filtered = rows.filter(row => !query ||
         [row, ...row.supplements].some(({fields}) =>
           [fields.eventDate, fields.facility, fields.department, fields.diagnosis, fields.reason]
-            .filter(Boolean).join(' ').toLocaleLowerCase().includes(query))
+            .filter(Boolean).join(' ').toLocaleLowerCase().includes(query)) ||
+        row.documents.some(doc => documentLabel(doc).toLocaleLowerCase().includes(query))
       );
       count.textContent = filtered.length + ' 次';
       const items = filtered.map(row => {
-        const files = row.attachments.length + row.supplements.reduce((n, item) => n + item.attachments.length, 0);
+        const files = row.attachments.length + row.supplements.reduce((n, item) => n + item.attachments.length, 0) +
+          row.documents.filter(doc => doc.hasImage).length;
         return node('article', 'fx-time-row', [
           node('time', '', row.fields.eventDate),
           node('div', 'fx-named', [
             node('strong', '', row.fields.diagnosis || row.fields.reason || '就诊记录'),
             node('small', '', [row.fields.facility, row.fields.department, files + ' 份原件',
-              row.supplements.length ? row.supplements.length + ' 次补充' : ''].filter(Boolean).join(' · ')),
+              row.supplements.length ? row.supplements.length + ' 次补充' : '',
+              row.documents.length ? row.documents.length + ' 份补充文书' : ''].filter(Boolean).join(' · ')),
           ]),
-          btn(live, '查看病例', () => showVisit(live, person, row, openEditor), 'ghost'),
+          btn(live, '查看病例', () => showVisit(live, person, row, openEditor, documents), 'ghost'),
         ]);
       });
       list.replaceChildren(...(items.length ? items : [node('p', 'fx-muted',
@@ -271,6 +379,12 @@ export function visitHistory(ctx, person, openEditor) {
     if (!rows.length) search.value = '';
     searchBar.hidden = !rows.length;
     panel.replaceChildren(header, searchBar, list);
+    if (unlinked.length && documents.open) {
+      panel.append(node('div', 'medical-visit-unlinked', btn(
+        live, '待归入病历的历史资料（' + unlinked.length + '）',
+        () => showUnlinkedDocuments(live, person, unlinked, rows, openEditor, documents), 'ghost',
+      )));
+    }
     renderRows();
   };
   search.addEventListener('input', () => renderRows?.());

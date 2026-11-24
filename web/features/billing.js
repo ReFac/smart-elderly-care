@@ -36,17 +36,20 @@ const billType = (bill) => {
 
 function residentBillingPolicy(ctx, person) {
   const current = person.admissionTerms;
+  const hasSecurity = current.depositMonths > 0;
   return ctx.dialog({
     title: '账单提醒与押金设置',
-    description: residentName(ctx, person.id) + ' · 提前天数填 0 时仅在账单日提醒。已出具的押金账单金额保持原约定。',
-    fields: billingPolicyFields(current),
+    description: residentName(ctx, person.id) + ' · ' + (hasSecurity
+      ? '合同到期或动用押金时提醒。月费账单照常核算。'
+      : '提前天数填 0 时仅在账单日提醒。'),
+    fields: billingPolicyFields(current, { hideReminder: hasSecurity }),
     onSubmit: ({ reminderDays, securityMode }) => ctx.command('ops.residentBillingPolicy', {
-      residentId: person.id, reminderDays: Number(reminderDays), securityMode,
+      residentId: person.id, reminderDays: Number(reminderDays ?? current.reminderDays ?? 3), securityMode,
     }, {
       title: '确认账单提醒与押金设置', target: residentName(ctx, person.id),
       fields: [
-        ['月费提醒', Number(reminderDays) ? '提前 ' + reminderDays + ' 天及账单日' : '账单日'],
-        ['逾期处理', securityMode === 'overdue' ? '可按未用押金余额抵扣，继续提醒' : '按约定提醒'],
+        ['提醒时机', hasSecurity ? '合同到期或动用押金' : Number(reminderDays) ? '提前 ' + reminderDays + ' 天及账单日' : '账单日'],
+        ['逾期处理', securityMode === 'overdue' ? '使用可用押金余额抵扣并提醒' : hasSecurity ? '押金单独保管' : '按约定提醒'],
       ],
     }),
   });
@@ -172,6 +175,8 @@ export function admissionPayment(ctx, residentId) {
 
 export function billDetail(ctx, bill) {
   const monthly = !['trial', 'security'].includes(bill.kind);
+  const payments = ctx.state.payments.filter((p) => p.billId === bill.id);
+  const contractRenewal = bill.contractRenewal;
   const securityUsed = bill.kind === 'security'
     ? ctx.state.payments.filter((payment) => payment.securityBillId === bill.id).reduce((total, p) => total + p.amount, 0) : null;
   const content = node('div', 'fx-profile', [
@@ -194,6 +199,14 @@ export function billDetail(ctx, bill) {
       ['待缴余额', money(bill.balance)],
       ...(securityUsed != null ? [['已用于账单冲抵', money(securityUsed)], ['在账押金余额', money((bill.paid || 0) - securityUsed)]] : []),
     ]),
+    contractRenewal ? section('续住结果', facts([
+      ['续住方式', '缴费到账后自动延长一个月'],
+      ['原合同到期日', contractRenewal.previousEndDate],
+      ['新合同到期日', contractRenewal.endDate],
+      ['办理日期', contractRenewal.date],
+    ])) : null,
+    monthly && !contractRenewal && payments.some((p) => p.securityBillId)
+      ? node('p', 'fx-muted', '本单使用了押金冲抵，续住请按合同和实收情况人工核对。') : null,
     section('全部收费明细',feeLedger(bill)),
     ...(monthly && bill.segments
       ? [
@@ -230,7 +243,7 @@ export function billDetail(ctx, bill) {
     section(
       '核销流水',
       records(
-        ctx.state.payments.filter((p) => p.billId === bill.id),
+        payments,
         (p) => named(p.method + ' · ' + money(p.amount), receiptDescription(p))
       )
     ),
@@ -291,7 +304,9 @@ export function billing(ctx) {
               },
               {
                 label: '状态',
-                view: (b) => badge(ctx, b.status),
+                view: (b) => b.contractRenewal ? node('div', 'fx-named', [
+                  badge(ctx, b.status), node('small', '', '已续住至 ' + b.contractRenewal.endDate),
+                ]) : badge(ctx, b.status),
               },
               {
                 label: '操作',
@@ -316,7 +331,7 @@ export function billing(ctx) {
       })],
       ['orders', '渠道对账', () => channelOrders(ctx)],
       ['reminders', '欠费提醒', () => reminders(ctx)],
-      ['billingNotices', '账单日提醒', () => billingNotices(ctx, (bill) => billDetail(ctx, bill))],
+      ['billingNotices', '账务提醒', () => billingNotices(ctx, (bill) => billDetail(ctx, bill))],
       ['expenses', '支出登记', () => expensePanel(ctx)],
       [
         'deposits',

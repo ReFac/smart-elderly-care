@@ -227,11 +227,15 @@ class CampusTests(unittest.TestCase):
         self.assertNotIn("staffPositions", shared)
 
     def test_document_and_delegated_staff_cannot_cross_branch(self):
+        from test_medical_visits import fixture_visit
+
         main = "r001"
+        visit_id = fixture_visit(self.store, self.owner, main, "2025-02-03")
         self.cmd(
             self.owner,
             "dossier.document",
             residentId=main,
+            visitId=visit_id,
             requestId="legacy",
             eventDate="2025-02-03",
             source="测试门诊",

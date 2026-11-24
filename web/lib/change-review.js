@@ -66,6 +66,7 @@ const titles = {
   'family.read': '签收家属站内简报',
   'dossier.relative': '更新亲属档案',
   'dossier.document': '存档医疗文书',
+  'dossier.linkVisitDocument': '将历史文书归入就诊病例',
   'dossier.ocr': '将原件发送至 DeepSeek OCR',
   'dossier.reviewDocument': '复核医疗文书',
   'dossier.signSummary': '签署病情概括',

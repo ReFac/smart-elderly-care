@@ -75,6 +75,7 @@ PERSON_ACTIONS = {
     "ops.deposit",
     "ops.residentBillingPolicy",
     "dossier.document",
+    "dossier.linkVisitDocument",
     "care.screen",
     "care.refer",
     "dossier.ocr",

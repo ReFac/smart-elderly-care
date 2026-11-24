@@ -39,7 +39,19 @@ def init(db):
     db.execute("""CREATE TABLE IF NOT EXISTS dossier_visit_records(
         id TEXT PRIMARY KEY, resident_id TEXT NOT NULL, group_key TEXT NOT NULL,
         metadata TEXT NOT NULL, UNIQUE(resident_id,group_key))""")
-    for table in ("dossier_visit_originals", "dossier_visit_records"):
+    db.execute("""CREATE TABLE IF NOT EXISTS dossier_visit_documents(
+        document_id TEXT PRIMARY KEY REFERENCES dossier_documents(id),
+        visit_id TEXT NOT NULL REFERENCES dossier_visit_records(id),
+        resident_id TEXT NOT NULL, actor_id TEXT NOT NULL, recorded_at TEXT NOT NULL)""")
+    db.execute("""CREATE INDEX IF NOT EXISTS dossier_visit_documents_resident
+        ON dossier_visit_documents(resident_id,visit_id)""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS dossier_visit_documents_same_chart
+        BEFORE INSERT ON dossier_visit_documents WHEN
+            NOT EXISTS(SELECT 1 FROM dossier_visit_records WHERE id=new.visit_id AND resident_id=new.resident_id
+                AND json_extract(metadata,'$.parentVisitId') IS NULL)
+            OR NOT EXISTS(SELECT 1 FROM dossier_documents WHERE id=new.document_id AND resident_id=new.resident_id)
+        BEGIN SELECT RAISE(ABORT,'文书与原就诊病例必须属于同一位长者'); END""")
+    for table in ("dossier_visit_originals", "dossier_visit_records", "dossier_visit_documents"):
         for op in ("UPDATE", "DELETE"):
             db.execute(f"""CREATE TRIGGER IF NOT EXISTS {table}_no_{op} BEFORE {op}
                 ON {table} BEGIN SELECT RAISE(ABORT,'就诊原件及签认记录不可覆盖'); END""")
@@ -132,6 +144,60 @@ def _root_visit(db, rid, visit_id):
     if not row:
         raise FileNotFoundError("找不到属于这位长者的原就诊记录")
     return json.loads(row[0])
+
+
+def _document_visit(db, state, user, payload):
+    if user["kind"] not in ("staff", "owner"):
+        raise PermissionError("仅在岗经办人员可归档就诊文书")
+    for grant in ("medical", "medical.write"):
+        access.require(user, grant)
+    rid = dossier.text(payload, "residentId", 100, True)
+    campus_access.require_resident(db, user, rid, state)
+    archive_retention.writable(state, rid)
+    visit_id = dossier.text(payload, "visitId", 32)
+    if not re.fullmatch(r"[a-f0-9]{32}", visit_id):
+        raise ValueError("请先选择或新建一条就诊病例，再补充医疗文书")
+    _root_visit(db, rid, visit_id)
+    return rid, visit_id
+
+
+def _attach_document(db, rid, visit_id, document_id, actor, now):
+    if not db.execute(
+        "SELECT 1 FROM dossier_documents WHERE id=? AND resident_id=?", (document_id, rid)
+    ).fetchone():
+        raise FileNotFoundError("找不到属于这位长者的医疗文书")
+    current = db.execute(
+        "SELECT visit_id FROM dossier_visit_documents WHERE document_id=?", (document_id,)
+    ).fetchone()
+    if current:
+        if current[0] != visit_id:
+            raise ValueError("该文书已归入另一条就诊病例，请核对原记录")
+        return False
+    db.execute(
+        "INSERT INTO dossier_visit_documents VALUES(?,?,?,?,?)",
+        (document_id, visit_id, rid, actor["id"], now.isoformat(timespec="seconds")),
+    )
+    return True
+
+
+def archive_document(db, state, payload, user, now):
+    rid, visit_id = _document_visit(db, state, user, payload)
+    details = {key: value for key, value in payload.items() if key != "visitId"}
+    message, document_id = dossier.archive_document(
+        db, state, details, user, now.date().isoformat(), return_id=True
+    )
+    _attach_document(db, rid, visit_id, document_id, user, now)
+    return message + "，归入本次就诊病例"
+
+
+def link_document(db, state, payload, user, now):
+    if set(payload) != {"residentId", "visitId", "documentId"}:
+        raise ValueError("请核对文书及关联就诊病例")
+    rid, visit_id = _document_visit(db, state, user, payload)
+    document_id = dossier.text(payload, "documentId", 32, True)
+    if _attach_document(db, rid, visit_id, document_id, user, now):
+        return "已将历史医疗文书归入所选就诊病例"
+    return "该历史医疗文书已属于所选就诊病例"
 
 
 def _check_supplement_files(db, rid, visit_id, manifests):
@@ -385,6 +451,14 @@ def project(db, data, user):
     data["medicalVisits"] = [
         {"id": did, "residentId": rid, **json.loads(meta)} for did, rid, meta in rows
     ]
+    documents = {row["id"]: row for row in data.get("medicalDocuments", ())}
+    if documents:
+        for document, visit in db.execute(
+            """SELECT document_id,visit_id FROM dossier_visit_documents
+               WHERE document_id IN (SELECT value FROM json_each(?))""",
+            (json.dumps(list(documents)),),
+        ):
+            documents[document]["visitId"] = visit
 
 
 def original(store, token, attachment_id):

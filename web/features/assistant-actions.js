@@ -55,6 +55,7 @@ function pageDestination(ctx, entry) {
     }
     if (/^(?:[1-9]|1[0-2])$/.test(entry.params.capacity)) params.capacity = entry.params.capacity;
     if (/^(?:[1-9]|[12]\d|30)$/.test(entry.params.limit)) params.limit = entry.params.limit;
+    if (['vacant', 'occupied'].includes(entry.params.status)) params.status = entry.params.status;
     if (['layout', 'room'].includes(entry.params.edit) && canAct(ctx, entry.params.edit === 'layout' ? 'facility.setLayout' : 'facility.updateRoom'))
       params.edit = entry.params.edit;
   }
@@ -75,7 +76,8 @@ export function assistantPageLinks(ctx, message) {
   const links = [];
   for (const entry of Array.isArray(message.pageLinks) ? message.pageLinks : []) {
     const link = pageDestination(ctx, entry);
-    if (link && !links.some((item) => item.destination === link.destination && item.tab === link.tab))
+    if (link && !links.some((item) => item.destination === link.destination && item.tab === link.tab &&
+      JSON.stringify(item.params) === JSON.stringify(link.params)))
       links.push(link);
   }
   // Earlier conversations only stored a single navigate action.

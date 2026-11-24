@@ -12,7 +12,7 @@ from .. import access_policy as policy, provider
 from ..provider import deepseek, token_receipt
 from ..store import Conflict, SignedOut
 from . import chat_context as ctx
-from . import chat_navigation, chat_web, react, ward_brief
+from . import chat_navigation, chat_web, react, view_filters, ward_brief
 
 CONTEXT_LIMIT = 100_000
 OUTPUT_LIMIT = 1800
@@ -89,6 +89,18 @@ def messages(db, actor, scope, generation, limit, pages=None, area=None):
     if pages is not None:
         previous = []
         for question, answer in chronological:
+            action = answer["action"] or {}
+            if "filterLinks" in action:
+                # Keep a missing or unauthorized match from becoming an unfiltered page.
+                links = action["filterLinks"] if any(p.route == "beds" for p in pages) else []
+                previous = [
+                    chat_navigation.Page("beds", item["title"], tab="all", params=tuple(item["params"].items()))
+                    for item in links
+                ]
+                answer["pageLinks"] = [entry.link() for entry in previous]
+                if not links and action.get("kind") == "navigate":
+                    answer["action"] = None
+                continue
             previous = (
                 []
                 if answer["webSearched"]
@@ -433,8 +445,15 @@ def reply(store, token, data, *, transport=None, progress=None):
         actions = chat_navigation.navigation_actions(
             permitted_actions(user, routes, text, selected), text, pages
         )
+        requested_filters = view_filters.request(text, page, last["question"] if last else "")
+        if requested_filters is not None:
+            filter_links, open_filtered = (
+                view_filters.resolve(db, state, user, requested_filters, selected)
+                if "beds" in routes else ([], False)
+            )
+            actions = {}
 
-        brief = ward_brief.topic(text) if not actions and user["kind"] in ("owner", "staff") else ""
+        brief = ward_brief.topic(text) if requested_filters is None and not actions and user["kind"] in ("owner", "staff") else ""
         feature = "assistant." + (brief or "chat")
         if actions.get("care") == "medicationRound":
             feature = "assistant.medication"
@@ -446,6 +465,8 @@ def reply(store, token, data, *, transport=None, progress=None):
         def private_body(db, state):
             nonlocal lookup_actions
             facts = ctx.evidence(store, db, user, state, selected, hours, topics)
+            if requested_filters is not None:
+                facts["床位页面筛选结果"] = [entry["title"] for entry in filter_links]
             if brief:
                 lines[:] = ward_brief.phrases(brief, facts)
                 return {
@@ -457,7 +478,7 @@ def reply(store, token, data, *, transport=None, progress=None):
                     ],
                 }
             explicit_lookup = re.search(r"调用工具|用工具|核[对实]最新|查最新|重新查|实时核对|查询工具", topics)
-            if (not actions and not web_enabled and ctx.institution_access(user)
+            if (requested_filters is None and not actions and not web_enabled and ctx.institution_access(user)
                 and (progress is None or explicit_lookup)):
                 lookup_actions = react.chat_actions(facts, read_latest, topics)
             body = build_body(
@@ -489,6 +510,7 @@ def reply(store, token, data, *, transport=None, progress=None):
 
         consider_search = (
             web_enabled
+            and requested_filters is None
             and not brief
             and not chat_navigation.local_question(text)
             and chat_web.eligible(db, state, text, actions)
@@ -620,7 +642,7 @@ def reply(store, token, data, *, transport=None, progress=None):
                 ) from None
         if transport:
             response = transport(key, body)
-        elif progress and not (lookup_actions or brief or actions or sources is not None):
+        elif progress and requested_filters is None and not (lookup_actions or brief or actions or sources is not None):
             response = deepseek.stream(key, body, progress.delta)
         else:
             response = deepseek.send(key, body, timeout=60)
@@ -658,6 +680,17 @@ def reply(store, token, data, *, transport=None, progress=None):
                 "kind": "scheduledMeal", "route": "care", "title": "核对伙食工单", "text": text,
             }
             answer = "请核对长者、餐次和实际吃过的菜品。确认后会更新伙食工单和对应长者的用餐记录。"
+        if requested_filters is not None:
+            action = {"kind": "viewFilters", "filterLinks": filter_links}
+            if open_filtered:
+                action.update(filter_links[0], kind="navigate")
+                answer = "已按条件筛选。正在打开" + filter_links[0]["title"] + "。"
+            elif len(filter_links) == 1:
+                answer = "点击下方入口，即可查看筛选后的" + filter_links[0]["title"] + "。"
+            elif filter_links:
+                answer = "有多个符合条件的范围，请选择要打开的楼栋或楼层。"
+            else:
+                answer = "当前授权范围内没有匹配的筛选条件。请核对院区、楼栋或楼层名称。"
         if sources is not None:
             answer = chat_web.public_response(answer, sources)
             if not answer:

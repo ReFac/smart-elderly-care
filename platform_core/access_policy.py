@@ -176,6 +176,7 @@ ACTION_GRANTS = {
     "ops.report": "reports",
     "dossier.profile": "intake",
     "dossier.document": "medical.write",
+    "dossier.linkVisitDocument": "medical.write",
     "dossier.ocr": "medical.write",
     "dossier.reviewDocument": "medical.write",
     "dossier.confirmVisit": "medical.write",
@@ -298,6 +299,9 @@ def resolve_routes(user):
     return [*routes, "account"]
 
 
+VISIT_DOCUMENT_ACTIONS = ("dossier.document", "dossier.linkVisitDocument")
+
+
 def authorize(user, action, payload, state):
     """Fail closed. Permissions for proposals/reviews include the affected business area."""
     if not user:
@@ -383,6 +387,10 @@ def authorize(user, action, payload, state):
     if action in ("dossier.reviewDocument", "dossier.confirmVisit"):
         require(user, "clinical")
         require(user, "medical")
+    if action in VISIT_DOCUMENT_ACTIONS:
+        if user["kind"] not in ("owner", "staff"):
+            raise PermissionError("仅在岗经办人员可归档就诊文书")
+        require(user, "medical")
     if action in ("dossier.signSummary", "dossier.signHealthIntro"):
         require(user, "clinical")
     if permission == "clinical.rules":
@@ -431,6 +439,8 @@ def allowed_actions(user):
             for a in actions
             if a not in ("dossier.reviewDocument", "dossier.signSummary", "dossier.confirmVisit", "dossier.signHealthIntro")
         ]
+    if user["kind"] not in ("owner", "staff") or not has(user, "medical"):
+        actions = [a for a in actions if a not in VISIT_DOCUMENT_ACTIONS]
     if not has(user, "clinical"):
         actions = [a for a in actions if ACTION_GRANTS.get(a) != "clinical.rules"]
     if not has(user, "care"):
@@ -473,6 +483,8 @@ def can_view_audit(user, action, *, agent_initiator=None, agent_grants=()):
         return has(user, "relatives") and has(user, "family.share")
     if action == "dossier.signHealthIntro":
         return has(user, "medical") and has(user, "clinical")
+    if action in VISIT_DOCUMENT_ACTIONS:
+        return has(user, "medical") and has(user, "medical.write")
     if action.startswith("agent."):
         return (
             action in ACTION_GRANTS

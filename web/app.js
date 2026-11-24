@@ -15,7 +15,7 @@ import { renderFeature } from './features/index.js';
 
 import { selectTab } from './features/shared.js';
 
-import { profile, expiringContracts } from './features/residency.js';
+import { profile, renewalReminders, reopenBedFilter } from './features/residency.js';
 import { dueMedicationCount } from './features/medication-rules.js';
 import { pendingLeadCalls } from './features/leads.js';
 import { residentLabel, residentHref, staffLabel } from './features/people-labels.js';
@@ -160,6 +160,7 @@ function go(destination, tab, onArrival, query) {
   if (tab) selectTab(destination, tab);
   if (query && destination === 'beds') {
     closeMenu();
+    reopenBedFilter();
     const params = new URLSearchParams(query);
     if (tab) params.set('tab', tab);
     window.history.pushState(null, '', '#' + destination + '?' + params);
@@ -249,11 +250,12 @@ function changesReceipt(result) {
   host.append(view);
 }
 
-async function undoRevision(change) {
+async function undoRevision(change, dossierDialog) {
   return submitChange({
     action: 'history.undo',
     url: '/api/history/' + change.revision + '/undo',
     payload: {},
+    dossierDialog,
     review: {
       title: '撤销这次改动',
       target: change.summary,
@@ -271,7 +273,7 @@ async function command(action, payload, options = {}) {
   return submitChange({ action, url: '/api/commands', payload, review: options });
 }
 
-async function submitChange({ action, url, payload, review = {} }) {
+async function submitChange({ action, url, payload, review = {}, dossierDialog }) {
   if (saving || reviewing) {
     toast('请先完成当前改动');
     return false;
@@ -279,6 +281,15 @@ async function submitChange({ action, url, payload, review = {} }) {
   const beforeVersion = review.expectedRevision ?? revision;
   const previousEpoch = epoch;
   const prior = state;
+  function preserveDossier() {
+    if (!dossierDialog?.open || !available('history')) return false;
+    const residentId = dossierDialog.dataset.roundsResidentId;
+    const before = prior.residents.find((r) => r.id === residentId);
+    const after = state.residents.find((r) => r.id === residentId);
+    return before && after && before.bedId === after.bedId && before.status === after.status &&
+      JSON.stringify(prior.user) === JSON.stringify(state.user) &&
+      JSON.stringify(prior.uiSettings.hiddenRoutes) === JSON.stringify(state.uiSettings.hiddenRoutes);
+  }
   let choice;
   if (review.confirmed) choice = { comment: review.comment || '' };
   else {
@@ -309,7 +320,7 @@ async function submitChange({ action, url, payload, review = {} }) {
     if (response.status === 409) {
       if (!(await readState())) return false;
       // A stale form may describe a bed, person or balance that has changed.
-      document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+      if (!preserveDossier()) document.querySelectorAll('dialog[open]').forEach((d) => d.close());
       render();
     }
     if (!response.ok) throw new Error(result.error || '操作未保存');
@@ -318,7 +329,8 @@ async function submitChange({ action, url, payload, review = {} }) {
       return true;
     }
     if (!(await readState())) return true;
-    document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+    const keptDossier = preserveDossier();
+    if (!keptDossier) document.querySelectorAll('dialog[open]').forEach((d) => d.close());
     const effectIds = (result.affected || []).map((r) => r.entityId);
     focusIds = [
       ...new Set([...effectIds, payload.taskId, payload.residentId, payload.id].filter(Boolean)),
@@ -328,17 +340,20 @@ async function submitChange({ action, url, payload, review = {} }) {
       const original = prior.voiceQueue?.find((r) => r.id === payload.proposalId);
       if (original?.taskId) focusIds.unshift(original.taskId);
       destination = ['care', 'completed'];
-    } else if (action === 'history.undo') historyScope.revision = result.revision;
+    } else if (action === 'history.undo' && !dossierDialog) historyScope.revision = result.revision;
     if (destination) {
       selectTab(...destination);
       if (route !== destination[0]) window.history.pushState(null, '', '#' + destination[0]);
     }
     render();
-    if (!review.quiet) changesReceipt(result);
+    if (!review.quiet) {
+      if (keptDossier) toast(result.summary || '改动已保存');
+      else changesReceipt(result);
+    }
     const target = document.querySelector('.change-focus');
-    if (target) target.scrollIntoView({ block: 'nearest' });
+    if (target && !keptDossier) target.scrollIntoView({ block: 'nearest' });
     focusIds = [];
-    return review.returnResult ? result : true;
+    return review.returnResult || keptDossier ? result : true;
   } catch (error) {
     toast(error.message || '连接失败，请刷新后核对记录。');
     return false;
@@ -393,7 +408,7 @@ function moduleLink([id, label, iconName]) {
   if (id === 'family') {
     const unread = state.familyRoundInbox?.messages.filter((m) => !m.readAt).length;
     if (unread) link.append(el('small', 'family-unread', unread + ' 未读'));
-    else if (todayBillingNotices()) link.append(el('small', 'family-unread', '今日缴费提醒'));
+    else if (todayBillingNotices()) link.append(el('small', 'family-unread', '今日账务提醒'));
   }
   if (active) link.append(icon('chevron', 13));
   link.addEventListener('click', closeMenu);
@@ -517,6 +532,11 @@ function todayBillingNotices() {
   return (state.billingNotices || []).filter((row) => row.date === state.today).length;
 }
 
+function pendingRenewals() {
+  return available('residents') && state.allowedActions.includes('care.renew')
+    ? renewalReminders(state.residents).length : 0;
+}
+
 function notices() {
   const list = el('div', 'notice-list');
   const items = [
@@ -529,10 +549,11 @@ function notices() {
       'stock',
     ],
   ];
-  if (state.allowedActions.includes('care.renew'))
+  const renewals = pendingRenewals();
+  if (renewals)
     items.unshift([
       '到期续住',
-      expiringContracts(state.residents, state.today).length,
+      renewals,
       'residents',
       'renew',
     ]);
@@ -578,7 +599,7 @@ function notices() {
   if (available('leads') && pendingLeadCalls(state))
     items.unshift(['意向客户待电话回访', pendingLeadCalls(state), 'leads', 'contacts']);
   if (available('billing') && todayBillingNotices())
-    items.unshift(['今日缴费提醒', todayBillingNotices(), 'billing', 'billingNotices']);
+    items.unshift(['今日账务提醒', todayBillingNotices(), 'billing', 'billingNotices']);
   if (available('inbox')) {
     if (state.roundsNoticeCount)
       items.unshift(['今日巡查提醒', state.roundsNoticeCount, 'inbox', 'rounds']);
@@ -704,6 +725,7 @@ function masthead() {
       hasNewNotice(context()) ||
       myTrialFollowups().length ||
       unresolvedTrials().length ||
+      pendingRenewals() ||
       state.groupActivityDue > 0 ||
       (available('billing') && todayBillingNotices() > 0) ||
       (available('leads') && pendingLeadCalls(state)) ||

@@ -5,6 +5,7 @@ from contextlib import closing
 from datetime import datetime
 import json
 from pathlib import Path
+from uuid import uuid4
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
@@ -16,6 +17,23 @@ from platform_core.store import Store, TIMEZONE, Conflict
 
 PASSWORD = "synthetic-visit-test"
 RID = "r001"
+
+
+def fixture_visit(store, token, resident_id, event_date):
+    draft = visits.preview(store, token, resident_id, {
+        "revision": store.version(token)["revision"],
+        "requestId": "signed-fixture-" + uuid4().hex,
+        "mode": "manual",
+        "fields": {"eventDate": event_date, "reason": "测试用就诊记录"},
+    })
+    store.execute(
+        "dossier.confirmVisit", {
+            "confirmed": True, "fields": draft["fields"], "draftId": draft["draftId"],
+            "residentId": resident_id,
+        },
+        draft["revision"], token,
+    )
+    return draft["draftId"]
 
 
 def png(rgb):
@@ -93,6 +111,62 @@ class MedicalVisitTests(TestCase):
 
     def data(self, token=None):
         return self.store.snapshot(token or self.token)["data"]
+
+    def test_documents_are_supplements_of_a_single_signed_encounter(self):
+        first = fixture_visit(self.store, self.token, RID, self.today)
+        second = fixture_visit(self.store, self.token, RID, "2026-11-20")
+        other = fixture_visit(self.store, self.token, "r002", self.today)
+        document = {
+            "residentId": RID, "requestId": "linked-doc", "eventDate": self.today,
+            "category": "CT", "source": "测试医院", "description": "核对已存档影像",
+            "imageBase64": base64.b64encode(self.raw).decode(),
+        }
+        with self.assertRaisesRegex(ValueError, "请先选择或新建"):
+            self.store.execute("dossier.document", document, self.rev(), self.token)
+        with self.assertRaises(FileNotFoundError):
+            self.store.execute("dossier.document", {**document, "visitId": other}, self.rev(), self.token)
+        self.assertEqual(self.data()["medicalDocuments"], [])
+        signed = next(row for row in self.data()["medicalVisits"] if row["id"] == first)
+        for attempt in range(2):
+            self.store.execute("dossier.document", {
+                **document, "visitId": first, "requestId": f"retry-{attempt}",
+            }, self.rev(), self.token)
+        saved, = self.data()["medicalDocuments"]
+        self.assertEqual(saved["visitId"], first)
+        self.assertEqual(self.store.photo(self.token, saved["id"]), (self.raw, "image/png"))
+        with self.assertRaisesRegex(ValueError, "已归入另一条"):
+            self.store.execute("dossier.linkVisitDocument", {
+                "residentId": RID, "visitId": second, "documentId": saved["id"],
+            }, self.rev(), self.token)
+        self.assertEqual(next(row for row in self.data()["medicalVisits"] if row["id"] == first), signed)
+
+    def test_explicit_legacy_link_keeps_original_and_resident_boundary(self):
+        from platform_core import dossier
+        from platform_core.backups import exchange
+
+        first = fixture_visit(self.store, self.token, RID, self.today)
+        other = fixture_visit(self.store, self.token, "r002", self.today)
+        import_doc = {
+            "residentId": RID, "requestId": "legacy-doc", "eventDate": self.today,
+            "category": "CT", "source": "历史测试医院", "description": "旧系统文书",
+            "imageBase64": base64.b64encode(self.raw).decode(),
+        }
+        with closing(self.store.connect()) as db, db:
+            state = json.loads(db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0])
+            actor = self.store.actor(db, self.token)
+            dossier.archive_document(db, state, import_doc, actor, self.today)
+        before, = self.data()["medicalDocuments"]
+        self.assertNotIn("visitId", before)
+        self.store.backups.capture()
+        point = self.store.backups.status(self.token)["points"][0]["id"]
+        fields = {"residentId": RID, "documentId": before["id"]}
+        with self.assertRaises(FileNotFoundError):
+            self.store.execute("dossier.linkVisitDocument", {**fields, "visitId": other}, self.rev(), self.token)
+        self.store.execute("dossier.linkVisitDocument", {**fields, "visitId": first}, self.rev(), self.token)
+        self.assertEqual(self.data()["medicalDocuments"], [{**before, "visitId": first}])
+        self.assertEqual(self.store.photo(self.token, before["id"]), (self.raw, "image/png"))
+        preview = exchange.preview_point(self.store.backups, self.token, point)
+        self.assertIn("医疗文书与就诊病例关联", preview["blockers"])
 
     def test_manual_stages_originals_then_confirms_once_with_distinct_medication_history(
         self,
