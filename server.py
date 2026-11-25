@@ -185,6 +185,20 @@ class Handler(BaseHTTPRequestHandler):
         return {key: values[0] for key, values in params.items()}
 
     def read_resource(self, path):
+        if path == "/api/system/monitor":
+            from platform_core import system_monitor
+            params = self.query_fields({"view"})
+            return self.send_json(200, system_monitor.inspect(self.store, self.token(), params.get("view"), self.server))
+
+        if path == "/api/finance/subsidies":
+            from platform_core.operations import subsidies
+            params = self.query_fields({"month"})
+            return self.send_json(200, subsidies.read(self.store, self.token(), params.get("month")))
+        subsidy_file = re.fullmatch(r"/api/finance/subsidies/materials/([a-f0-9]{32})", path)
+        if subsidy_file:
+            from platform_core.operations import subsidies
+            raw, mime = subsidies.original(self.store, self.token(), subsidy_file[1])
+            return self.respond(200, raw, mime)
         if path == "/api/auth/passkeys":
             from platform_core import passkeys
 
@@ -1017,7 +1031,7 @@ class Handler(BaseHTTPRequestHandler):
                 elif body["action"] == "access.create":
                     raise ValueError("请登记本人手机号。登录密码由本人设置。")
             if (
-                body.get("action") not in ("dossier.document", "access.staffContract")
+                body.get("action") not in ("dossier.document", "access.staffContract", "ops.subsidyMaterial")
                 and int(self.headers["Content-Length"]) > SMALL_BODY
             ):
                 raise ValueError("普通表单上限为 64 KiB")

@@ -402,7 +402,7 @@ function rulesTable(ctx, data) {
         row.startDate + (row.endDate ? ' 至 ' + row.endDate : ' 起')) },
       { label: '执行范围 / 经办', view: row => node('div', 'scheduled-scope', named(scopeLabel(data, row.scope), row.assignee)) },
       { label: '状态', view: row => badge(ctx, row.enabled ? '已启用' : '已暂停', row.enabled ? 'green' : 'neutral') },
-      { label: '操作', align: 'end', view: row => data.canManage ? choose(
+      { label: '操作', align: 'end', view: row => row.planId ? '在照护计划中调整' : data.canManage ? choose(
         btn(ctx, '编辑', () => editor(ctx, data, row)),
         row.kind === 'meal' ? btn(ctx, '当天餐单', () => editMenu(ctx, data, row)) : null,
         btn(ctx, row.enabled ? '暂停' : '启用', () => ctx.command('care.setScheduleEnabled',

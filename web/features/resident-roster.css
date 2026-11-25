@@ -1,0 +1,121 @@
+.resident-roster {
+  --roster-surface: var(--surface, #fff);
+  --roster-soft: var(--surface-soft, #f5f8fc);
+  gap: 12px;
+}
+.roster-mast, .roster-list, .roster-filters, .resident-record-workspace {
+  min-width: 0;
+}
+.roster-heading, .roster-list-caption, .roster-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.roster-heading { justify-content: space-between; margin-bottom: 12px; }
+.roster-heading h1 { font-size: clamp(1.23rem, 1.6vw, 1.55rem); line-height: 1.25; letter-spacing: -.035em; }
+.roster-metrics {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px;
+  padding: 0; margin: 0;
+}
+.roster-metrics > div {
+  display: grid; align-content: center; gap: 4px; padding: 12px 16px;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: color-mix(in srgb, var(--roster-tint, #3e83c8) 7%, var(--roster-surface));
+  border-inline-start: 3px solid var(--roster-tint, #3e83c8);
+}
+.roster-metrics > :nth-child(2) { --roster-tint: #159288; }
+.roster-metrics > :nth-child(3) { --roster-tint: #58a5c5; }
+.roster-metrics > :nth-child(4) { --roster-tint: #8672b1; }
+.roster-metrics > :nth-child(5) { --roster-tint: #ba8a38; }
+.roster-metrics dt, .roster-field > span { color: var(--muted); font-size: .78rem; font-weight: 550; }
+.roster-metrics dd { display: flex; align-items: baseline; gap: 4px; margin: 0; line-height: 1.2; }
+.roster-metrics strong { color: var(--ink); font-size: 1.55rem; font-variant-numeric: tabular-nums; }
+.roster-metrics small { font-size: .74rem; color: var(--muted); }
+.roster-dossier .roster-mast {
+  padding: 15px 18px; color: white; border-radius: 8px;
+  background: linear-gradient(105deg, #17657c, #12879a 76%, #208da2);
+}
+.roster-dossier .roster-heading h1, .roster-dossier .roster-metrics strong { color: white; }
+.roster-dossier .roster-heading .btn { background: white; color: #155967; border-color: white; }
+.roster-dossier .roster-metrics { gap: 0; }
+.roster-dossier .roster-metrics > div { border: 0; border-radius: 0; padding: 0 14px; background: transparent; }
+.roster-dossier .roster-metrics > div:first-child { padding-inline-start: 0; }
+.roster-dossier .roster-metrics > div + div { border-inline-start: 1px solid #ffffff4d; }
+.roster-dossier .roster-metrics dt, .roster-dossier .roster-metrics small { color: #deeff3; }
+.roster-dossier .roster-metrics strong { font-size: 1.32rem; }
+.roster-list, .roster-filters, .resident-record-workspace {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--roster-surface, var(--surface, #fff));
+}
+.roster-filters {
+  display: grid; grid-template-columns: repeat(4,minmax(92px, 1fr)) minmax(160px, 1.7fr) auto;
+  gap: 10px; align-items: end; padding: 12px 15px;
+}
+.roster-field { display: grid; min-width: 0; gap: 4px; }
+.roster-scopes {display:flex;flex-wrap:wrap;gap:5px;}
+.roster-scopes .btn {border-radius:16px;padding:2px 8px;min-height:25px;}
+.roster-scopes .btn[aria-pressed=true] {color:var(--desk-link);border-color:var(--desk-link);}
+.roster-filters .fx-actions {flex-wrap:nowrap;align-self:end;}
+.roster-pagination {flex-wrap:wrap;gap:8px;}
+.roster-field .fx-input { width: 100%; min-width: 0; height: 34px; min-height: 34px; padding: 4px 8px; }
+.roster-filters > .btn, .roster-pagination .btn, .roster-list-caption .btn { min-height: 32px; padding: 5px 10px; }
+.roster-list { padding-bottom: 7px; overflow: hidden; }
+.roster-list-caption { padding: 12px 15px; }
+.roster-list-caption h2 { font-size: 1.03rem; }
+.roster-count { padding: 1px 8px; border-radius: 12px; font-size: .76rem; color: var(--accent); background: var(--soft); }
+.roster-list-caption .fx-actions { margin-left: auto; }
+.roster-table-wrap { max-width: 100%; overflow-x: auto; }
+.roster-table { width: 100%; border-collapse: collapse; line-height: 1.45; text-align: left; font-size: .84rem; }
+.roster-table th {
+  white-space: nowrap; padding: 9px 8px; font-size: .78rem; font-weight: 650;
+  color: var(--muted); background: var(--roster-soft); border-block: 1px solid var(--line);
+}
+.roster-table td { padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.roster-table td:first-child, .roster-table th:first-child { padding-inline-start: 15px; }
+.roster-table tr:hover td { background: var(--roster-soft); }
+.roster-table input[type=checkbox] { width: 15px; height: 15px; vertical-align: middle; accent-color: var(--accent); }
+.roster-table .fx-named { min-width: 5.3rem; display: grid; gap: 3px; }
+.roster-table .fx-named small, .roster-notes { color: var(--muted); font-size: .75rem; }
+.roster-notes { display: grid; gap: 3px; min-width: 7em; }
+.roster-table .btn-ghost { min-height: 24px; padding: 0 3px; font-size: .78rem; }
+.roster-table .fx-actions, .roster-progress, .roster-risk-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 5px; }
+.roster-table .fx-actions { min-width: 7em; }
+.roster-table .resident-profile-link { color: var(--accent); font-weight: 650; }
+.roster-progress { max-width: 9em; min-width: 6.2em; }
+.roster-progress span, .roster-risk {
+  display: inline-flex; align-items: center; gap: 2px; border-radius: 3px;
+  font-size: .72rem; line-height: 1.3; padding: 2px 4px;
+}
+.roster-progress i { font-style: normal; }
+.roster-done { color: var(--good-text, #176452); background: var(--good-surface, #e2f4ec); }
+.roster-pending { color: var(--muted); background: var(--roster-soft); border: 1px dashed var(--line); }
+.roster-risk { color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); background: var(--soft); }
+.roster-documents { display: grid; gap: 2px; justify-items: start; }
+.roster-empty { margin: 0; padding: 36px 12px; text-align: center; color: var(--muted); }
+.roster-pagination { justify-content: space-between; padding: 10px 15px 4px; font-size: .78rem; }
+.roster-list > .btn { margin-inline-start: 10px; min-height: 25px; font-size: .78rem; }
+.roster-secondary { display: grid; gap: 10px; }
+.roster-credential-list, .roster-risk-list { list-style: none; margin: 0; padding: 0; }
+.roster-credential-list li, .roster-risk-list li { padding: 9px 0; border-bottom: 1px solid var(--line); }
+.roster-credential-list li { display: flex; justify-content: space-between; }
+.resident-record-workspace { padding: 18px; }
+.resident-record-workspace .resident-dossier-nav { top: 10px; }
+.roster-print-frame { position: fixed; width: 1px; height: 1px; border: 0; bottom: 0; right: 0; opacity: 0; pointer-events: none; }
+@media (max-width: 1100px) {
+  .roster-filters { grid-template-columns: repeat(3,minmax(100px, 1fr)); }
+  .roster-filters > .btn { justify-self: start; }
+}
+@media (max-width: 700px) {
+  .roster-metrics { grid-auto-flow: row; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; }
+  .roster-metrics > div { padding: 7px; }
+  .roster-dossier .roster-metrics { row-gap: 9px; }
+  .roster-filters { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .roster-list-caption { padding: 10px; }
+  .roster-table { min-width: 860px; }
+}
+.desk-shell .roster-table td { padding-block: 7px; }
+.desk-shell .roster-table .btn-ghost { min-height: 20px; padding: 1px 3px; }
+.desk-shell .roster-table th { padding-block: 6px; }
+.roster-table .roster-progress { max-width: 12em; min-width: 8em; }

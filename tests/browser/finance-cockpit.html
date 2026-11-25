@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>财务与看板交互验证</title>
+  </head>
+  <body>
+    <main></main>
+    <output>检查中</output>
+    <script type="module">
+      import * as ui from '../../web/lib/ui.js';
+      import { businessDashboard } from '../../web/features/business-dashboard.js';
+      import { operationalOverview } from '../../web/dashboard.js';
+      import { bounds, comparison, metricsSource } from '../../web/features/business-metrics.js';
+      import { billing } from '../../web/features/billing.js';
+      import { assistantCommand, openAssistantAction } from '../../web/features/assistant-actions.js';
+      import { selectTab } from '../../web/features/shared.js';
+      import { formDialog, detail } from '../../web/lib/dialogs.js';
+      const app = document.querySelector('main'),
+        out = document.querySelector('output');
+      const ok = (x, label) => {
+        if (!x) throw Error(label);
+      };
+      const state = {
+        today: '2026-11-25',
+        user: { id: 'test', displayName: '测试经办人' },
+        uiSettings: { institutionName: '测试机构' },
+        chargeCatalog: { categories: { medical: '医疗服务费' }, units: ['笔'] },
+        residents: [
+          { id: 'p', name: '张甲', status: '已退住', admittedAt: '2026-01-01', dischargedAt: '2026-11-24' },
+          { id: 'q', name: '李乙', status: '在住', admittedAt: '2026-11-03', age: 80 },
+        ],
+        bills: [
+          {
+            id: 'paid',
+            residentId: 'p',
+            amount: 300,
+            paid: 300,
+            balance: 0,
+            status: '已结清',
+            month: '2026-11',
+            lineItems: [
+              { code: 'medical', label: '检查费', quantity: 1, unit: '次', unitPrice: 200, amount: 200 },
+              { code: 'care', label: '护理费', amount: 100 },
+            ],
+          },
+          {
+            id: 'owed',
+            residentId: 'q',
+            amount: 150,
+            paid: 0,
+            balance: 150,
+            status: '待交费',
+            month: '2026-11',
+          },
+        ],
+        payments: [
+          {
+            id: 'receipt',
+            billId: 'paid',
+            residentId: 'p',
+            method: '线下登记',
+            amount: 300,
+            feeAmount: 0,
+            date: '2026-11-25',
+          },
+        ],
+        depositEntries: [
+          {
+            id: 'surplus',
+            receiptId: 'receipt',
+            amount: 10,
+            residentId: 'p',
+            date: '2026-11-25',
+            feeAmount: 0,
+          },
+        ],
+        deposits: [{ residentId: 'p', amount: 10 }],
+        tasks: [{ id:'care-1',residentId: 'q', status: '已完成', date:'2026-11-25',completedAt: '2026-11-25', title: '晨间护理' }],
+        allowedActions: ['ops.bill', 'ops.deposit', 'ops.dischargeSettlement'],
+        beds: [],
+      };
+      const requests = [];
+      const base = {
+        name: '张甲',
+        residentId: 'p',
+        admitted: '2026-01-01',
+        eligibleMonth: '2026-02',
+        building: '主楼',
+        buildingId: 'b',
+        floor: '二楼',
+        floorId: 'f',
+        room: '202',
+        roomId: 'r',
+        bed: '202-1',
+        type: '首次申报',
+        missing: [],
+        materials: [],
+        invoiceMonths: [],
+        claim: null,
+      };
+      const ctx = {
+        state,
+        ui,
+        available: () => true,
+        permitted: () => true,
+        toast: () => {},
+        detail,
+        dialog: formDialog,
+        get: async (p) => ({
+          month: '2026-11',
+          revision: 1,
+          canConfigure: true,
+          rules: { minimumDays: 30, invoiceMonths: 0 },
+          rows: [base, { ...base, residentId: 'q', name: '李乙', missing: ['身份证正面'] }],
+        }),
+        command: (...v) => {
+          requests.push(v);
+          return true;
+        },
+        go() {},
+      };
+      function bill(tab) {
+        selectTab('billing', tab);
+        app.replaceChildren(billing(ctx));
+      }
+      function find(b, text) {
+        const el = [...b.querySelectorAll('button')].find((x) => x.textContent === text);
+        if (!el) throw Error('找不到 ' + text);
+        return el;
+      }
+      try {
+        const links = [];
+        const navigator = { ...ctx, go: (...destination) => links.push(destination) };
+        const shortcut = assistantCommand(navigator, {
+          role: 'assistant',
+          action: {
+            kind: 'navigate',
+            route: 'overview',
+            params: { view: 'cockpit', unsupported: 'ignored' },
+          },
+        });
+        openAssistantAction(navigator, shortcut);
+        ok(
+          links[0][0] === 'overview' && JSON.stringify(links[0][3]) === '{"view":"cockpit"}',
+          '助理打开专用运营大屏',
+        );
+        ok(
+          !assistantCommand(
+            { ...ctx, available: () => false },
+            { role: 'assistant', action: { kind: 'navigate', route: 'billing', tab: 'daily' } },
+          ),
+          '财务入口服从当前岗位授权',
+        );
+        const src = metricsSource(state),
+          rng = bounds(state.today, '本月'),
+          m = src.activity(rng);
+        ok(
+          m.gross === 310 && m.visits === 1 && m.census === 1 && m.discharges === 1,
+          '真实实收、已完成照护与退住人数',
+        );
+        ok(
+          JSON.stringify(src.structure(m.incoming)) ===
+            JSON.stringify([
+              ['检查费', 200],
+              ['护理费', 100],
+              ['预缴到账', 10],
+            ]),
+          '准确分类并避免预缴重复计入',
+        );
+        ok(
+          comparison({ start: '2024-03-01', end: '2024-03-31' }, '本月', '较上一周期').end === '2024-02-29',
+          '闰月基期',
+        );
+        const ledger = operationalOverview(ctx);
+        app.replaceChildren(ledger);
+        const picker = ledger.querySelector('[aria-label="运营台账"]');
+        ok(ledger.querySelector('tbody').textContent.includes('receipt'), '实收到款台账按日列出实际凭证');
+        const chooseLedger = (key) => {
+          picker.value = key;
+          picker.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        chooseLedger('unpaid');
+        ok(
+          ledger.querySelector('tbody').rows.length === 1 &&
+            ledger.querySelector('tbody').textContent.includes('owed'),
+          '待收费台账仅列未结款',
+        );
+        chooseLedger('tasks');
+        ok(ledger.querySelector('tbody').textContent.includes('晨间护理'), '工单可按日期查看');
+        const nurseDesk = operationalOverview({
+          ...ctx,
+          available: (r) => r === 'care',
+          permitted: (g) => g === 'care',
+        });
+        ok(
+          !nurseDesk.textContent.includes('实收到款') && !nurseDesk.textContent.includes('receipt'),
+          '护理岗位不显示财务数据',
+        );
+        const notices = [];
+        const stale = operationalOverview({
+          ...ctx,
+          toast: (m) => notices.push(m),
+          current: () => ({
+            ...ctx,
+            state: { ...state, payments: [], depositEntries: [] },
+            toast: (m) => notices.push(m),
+          }),
+        });
+        find(stale, '查看凭证').click();
+        await Promise.resolve();
+        ok(notices.length === 1 && !document.querySelector('dialog[open]'), '已失效流水不可打开');
+        app.replaceChildren(businessDashboard(ctx, () => {}));
+        ok(app.querySelectorAll('.biz-kpi').length === 7, '七项指标');
+        find(app, '今日').click();
+        ok(app.querySelectorAll('.biz-card svg').length === 4, '分项收入和三项趋势');
+        find(app, '查看分期明细').click();
+        ok(document.querySelector('dialog').textContent.includes('2026-11-25'), '能打开分期明细');
+        document.querySelector('dialog').close();
+        bill('unpaid');
+        ok(
+          app.querySelector('tbody').rows.length === 1 &&
+            !app.querySelector('tbody').textContent.includes('张甲'),
+          '待收费只显示未结账单',
+        );
+        find(app, '查看明细').click();
+        ok(document.querySelector('dialog[open]').classList.contains('finance-drawer'), '账单从抽屉打开');
+        document.querySelector('dialog[open]').close();
+        bill('medicalFees');
+        ok(
+          app.querySelector('tbody').textContent.includes('检查费') &&
+            app.querySelector('tbody').rows.length === 1,
+          '独立医疗费用明细',
+        );
+        bill('discharge');
+        find(app, '查看结算').click();
+        let drawer = document.querySelector('dialog[open]');
+        find(drawer, '登记已退款').click();
+        ok(document.querySelector('form input[name=reference]'), '退款凭证表单');
+        document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+        bill('daily');
+        ok(
+          app.querySelector('tbody').rows.length === 1 &&
+            app.querySelector('tbody').textContent.includes('receipt'),
+          '日结到账分组',
+        );
+        app.querySelector('[aria-label=结算日期]').value = '2026-11-23';
+        app.querySelector('[aria-label=结算日期]').dispatchEvent(new Event('change'));
+        ok(app.querySelector('tbody').rows.length === 0, '按日切换');
+        bill('subsidies');
+        await new Promise((r) => setTimeout(r, 1));
+        const table = app.querySelector('.subsidy-grid');
+        ok(table.tBodies[0].rows.length === 2 && !app.querySelector('.fx-kpis'), '申报材料单独显示');
+        app.querySelector('[aria-label=勾选张甲]').click();
+        find(app, '生成申报清单').click();
+        ok(requests.at(-1)[1].residentIds[0] === 'p', '勾选完整材料按人签发');
+        const q = app.querySelector('input[type=search]');
+        q.value = '李';
+        q.dispatchEvent(new Event('input'));
+        ok(
+          app.querySelector('.subsidy-grid tbody').rows.length === 1 && find(app, '生成申报清单').disabled,
+          '过滤筛选清除不可见选项',
+        );
+        out.textContent = 'PASS';
+        document.body.dataset.result = 'pass';
+      } catch (e) {
+        out.textContent = e.stack;
+        document.body.dataset.result = 'fail';
+      }
+    </script>
+  </body>
+</html>

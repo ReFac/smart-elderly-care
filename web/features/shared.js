@@ -1,4 +1,3 @@
-import { routes } from '../lib/navigation.js';
 import { residentLabel, staffLabel } from './people-labels.js';
 export function node(tag, cls, content) {
   const element = document.createElement(tag);
@@ -145,25 +144,21 @@ export function badge(ctx, value, tone) {
 }
 
 export function page(ctx, title, description, actions, ...content) {
-  const meta =
-    routes.get(location.hash.slice(1)) || [...routes.values()].find((r) => r.label === title);
-  const identity = node('div', 'fx-module-mark', ctx.ui.icon(meta?.icon || 'file', 25));
-  const titleBlock = node('div', 'fx-module-title', [
-    meta?.group ? node('div', 'fx-module-group', meta.group) : null,
-    node('h1', '', title)
-  ]);
   const header = node('header', 'fx-module-head', [
-    node('div', 'fx-module-identity', [identity, titleBlock]),
-    actions ? node('div', 'fx-module-actions', actions) : null,
-    description ? node('p', 'fx-module-description', description) : null
+    node('h1', '', title), actions ? node('div', 'fx-module-actions', actions) : null
   ]);
+  if (description) {
+    const info = node('details', 'desk-page-help');
+    add(info, node('summary', '', '说明'), node('p','',description));
+    header.append(info);
+  }
   return node('section', 'fx-page', [header, ...content]);
 }
 
 export function facts(entries) {
   const list = node('dl', 'fx-facts');
   for (const [key, value] of entries)
-    add(list, node('div', '', [node('dt', '', key), node('dd', '', value || '—')]));
+    add(list, node('div', '', [node('dt', '', key), node('dd', '', value == null || value === '' ? '—' : value)]));
   return list;
 }
 
@@ -252,33 +247,33 @@ export function table(
   ctx,
   { title, rows, cols, search, filter, action, empty: empty = '暂无记录' }
 ) {
-  const panel = node('section', 'fx-panel');
-  const toolbar = node('div', 'fx-toolbar');
-  const heading = node('div', 'fx-panel-title', [
-    node('span', 'fx-ledger-icon', ctx.ui.icon('list', 17)),
-    node('h2', '', title)
-  ]);
-  const count = node('span', 'fx-count');
-  heading.append(count);
-  const tools = node('div', 'fx-table-tools');
-  const input = node('input', 'fx-input');
-  input.type = 'search';
+  const panel = node('section','fx-panel');
+  const saved = ctx.workspaceState ? (ctx.workspaceState.tables ||= Object.create(null)) : {};
+  const prefs = saved[title] ||= { q:'', filter:filter?.initial || '', page:0, size:20 };
+  const heading = node('div','fx-panel-title',[node('h2','',title)]);
+  const count = node('span','fx-count'); heading.append(count);
+  const toolbar = node('div','fx-toolbar',[heading,action]);
+  const tools = node('form','fx-table-tools');
+  tools.setAttribute('role','search');
+  const input = node('input','fx-input'); input.type='search';
   input.placeholder = search?.placeholder || '搜索记录';
-  input.setAttribute('aria-label', input.placeholder);
-  const picker = node('select', 'fx-input');
+  input.setAttribute('aria-label',input.placeholder);
+  input.value = prefs.q;
+  const picker = node('select','fx-input');
   if (filter) {
-    picker.setAttribute('aria-label', filter.label || '筛选状态');
     const values = filter.options || [...new Set(rows.map(filter.value).filter(Boolean))];
-    ['', ...values].forEach((value) => {
-      const opt = node('option', '', value || filter.all || '全部状态');
-      opt.value = value;
-      picker.append(opt);
-    });
-    picker.value = filter.initial || '';
+    for (const value of ['',...values]) picker.add(new Option(value || filter.all || '全部状态',value));
+    picker.value = prefs.filter;
   }
-  const searchBox = node('label', 'fx-table-search', [ctx.ui.icon('search', 16), input]);
-  add(tools, search ? searchBox : null, filter ? picker : null);
-  add(toolbar, heading, action);
+  if (search) tools.append(node('label','desk-filter',['关键字',input]));
+  if (filter) tools.append(node('label','desk-filter',[filter.label || '状态',picker]));
+  if (search || filter) {
+    const submit = node('button','btn btn-primary',[ctx.ui.icon('search',14),'搜索']); submit.type='submit';
+    const reset = ctx.ui.button('重置',() => {
+      input.value=''; picker.value=''; prefs.q=''; prefs.filter=''; prefs.page=0; update();
+    },'secondary','refresh');
+    add(tools,submit,reset);
+  }
   const wrap = node('div', 'fx-table-wrap');
   const grid = node('table', 'fx-table');
   const head = node('tr');
@@ -291,44 +286,48 @@ export function table(
   add(grid, node('thead', '', head), body);
   wrap.append(grid);
   const blank = node('div', 'fx-empty');
-  let currentPage = 0;
-  const pageSize = 12;
-  const pagination = node('div', 'fx-pagination');
-  const pageInfo = node('span', 'fx-muted');
-  const previous = btn(ctx, '上一页', () => {
-    currentPage -= 1;
-    update();
-  });
-  const next = btn(ctx, '下一页', () => {
-    currentPage += 1;
-    update();
-  });
-  add(pagination, pageInfo, previous, next);
+  const pagination = node('div','fx-pagination');
+  const pageInfo = node('span','fx-muted');
+  const size = node('select','desk-page-size');
+  size.setAttribute('aria-label','每页条数');
+  for (const n of [20,50,100]) size.add(new Option(n + '条/页',String(n)));
+  size.value = String(prefs.size);
+  size.onchange = () => {prefs.size=Number(size.value); prefs.page=0; update();};
+  const previous = ctx.ui.button('',()=>{prefs.page--; update();},'secondary','left');
+  previous.setAttribute('aria-label','上一页');
+  const next = ctx.ui.button('',()=>{prefs.page++; update();},'secondary','chevron');
+  next.setAttribute('aria-label','下一页');
+  const pageNumber = node('b','desk-page-number');
+  const jump = node('input','desk-page-jump'); jump.type='number'; jump.min=1;
+  jump.setAttribute('aria-label','前往页码');
+  jump.onchange=()=>{prefs.page=(Number(jump.value)||1)-1; update();};
+  add(pagination,pageInfo,size,previous,pageNumber,next,node('label','desk-page-to',['前往',jump,'页']));
   const update = () => {
-    const needle = input.value.trim().toLocaleLowerCase();
+    const needle = prefs.q.trim().normalize('NFKC').toLocaleLowerCase();
     const subset = rows.filter(
       (row) =>
         (!needle ||
           String(search?.value(row) || '')
-            .toLocaleLowerCase()
+            .normalize('NFKC').toLocaleLowerCase()
             .includes(needle)) &&
         (!filter ||
-          !picker.value ||
-          (filter.matches ? filter.matches(row, picker.value) : filter.value(row) === picker.value))
+          !prefs.filter ||
+          (filter.matches ? filter.matches(row, prefs.filter) : filter.value(row) === prefs.filter))
     );
     count.textContent = subset.length + ' 条';
-    const pages = Math.max(1, Math.ceil(subset.length / pageSize));
-    currentPage = Math.min(Math.max(0, currentPage), pages - 1);
+    const pages = Math.max(1,Math.ceil(subset.length/prefs.size));
+    prefs.page = Math.min(Math.max(0,Math.trunc(prefs.page)),pages-1);
     const focus = (ctx.focusIds || []).find((id) => subset.some((row) => row.id === id));
-    if (focus && !panel.isConnected)
-      currentPage = Math.floor(subset.findIndex((row) => row.id === focus) / pageSize);
-    const start = currentPage * pageSize;
-    pagination.hidden = pages === 1;
-    pageInfo.textContent = '第 ' + (currentPage + 1) + ' 页 / 共 ' + pages + ' 页';
-    previous.disabled = currentPage === 0;
-    next.disabled = currentPage === pages - 1;
+    if (focus && !panel.isConnected) prefs.page = Math.floor(subset.findIndex(row=>row.id === focus)/prefs.size);
+    const start = prefs.page * prefs.size;
+    pagination.hidden = !rows.length;
+    pageInfo.textContent='共 ' + subset.length + ' 条';
+    pageNumber.textContent=String(prefs.page+1);
+    pageNumber.title='共 ' + pages + ' 页';
+    jump.max=pages; jump.value=String(prefs.page+1);
+    previous.disabled=prefs.page===0; next.disabled=prefs.page===pages-1;
     body.replaceChildren(
-      ...subset.slice(start, start + pageSize).map((row) =>
+      ...subset.slice(start, start + prefs.size).map((row) =>
         node(
           'tr',
           focus && row.id === focus ? 'change-focus' : '',
@@ -343,18 +342,18 @@ export function table(
     blank.hidden = Boolean(subset.length);
     blank.textContent = rows.length ? '没有匹配的记录' : empty;
   };
-  function resetPage() {
-    currentPage = 0;
-    update();
-  }
-  input.addEventListener('input', resetPage);
-  picker.addEventListener('change', resetPage);
-  add(panel, toolbar, tools.childElementCount ? tools : null, wrap, blank, pagination);
+  tools.onsubmit = (event) => {
+    event.preventDefault(); prefs.page=0; prefs.q=input.value.trim();
+    prefs.filter=picker.value; update();
+  };
+  add(panel, tools.childElementCount ? tools : null, toolbar, wrap, blank, pagination);
   update();
   return panel;
 }
 
 const selectedTabs = new Map();
+
+export function resetSelectedTabs() { selectedTabs.clear(); }
 
 export function selectTab(route, key) {
   selectedTabs.set(route, key);
@@ -368,6 +367,7 @@ export function tabs(route, choices) {
   let selected = selectedTabs.get(route);
   if (!choices.some((item) => item[0] === selected)) selected = choices[0][0];
   const buttons = node('div', 'fx-tabs');
+  buttons.dataset.route = route;
   buttons.setAttribute('aria-label', '工作视图');
   const body = node('div', 'fx-tab-body');
   buttons.setAttribute('role', 'tablist');
@@ -386,6 +386,7 @@ export function tabs(route, choices) {
     const button = node('button', '', label);
     button.type = 'button';
     button.dataset.key = key;
+    button.dataset.label = label;
     button.setAttribute('role', 'tab');
     button.addEventListener('keydown', (event) => {
       const items = Array.from(buttons.children),
@@ -401,7 +402,10 @@ export function tabs(route, choices) {
       items[destination].click();
       items[destination].focus();
     });
-    button.addEventListener('click', () => show(key));
+    button.addEventListener('click', () => {
+      const nav = new CustomEvent('desk:view', {bubbles:true,cancelable:true,detail:{route,key,label}});
+      if (button.dispatchEvent(nav)) show(key);
+    });
     buttons.append(button);
   }
   show(selected);

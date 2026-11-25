@@ -1,4 +1,5 @@
 import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
+import { monitors, monitorPage } from './system-monitor.js';
 import { backupPanel } from './backups.js';
 import { roundsSettings } from './rounds-desk.js';
 import { passwordFlow, sendPasswordReset } from './identity.js';
@@ -7,7 +8,7 @@ import { passkeyButton, passkeySignIn } from './passkeys.js';
 import { openDossier } from './dossier.js';
 import { openEmployment } from './staff-employment.js';
 import { icon } from '../lib/ui.js';
-import { node, page, table, choose, btn, link, badge, named, section, facts, tabs } from './shared.js';
+import { node, page, table, choose, btn, link, badge, named, section, facts, tabs, currentTab } from './shared.js';
 import { routes } from '../lib/navigation.js';
 import { capabilitySummary, draftPreview, grantPicker } from './access-grants.js';
 import { trialSettings } from './trial-stays.js';
@@ -92,63 +93,17 @@ function registerSignatureName(ctx, account) {
   });
 }
 
-function careFlowFigure() {
-  const figure = node('figure', 'access-flow');
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 480 225');
-  svg.setAttribute('aria-hidden', 'true');
-  // An isometric record, plan and receipt share a line of evidence.
-  svg.innerHTML = `<defs>
-    <linearGradient id="sheetTop" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#649cff"/><stop offset="1" stop-color="#244faa"/></linearGradient>
-    <linearGradient id="sheetMid"><stop stop-color="#2351ab"/><stop offset="1" stop-color="#4385eb"/></linearGradient>
-    <pattern id="careGrid" width="22" height="22" patternUnits="userSpaceOnUse" patternTransform="matrix(1 -.47 .94 .46 0 0)"><path d="M22 0H0v22" fill="none" stroke="#afcaff" opacity=".23" stroke-width="1"/></pattern>
-  </defs>
-  <g stroke-linejoin="round" stroke-width="1.3">
-    <path d="m14 150 125-62 149 66-126 61z" fill="url(#careGrid)" stroke="#7494c7" stroke-dasharray="3 6" opacity=".65"/>
-    <path d="m27 123 115-53 127 55v9l-115 54-127-55z" fill="#24468b" stroke="#6e9cd8"/>
-    <path d="m27 123 115-53 127 55-115 55z" fill="#254f9d" stroke="#70a4f1"/>
-    <path d="m27 97 115-53 127 55v9l-115 54-127-55z" fill="#2466b5" stroke="#91c0fb"/>
-    <path d="m27 97 115-53 127 55-115 55z" fill="url(#sheetMid)" stroke="#96c2ff"/>
-    <path d="m27 68 115-53 127 55v10l-115 54-127-55z" fill="#27498b" stroke="#aecfff"/>
-    <path d="m27 68 115-53 127 55-115 55z" fill="url(#sheetTop)" stroke="#cfdeff"/>
-    <g transform="matrix(.91,-.42,.98,.42,65,67)" fill="none" stroke="#d5e5ff" stroke-linecap="round">
-      <rect x="0" y="0" width="84" height="82" rx="6" fill="#315da4" fill-opacity=".54"/>
-      <path d="M11 57h60m-60 10h38" stroke-width="3.4"/>
-      <path d="M36 9h13v11h11v13H49v11H36V33H25V20h11z" fill="#dcecff" stroke="none"/>
-    </g>
-    <g fill="none" stroke="#8db4f6"><path d="m243 58 33-19h51"/><path d="m256 104 24-12h47"/><path d="m247 143 35 15h45"/></g>
-    <g fill="#eabb6e"><circle cx="243" cy="58" r="3"/><circle cx="256" cy="104" r="3"/><circle cx="247" cy="143" r="3"/></g>
-  </g>
-  <g fill="#edf2ff" font-size="17" font-family="sans-serif"><text x="342" y="45">长辈档案</text><text x="342" y="98">照护工单</text><text x="342" y="164">执行留痕</text></g>`;
-  figure.setAttribute('aria-label', '照护流程：由长辈档案形成照护工单，执行后留存记录。');
-  figure.append(svg);
-  return figure;
-}
-
 export function loginScreen(onLogin, branding = {}, onPasskey = null) {
-  const main = node('main', 'access-login');
-  const hero = node('section', 'access-login-hero');
-  const mark = node('img', 'access-logo');
-  mark.src = '/assets/mark.svg';
-  mark.alt = '';
-  hero.append(
-    node('div', 'access-brand', [mark, node('strong', '', branding.brandName || '医养管理平台')]),
-  );
-  const product = node('div', 'access-product');
-  product.append(
-    node('span', 'access-edition', branding.institutionName || '养老机构'),
-    node('h1', '', branding.brandName || '医养管理平台'),
-    careFlowFigure(),
-  );
-  hero.append(product);
-
-  const entry = node('section', 'access-login-entry'),
-    panel = node('div', 'access-login-panel');
-  panel.append(
-    node('span', 'access-login-icon', icon('shield', 25)),
-    node('h2', '', '登录工作台'),
-    node('p', 'access-login-intro', '员工、家属与已注册访客可使用自己的账号登录。'),
-  );
+  const main = node('main', 'desk-sign-in');
+  const brand = node('a','desk-sign-in-brand');
+  brand.href='/visit';
+  const mark=node('img'); mark.src='/assets/desk-mark.svg'; mark.alt='';
+  brand.append(mark,node('strong','',branding.brandName || '医养管理平台'));
+  const mast = node('header','desk-public-mast',brand);
+  const entry = node('section', 'desk-sign-in-entry');
+  const panel = node('div', 'desk-sign-in-panel');
+  panel.append(node('h1','','登录工作台'),
+    node('p','desk-sign-in-org',branding.institutionName || '养老机构'));
   const form = node('form', 'access-form access-login-form');
   const [nameRow, name] = inputField('登录账号', 'username', '', {
     autocomplete: 'username',
@@ -194,9 +149,11 @@ export function loginScreen(onLogin, branding = {}, onPasskey = null) {
   if (onPasskey) panel.append(passkeyButton('用通行密钥登录', () => passkeySignIn(onPasskey)));
   const register = node('a', 'access-visitor-link', [icon('people', 18), node('strong', '', '免手机号注册访客账号'), icon('chevron', 16)]);
   register.href = '/visitor-register.html';
-  panel.append(recover, help, register, visit, faq, colorModeControl());
-  entry.append(panel);
-  main.append(hero, entry);
+  const links = node('nav','desk-sign-in-links',[register,visit,faq]);
+  panel.append(recover,help,links);
+  const preference = node('footer','desk-sign-in-preference',colorModeControl());
+  entry.append(panel,preference);
+  main.append(mast,entry);
   return main;
 }
 
@@ -388,46 +345,19 @@ function status(ctx, row) {
 }
 
 function roleTemplates(ctx) {
-  const icons = { 院长: 'building', 护士: 'pulse', 护工: 'people', 财务: 'wallet', 自定义: 'list' };
-  const panel = node('section', 'access-templates');
-  panel.append(node('h2', '', '岗位模板'));
-  const cards = node('div', 'access-template-list');
-  for (const [role, permissions] of Object.entries(ctx.state.rolePresets)) {
-    const card = node('button', 'access-template');
-    card.type = 'button';
-    card.append(
-      node('span', 'access-template-icon', icon(icons[role] || 'people', 19)),
-      node('strong', '', role),
-      node('small', '', permissions.length + ' 项授权'),
-    );
-    card.addEventListener('click', () => {
-      const content = node('section', 'access-template-detail');
-      if (permissions.length)
-        content.append(
-          node(
-            'ul',
-            'access-grant-list',
-            permissions.map((key) => node('li', '', ctx.state.permissionOptions[key])),
-          ),
-        );
-      else content.append(node('p', 'access-login-intro', '从空权限开始勾选。'));
-      const detail = ctx.detail(role + ' · 岗位模板', content);
-      content.append(
-        btn(
-          ctx,
-          '按此模板新增员工',
-          () => {
-            detail.close();
-            editAccount(ctx, 'staff', null, role);
-          },
-          'primary',
-        ),
-      );
-    });
-    cards.append(card);
-  }
-  panel.append(cards);
-  return panel;
+  const rows = Object.entries(ctx.state.rolePresets).map(([role,permissions])=>({role,permissions}));
+  return table(ctx,{title:'岗位权限模板',rows,
+    cols:[
+      {label:'岗位',view:r=>r.role},
+      {label:'权限数',view:r=>r.permissions.length},
+      {label:'权限范围',view:r=>r.permissions.slice(0,4).map(k=>ctx.state.permissionOptions[k]).join('、') || '自定义'},
+      {label:'操作',align:'end',view:r=>choose(
+        link(ctx,'查看',()=>ctx.detail(r.role+' · 岗位权限',r.permissions.length
+          ? node('ul','access-grant-list',r.permissions.map(k=>node('li','',ctx.state.permissionOptions[k])))
+          : node('p','','可在新增员工时选择权限。'))),
+        link(ctx,'按模板新增员工',()=>editAccount(ctx,'staff',null,r.role)))},
+    ],
+  });
 }
 
 function accounts(ctx) {
@@ -601,12 +531,12 @@ function accounts(ctx) {
         : null,
       btn(ctx, '新增员工', () => editAccount(ctx, 'staff'), 'primary'),
     ),
-    isOwner
-      ? tabs('access', categories.map(([key, label, rows, stay]) => [
-          key, `${label} (${rows.length})`, () => directory(label, rows, stay),
-        ]))
-      : directory('可管理员工', state.accounts, false),
-    roleTemplates(ctx),
+    tabs('access', [
+      ...(isOwner ? categories.map(([key,label,rows,stay])=>[
+        key, label, ()=>directory(label,rows,stay),
+      ]) : [['all','可管理员工',()=>directory('可管理员工',state.accounts,false)]]),
+      ['templates','岗位权限模板',()=>roleTemplates(ctx)],
+    ]),
   );
   management.classList.add('access-management');
   return management;
@@ -623,7 +553,7 @@ function settings(ctx) {
   const [themeRow, theme] = selectField(
     '界面配色',
     [
-      ['forest', '海军蓝 · 暖金'],
+      ['forest', '标准蓝'],
       ['ocean', '海蓝'],
       ['plum', '紫蓝'],
     ],
@@ -686,7 +616,6 @@ function settings(ctx) {
       ['公开搜索', `已计费 ${config.webSearch?.calls || 0} 次，待核对 ${config.webSearch?.pending || 0} 次`],
       ['有效期至', config.expiresOn || '—'],
     ]),
-    btn(ctx, '查看 AI 用量', () => ctx.go('settings', 'deepseekUsage'), 'primary'),
     node('p', 'fx-muted', '云端规划按机构另购套餐启用。开通、续期与额度调整由平台运营方办理。'),
   ]);
   if (config.media) {
@@ -714,9 +643,10 @@ function settings(ctx) {
     ctx,
     '机构设置',
     '管理界面、AI 套餐、机构数据备份和版本更新。',
-    null,
+    btn(ctx,'查看 AI 用量',()=>ctx.go('settings','deepseekUsage')),
     tabs('settings', [
-      ['general', '界面与 AI 套餐', () => node('div', 'access-settings-grid', [appearance, deep])],
+      ['general', '机构界面', () => appearance],
+      ['providerPlan','AI 套餐与识别服务',()=>deep],
       ['deepseekUsage', 'AI 用量', () => providerUsage(ctx)],
       ['trials', '试住约定', () => trialSettings(ctx)],
       ['rounds', '定时巡查', () => roundsSettings(ctx)],
@@ -731,7 +661,7 @@ function settings(ctx) {
 export function renderAccess(route, ctx) {
   if (route === 'settings')
     return ctx.state.user?.kind === 'owner'
-      ? settings(ctx)
+      ? (monitors.some(([id])=>id===currentTab('settings')) ? monitorPage(ctx,currentTab('settings')) : settings(ctx))
       : ctx.ui.empty('机构设置需要 Owner 权限');
   return ctx.state.accessManagement ? accounts(ctx) : ctx.ui.empty('当前账号未获人员管理权限');
 }

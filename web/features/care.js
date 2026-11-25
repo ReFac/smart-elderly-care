@@ -1,6 +1,7 @@
 import { openScheduledMeal } from './scheduled-meals.js';
 import { scheduledWork } from './scheduled-work.js';
 import { medicationRoundDesk } from './med-rounds.js';
+import { receivingDesk } from './medication-receiving.js';
 import { residentAnchor, staffLabel } from './people-labels.js';
 import { careTimeline } from './care-timeline.js';
 import { openExamMedications } from './medication-reports.js';
@@ -32,12 +33,14 @@ import {
   nextDay,
 } from './shared.js';
 import { scaleForm, evaluationDetails } from './assessment-scale.js';
+import { openCarePlan } from './care-plan-editor.js';
+import { riskDesk } from './risk-reports.js';
 import { followups, referrals } from './care-pathway.js';
 import { medicationReminders, drugRules } from './medication-rules.js';
 import { levels } from './residency.js';
-import { handovers } from './handovers.js';
+import { createHandover, handovers, showHandover } from './handovers.js';
 import { groupActivities } from './group-activities.js';
-import { assessmentStages, healthDesk } from './care-workbench.js';
+import { assessmentStages, healthDesk, ledgerDigest } from './care-workbench.js';
 
 const personSearch = (ctx, extra) => ({
   placeholder: '搜索长辈或记录',
@@ -122,29 +125,14 @@ export function assessments(ctx) {
     });
   }
   function approve(plan) {
-    runForm(ctx, {
-      title: '复核照护计划',
-      action: 'care.approvePlan',
-      description:
-        residentName(ctx, plan.residentId) +
-        ' · ' +
-        plan.title +
-        ' · ' +
-        plan.note +
-        '。待派工：' +
-        (plan.items || ['执行个体照护计划']).join('、') +
-        '。责任人：' +
-        staffLabel(ctx, plan.assignee, plan.assigneeId) +
-        '（' +
-        (plan.assignmentSource || '人工指定') +
-        '）。',
-      fields: [],
-      map: (v) => ({
-        ...v,
-        planId: plan.id,
-      }),
-      submitLabel: '确认并派发',
-    });
+    const items = plan.serviceItems;
+    const specs = items ? items.map(r=>[r.title, r.enabled ? [
+      {once:'仅一次',daily:'每日',weekly:'每周'+['一','二','三','四','五','六','日'][r.weekday-1]}[r.period],
+      r.count+' 次',r.times.length?r.times.join('、'):'不指定时点',r.assignee,r.roles.join('、'),
+    ].join(' · ') : '停用']) : (plan.items||['执行个体照护计划']).map(title=>[title,'仅一次 · 09:00 · '+plan.assignee]);
+    ctx.dialog({title:'复核照护计划',fields:[],description:residentName(ctx,plan.residentId)+' · '+plan.note,
+      content:section('确认执行安排',facts(specs)),submitLabel:'确认并派发',
+      onSubmit:()=>ctx.command('care.approvePlan',{planId:plan.id},{title:'审核照护计划并派发',target:plan.title,fields:specs})});
   }
   const evaluationList = () =>
     table(ctx, {
@@ -262,26 +250,16 @@ export function assessments(ctx) {
         {
           label: '操作',
           align: 'end',
-          view: (r) =>
-            r.status === '待复核'
-              ? link(ctx, '复核派发', () => approve(r))
-              : link(ctx, '查看', () =>
-                  ctx.detail('个性化照护方案', node('div', 'fx-profile', [
-                    facts([
-                      ['长辈', residentName(ctx, r.residentId)],
-                      ['计划', r.title],
-                      ['内容', r.note],
-                      ['负责人员', staffLabel(ctx, r.assignee, r.assigneeId)],
-                      ['匹配依据', r.assignmentSource || '人工指定'],
-                      ['状态', r.status],
-                      ['复核人', staffLabel(ctx, r.reviewer)],
-                      ['派发日期', r.reviewedAt],
-                      ['复评日期', r.reviewDate],
-                    ]),
-                    section('照护项目', records(r.items || ['执行个体照护计划'], (item) => item)),
-                    link(ctx, '查看已派发照护工单', () => ctx.go('care','tasks')),
-                  ]))
-                ),
+          view: (r) => choose(
+            canAct(ctx,'care.revisePlan') ? link(ctx, r.supersededBy ? '查看历史方案' : '调整计划', () => openCarePlan(ctx,r)) : null,
+            r.status === '待复核' && canAct(ctx,'care.approvePlan') ? link(ctx,'复核派发',()=>approve(r)) :
+              link(ctx,'计划详情',()=>ctx.detail('个性化照护方案',node('div','fx-profile',[
+                facts([['计划',r.title],['状态',r.supersededBy?'已被后续方案替代':r.status],['说明',r.note],
+                  ['复核人',staffLabel(ctx,r.reviewer)],['复评日期',r.reviewDate]]),
+                section('照护项目',records(r.items||['执行个体照护计划'],item=>item)),
+                link(ctx,'查看已派发照护工单',()=>ctx.go('care','tasks')),
+              ])))
+          ),
         },
       ],
     });
@@ -303,6 +281,7 @@ export function assessments(ctx) {
       ['grading', '等级判定', grading],
       ['plans', '照护计划', plans],
       ['review', '复评安排', reviews],
+      ...(hasGrant(ctx,'clinical') ? [['risk','专项风险档案',()=>riskDesk(ctx)]] : []),
     ])
   );
 }
@@ -423,39 +402,76 @@ function serviceProof(ctx, id) {
   );
 }
 
+function taskActionsAllowed(ctx, row) {
+  const actor = ctx.state.user;
+  const assignments = actor.role === '自定义' ? actor.staffDuties || [] : [actor.role];
+  return row.status === '待执行' && row.date <= today(ctx) && canAct(ctx,'care.completeTask') &&
+    (!row.allowedRoles?.length || actor.kind === 'owner' || assignments.some(a=>row.allowedRoles.includes(a)));
+}
+
+function taskSource(row) {
+  if (row.planId) return '照护计划';
+  if (row.occurrenceId) return '定时工单';
+  if (row.assistantActionId) return '健康助理';
+  return row.source || '照护工单';
+}
+
+export function taskDetail(ctx, row) {
+  const body = node('div', 'fx-profile', [
+    node('div', 'care-record-heading', [
+      node('div', '', [node('small','',taskSource(row)), node('h2','',row.title)]),
+      badge(ctx,row.status),
+    ]),
+    section('任务安排', facts([
+      ['服务对象', residentAnchor(ctx, row.residentId)],
+      ['服务类型', row.kind], ['计划执行', [row.date,row.time || '当日安排'].join(' ')],
+      ['执行人员', staffLabel(ctx,row.assignee,row.assigneeId)],
+      ['可执行岗位或职责', row.allowedRoles?.length ? row.allowedRoles.join('、') : '具备照护执行权限的人员'],
+      ['工单编号', row.id],
+    ])),
+    section('执行说明',node('p','',row.note || '暂无补充说明')),
+    row.cancellationReason ? section('终止原因',node('p','',row.cancellationReason)) : null,
+  ]);
+  const dialog = ctx.detail('照护工单详情',body);
+  dialog.dataset.roundsResidentId = row.residentId;
+  dialog.classList.add('care-record-drawer','desk-detail-drawer');
+  if (taskActionsAllowed(ctx,row)) body.append(btn(ctx, row.mealKind ? '核对实际进食' : '登记执行', () => {
+    dialog.close();
+    completeTask(ctx,row);
+  },'primary'));
+}
+
 function taskHistory(ctx) {
-  const rows = ctx.state.tasks
-    .filter((r) => r.status !== '已完成')
-    .sort(
-      (a, b) =>
-        Number(b.date === today(ctx)) - Number(a.date === today(ctx)) ||
-        b.date.localeCompare(a.date) ||
-        a.time.localeCompare(b.time),
-    );
-  return table(ctx, {
-    title: '待办工单',
-    rows,
-    search: personSearch(ctx, (r) => r.title + ' ' + r.assignee),
-    filter: statusFilter,
-    cols: [
-      { label: '任务', view: (r) => named(r.title, r.kind) },
-      personCol(ctx),
-      { label: '计划时间', view: (r) => named(r.time, r.date) },
-      { label: '责任人', view: (r) => staffLabel(ctx, r.assignee, r.assigneeId) },
-      { label: '状态', view: (r) => r.cancellationReason ? named(r.status, r.cancellationReason) : badge(ctx, r.status) },
-      {
-        label: '操作',
-        align: 'end',
-        view: (r) =>
-          r.status === '待执行'
-            ? r.date > today(ctx)
-              ? '未到执行日'
-              : link(ctx, '登记执行', () => completeTask(ctx, r))
-            : '—',
-      },
-    ],
-    empty: '没有符合条件的待办工单。',
-  });
+  const day = today(ctx);
+  const rows = ctx.state.tasks.filter(r => r.status !== '已完成').sort((a,b) =>
+    Number(b.status==='待执行') - Number(a.status==='待执行') ||
+    a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
+  const active = rows.filter(r => r.status === '待执行');
+  const mine = r => r.assigneeId ? r.assigneeId === ctx.state.user.id : r.assignee === ctx.state.user.displayName;
+  return node('div','care-register',[
+    ledgerDigest([['今日待执行',active.filter(r=>r.date===day).length],
+      ['往日未完成',active.filter(r=>r.date<day).length],
+      ['分派给我',active.filter(mine).length],
+      ['以后执行',active.filter(r=>r.date>day).length]]),
+    table(ctx, {
+      title: '待办工单', rows,
+      search: personSearch(ctx, r => [r.title,r.assignee,r.kind,r.id,taskSource(r)].join(' ')),
+      filter: {label:'工单范围',all:'全部工单',options:['今日待执行','往日未完成','分派给我',...new Set(rows.map(r=>r.status))],
+        matches:(r,s)=>s==='今日待执行' ? r.status==='待执行'&&r.date===day : s==='往日未完成' ?
+          r.status==='待执行'&&r.date<day : s==='分派给我' ? mine(r) : r.status===s},
+      cols: [
+        { label: '任务', view: r => named(r.title,r.kind) }, personCol(ctx),
+        { label: '工单来源', view: taskSource },
+        { label: '计划执行', view: r => named(r.date, r.time || '当日安排') },
+        { label: '执行人员', view: r => staffLabel(ctx, r.assignee,r.assigneeId) },
+        { label: '进度', view: r => badge(ctx,r.status==='待执行'&&r.date<day ? '逾期待执行' : r.status) },
+        { label: '操作', align:'end', view: r => choose(
+          link(ctx,'工单详情',()=>taskDetail(ctx,r)),
+          taskActionsAllowed(ctx,r) ? link(ctx,'登记执行',()=>completeTask(ctx,r)) : null) },
+      ],
+      empty:'没有符合条件的待办工单。',
+    }),
+  ]);
 }
 
 export function vitalForm(ctx) {
@@ -570,6 +586,10 @@ export function care(ctx) {
         vitalForm: () => vitalForm(ctx),
         inspectVital: (row) => vitalDetail(ctx, row),
         resolveVital: (row) => resolveVital(ctx, row),
+        inspectTask: row => taskDetail(ctx, row),
+        createHandover: button => createHandover(ctx, button),
+        showHandover: row => showHandover(ctx, row),
+        openOrder: row => medicationWork(ctx).detail(row),
       })]] : []),
       ...(canAct(ctx, 'care.completeTask') ? [
         ['tasks', '照护工单', () => taskHistory(ctx)],
@@ -614,10 +634,10 @@ export function medicationForm(ctx) {
   });
 }
 
-export function medications(ctx) {
+export function medicationWork(ctx) {
   const warnings = (row) => row.warnings || [];
   function detail(row) {
-    ctx.detail('医嘱、核查与执行凭证', node('div', 'fx-profile', [
+    const body = node('div', 'fx-profile', [
       facts([
         ['长辈', residentAnchor(ctx, row.residentId)],
         ['药品', row.name],
@@ -635,7 +655,14 @@ export function medications(ctx) {
       section('核查历史', records(row.reviews || [], (entry) =>
         named([entry.date, staffLabel(ctx, entry.reviewer)].filter(Boolean).join(' · '),
           [...(entry.warnings || []), entry.note].filter(Boolean).join(' · ')))),
-    ]));
+    ]);
+    const dialog = ctx.detail('医嘱、核查与执行凭证',body);
+    dialog.dataset.roundsResidentId = row.residentId;
+    dialog.classList.add('care-record-drawer','desk-detail-drawer');
+    if (row.status === '待复核' && canAct(ctx,'care.reviewMedication'))
+      body.append(btn(ctx,'复核用药计划',()=>{dialog.close();review(row);},'primary'));
+    if (row.status === '待执行' && canAct(ctx,'care.giveMedication'))
+      body.append(btn(ctx,'登记给药执行',()=>{dialog.close();execute(row);},'primary'));
   }
   function review(r) {
     runForm(ctx, {
@@ -679,6 +706,11 @@ export function medications(ctx) {
       submitLabel: '确认执行',
     });
   }
+  return { warnings, detail, review, execute };
+}
+
+export function medications(ctx) {
+  const { warnings, detail, review, execute } = medicationWork(ctx);
   const orderAction = (row) => choose(
     link(ctx, '查看医嘱凭证', () => detail(row)),
     row.status === '待复核' && canAct(ctx, 'care.reviewMedication')
@@ -730,6 +762,7 @@ export function medications(ctx) {
           }),
       ],
       ['reminders', '定时提醒', () => medicationReminders(ctx, execute)],
+      ['receiving', '药品接收登记', () => receivingDesk(ctx)],
       ['safety', '筛查提醒', () => table(ctx, {
         title: '过敏、重复用药与配伍提醒',
         rows: byRecent(ctx.state.medications).filter((row) => warnings(row).length ||

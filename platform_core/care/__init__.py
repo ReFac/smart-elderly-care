@@ -20,9 +20,10 @@ from .pathways import (
     referral_consent,
     export_referral,
 )
-from . import scales
+from . import plan_items, scales
 from .plans import add_task, approve_plan, assess, complete_task, quality
 from .records import LEVELS, iso_date
+from .receiving import receive as receive_medication
 from .residency import (
     admit,
     confirm_stay,
@@ -63,9 +64,11 @@ _ACTIONS = {
     "care.renew": renew,
     "care.assess": assess,
     "care.approvePlan": approve_plan,
+    "care.revisePlan": plan_items.revise,
     "care.addTask": add_task,
     "care.completeTask": complete_task,
     "care.addMedication": add_medication,
+    "care.receiveMedication": receive_medication,
     "care.reviewMedication": review_medication,
     "care.giveMedication": give_medication,
     "care.vital": vital,

@@ -1,117 +1,53 @@
 <!doctype html>
 <html lang="zh-CN" class="visitor-site">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f6f8f2">
-  <meta name="description" content="了解养老照护、生活环境和来院参观安排。">
-  <title>养老机构 · 养老照护与参观</title>
-  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/visit.css">
-  <link rel="stylesheet" href="/color-mode.css">
-  <script type="module" src="/visit.js"></script>
-</head>
-<body>
-  <a class="skip-link" href="#main">跳到主要内容</a>
-  <header class="site-header">
-    <div class="site-wrap site-nav">
-      <a class="site-brand" href="/visit"><img src="/assets/mark.svg" width="34" height="34" alt=""><strong data-brand>养老机构</strong></a>
-      <nav aria-label="官网导航">
-        <a href="#environment">生活环境</a>
-        <a href="#care">照护服务</a>
-        <a href="#plan">来访安排</a>
-      </nav>
-      <div class="site-actions account-actions">
-        <a class="staff-link" href="/?workspace=1">账号登录</a>
-        <a class="secondary" href="/visitor-register.html">免手机号注册</a>
-      </div>
-    </div>
-  </header>
-  <main id="main">
-    <section class="site-wrap hero" aria-labelledby="home-title">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#ffffff"><meta name="description" content="了解养老照护服务，在线参观空间或预约到院。">
+  <title>养老照护与参观 · 医养服务</title><link rel="icon" href="/assets/desk-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/color-mode.css"><link rel="stylesheet" href="/visit.css"><script type="module" src="/visit.js"></script>
+</head><body><a class="skip-link" href="#main">跳到主要内容</a>
+<header class="site-header"><div class="site-wrap site-nav"><a class="site-brand" href="/visit"><span class="brand-mark"><img src="/assets/desk-mark.svg" width="34" height="32" alt=""></span><strong data-brand>医养服务</strong></a>
+      <nav aria-label="官网导航"><a href="/visit" aria-current="page">机构首页</a><a href="/roomtour">环境导览</a><a href="/visit#care">照护服务</a><a href="/faq">常见问题</a></nav>
+      <div class="site-actions account-actions"><a class="staff-link" href="/?workspace=1">账号登录</a><a class="secondary" href="/visitor-register.html">免手机号注册</a></div>
+    </div></header>
+<main id="main">
+  <section class="hero" aria-labelledby="home-title">
+    <img class="hero-photo" src="/assets/visit/lounge.webp" alt="起居区设计示意，落地窗旁设有连续扶手与休息座椅" width="1536" height="1024" fetchpriority="high">
+    <div class="site-wrap hero-inner">
       <div class="hero-copy">
-        <h1 id="home-title" data-brand>养老机构</h1>
-        <h2>为长辈选一个<br>安心的住处</h2>
-        <p>了解起居、用餐和日常照护。先在线走一遍，再和家人一起安排来院参观。</p>
-        <div class="site-actions">
-          <a class="primary" href="/roomtour">进入 3D 环境导览</a>
-          <a class="secondary" href="#book-visit">预约来院</a>
-        </div>
+        <p class="hero-institution" data-brand>医养服务</p>
+        <h1 id="home-title">先来院里，<br>看看长辈的生活。</h1>
+        <p class="hero-lead">从一间居室到一日三餐，看看日常照护怎样安排。您可以先在线参观，再约家人一起到院。</p>
+        <div class="site-actions"><a class="primary" href="/roomtour"><i data-icon="box" aria-hidden="true"></i>进入 3D 环境导览</a><a class="hero-book" href="#book-visit">预约来院</a></div>
       </div>
-      <figure class="hero-figure">
-        <img src="/assets/visit/lounge.webp" alt="明亮的适老起居空间，有连续扶手、宽通道和庭院窗景" width="1536" height="1024" fetchpriority="high">
-        <figcaption>照护环境设计示意</figcaption>
-      </figure>
-    </section>
-
-    <section class="environment" id="environment" aria-labelledby="environment-title">
-      <div class="site-wrap environment-grid">
-        <div class="environment-copy">
-          <h2 id="environment-title">从门厅走到居室</h2>
-          <p>线上导览提供可旋转的 3D 示范。可查看接待大厅、活动区、长辈居室和庭院，再把到院想看的空间记下来。</p>
-          <a class="primary" href="/roomtour">打开 3D 示范</a>
-        </div>
-        <dl class="space-list">
-          <div><dt>接待大厅</dt><dd>了解抵达后的登记和等候动线</dd></div>
-          <div><dt>活动区</dt><dd>查看休息、交流与集体活动空间</dd></div>
-          <div><dt>长辈居室</dt><dd>了解床位、床旁通道和收纳示意</dd></div>
-          <div><dt>户外庭院</dt><dd>查看散步路线及坐下休息的位置</dd></div>
-        </dl>
-      </div>
-    </section>
-
-    <section class="site-wrap care" id="care" aria-labelledby="care-title">
-      <div class="section-intro">
-        <h2 id="care-title">围绕长辈的一天</h2>
-        <p>每位长辈的生活习惯和照护需求不同。参观时可以把平时的作息、饮食和需要协助的地方告诉接待人员。</p>
-      </div>
-      <div class="care-grid">
-        <article><h3>日常生活照护</h3><p>了解起床、活动、卫生和休息的安排，按身体情况沟通需要协助的事项。</p></article>
-        <article><h3>用餐与饮食习惯</h3><p>现场了解用餐时间和当日餐单，提前说明长辈的饮食偏好或需要留意的食物。</p></article>
-        <article><h3>健康观察和沟通</h3><p>询问护理记录、异常反馈以及家属如何查阅本人获授权的信息。</p></article>
-      </div>
-    </section>
-
-    <section class="visit-planning" id="plan" aria-labelledby="plan-title">
-      <div class="site-wrap plan-grid">
-        <div class="section-intro">
-          <h2 id="plan-title">安排一次来访</h2>
-          <p>从线上浏览到实地看房，可以按家人的时间一步步来。</p>
-          <ol class="plan-steps">
-            <li><strong>线上了解</strong><span>看看居室和公共空间，记下关心的问题。</span></li>
-            <li><strong>电话确认</strong><span>提交意向后，接待人员通过您留下的号码商定时间。</span></li>
-            <li><strong>来院参观</strong><span>按约定到访，可当面沟通入住、试住和收费项目。</span></li>
-          </ol>
-        </div>
-        <aside class="questions" aria-labelledby="question-title">
-          <h3 id="question-title">参观前常见问题</h3>
-          <details><summary>想先问试住或收费，可以吗？</summary><p>可以先请求回电，并说明最想了解的项目。试住安排和费用由院区接待人员确认。</p></details>
-          <details><summary>填了期望时间，是否已经预约成功？</summary><p>期望时间供接待人员参考。电话确认后，院区会记录来访时段。</p></details>
-          <details><summary>线上看到的是实拍还是示范？</summary><p>此页图片是环境设计示意，3D 导览使用独立演示场景。实际布置请以现场参观为准。</p></details>
-        </aside>
-      </div>
-    </section>
-
-    <section class="site-wrap reception" id="appointment" aria-labelledby="visit-title">
-      <div class="reception-intro">
-        <h2 id="visit-title">预约来院参观</h2>
-        <p>选好院区后，接待人员将与您商定来访时间。</p>
-        <button type="button" class="primary" id="book-visit">填写参观意愿</button>
-      </div>
-      <aside class="callback-card">
-        <h3>想先电话聊一聊？</h3>
-        <p>可请接待人员回电介绍试住、费用和照护服务。</p>
-        <button type="button" class="secondary" id="open-callback">请给我回电</button>
-      </aside>
-    </section>
-  </main>
-  <footer class="site-footer">
-    <div class="site-wrap footer-layout">
-      <a class="site-brand" href="/visit"><img src="/assets/mark.svg" width="32" height="32" alt=""><strong data-brand>养老机构</strong></a>
-      <nav aria-label="页脚导航"><a href="/roomtour">环境导览</a><a href="#appointment">来访预约</a><a href="/faq">常见问题</a><a href="/?workspace=1">账号登录</a></nav>
+      <span class="hero-caption">公共起居区 · 环境设计示意</span>
     </div>
-  </footer>
-  <dialog id="visit-request" aria-labelledby="visit-request-title">
+  </section>
+  <section class="site-wrap public-section" id="environment" aria-labelledby="environments-title">
+    <header class="section-title"><div><h2 id="environments-title">在线参观院内空间</h2><p>选择一个空间进入 Roomtour，可转动视角查看布局。</p></div><a class="plain-link" href="/roomtour">进入完整导览</a></header>
+    <div class="scene-cards"><a class="scene-card" href="/roomtour?scene=reception"><div class="scene-art"><img loading="lazy" src="/assets/visit/reception.webp" width="560" height="290" alt=""></div><div class="scene-caption"><h3>接待大厅</h3><span>登记与等候</span></div></a><a class="scene-card" href="/roomtour?scene=activity"><div class="scene-art"><img loading="lazy" src="/assets/visit/activity.webp" width="560" height="290" alt=""></div><div class="scene-caption"><h3>公共活动区</h3><span>活动与用餐</span></div></a><a class="scene-card" href="/roomtour?scene=bedroom"><div class="scene-art"><img loading="lazy" src="/assets/visit/bedroom.webp" width="560" height="290" alt=""></div><div class="scene-caption"><h3>长辈居室</h3><span>床位与收纳</span></div></a><a class="scene-card" href="/roomtour?scene=garden"><div class="scene-art"><img loading="lazy" src="/assets/visit/garden.webp" width="560" height="290" alt=""></div><div class="scene-caption"><h3>户外庭院</h3><span>散步与休憩</span></div></a></div>
+  </section>
+  <section class="service-section" id="care" aria-labelledby="care-title"><div class="site-wrap service-layout">
+    <div><h2 id="care-title">家人关心的<br>日常照护</h2><p>参观时，可以带上长辈的生活习惯和照护需求，与接待人员逐项沟通。</p></div>
+    <dl class="service-lines">
+      <div><dt><i data-icon="bed" aria-hidden="true"></i>起居与活动</dt><dd>了解起床、休息、日常活动和床旁协助的安排。</dd></div>
+      <div><dt><i data-icon="leaf" aria-hidden="true"></i>三餐与饮食</dt><dd>询问餐单、进餐时间，以及如何登记饮食偏好与禁忌。</dd></div>
+      <div><dt><i data-icon="heart" aria-hidden="true"></i>健康与沟通</dt><dd>了解护理人员如何记录身体变化，家属怎样查阅获授权的照护记录。</dd></div>
+    </dl>
+  </div></section>
+  <section id="plan" class="site-wrap public-section visit-arrange" aria-labelledby="plan-title">
+    <div class="arrange-copy" id="appointment"><h2 id="plan-title">安排来院参观</h2><p>选择院区，留下方便联系的号码。接待人员会致电与您确认到院时间。</p>
+      <div class="site-actions"><button class="primary" id="book-visit" type="button"><i data-icon="calendar" aria-hidden="true"></i>填写参观意愿</button><button class="secondary" id="open-callback" type="button">请给我回电</button></div>
+    </div><aside class="visit-questions"><h3>来院前，您可能想了解</h3>
+      <details><summary>能先了解试住和收费吗？</summary><p>可以请求回电，说明想了解的服务或费用明细，由院区接待人员与您沟通。</p></details>
+      <details><summary>提交期望时间后，什么时候算约好？</summary><p>工作人员会与您电话确认。双方商定后，院区会预留接待时段。</p></details>
+      <details><summary>导览里看到的就是实际房间吗？</summary><p>线上图片和 3D 空间是设计示意，您可到院查看实际房间及当日开放的区域。</p></details>
+      <a class="plain-link" href="/faq">查看全部常见问题</a>
+    </aside>
+  </section>
+</main>
+<footer class="site-footer"><div class="site-wrap footer-layout"><a class="site-brand" href="/visit"><span class="brand-mark"><img src="/assets/desk-mark.svg" width="34" height="32" alt=""></span><strong data-brand>医养服务</strong></a>
+      <nav aria-label="页脚导航"><a href="/roomtour">环境导览</a><a href="/visit#book-visit">预约来院</a><a href="/faq">常见问题</a><a href="/?workspace=1">账号登录</a></nav>
+    </div></footer>  <dialog id="visit-request" aria-labelledby="visit-request-title">
     <div class="dialog-head"><h2 id="visit-request-title">填写参观意愿</h2><button type="button" aria-label="关闭参观申请" data-close>×</button></div>
     <form id="visit-form" method="post">
       <label>参观院区<select required name="campusId" class="campuses" disabled><option value="">正在载入院区…</option></select></label>
@@ -129,7 +65,7 @@
       <p class="form-error" role="alert"></p>
       <button class="primary" type="submit" disabled>提交参观意愿</button>
     </form>
-    <div class="receipt" id="visit-receipt" role="status" tabindex="-1" hidden><h3>参观意愿已送达</h3><p>请留意接待人员来电。电话确认后，工作人员会为您留出接待时段。</p></div>
+    <div class="receipt" id="visit-receipt" role="status" tabindex="-1" hidden><h3>参观意愿已送达</h3><p>请留意接待人员来电。电话确认后，工作人员会为您留出接待时段。</p><button class="secondary" type="button" data-again>填写另一份参观意愿</button></div>
   </dialog>
   <dialog id="callback" aria-labelledby="callback-title">
     <div class="dialog-head"><h2 id="callback-title">请接待人员回电</h2><button type="button" data-close aria-label="关闭回电申请">×</button></div>
@@ -139,7 +75,6 @@
       <label class="consent"><input type="checkbox" required name="consent"><span>我同意所选院区保存这个号码，并就本次养老服务咨询给我回电。</span></label>
       <p class="form-error" role="alert"></p><button class="primary" type="submit" disabled>同意并请求回电</button>
     </form>
-    <div class="receipt" id="callback-receipt" role="status" tabindex="-1" hidden><h3>回电请求已收到</h3><p>如需安排来院参观，也可以继续填写参观意愿。</p></div>
+    <div class="receipt" id="callback-receipt" role="status" tabindex="-1" hidden><h3>回电请求已收到</h3><p>如需安排来院参观，也可以继续填写参观意愿。</p><button class="secondary" type="button" data-again>填写另一份回电请求</button></div>
   </dialog>
-</body>
-</html>
+</body></html>

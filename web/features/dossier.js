@@ -1,15 +1,17 @@
-import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
-import { residentDailyReadOnly, residentInsights } from './resident-insights.js';
+import { residentLabel, staffLabel } from './people-labels.js';
+import { residentInsights } from './resident-insights.js';
 import { healthProfile } from './resident-health.js';
 import { renderMedicationReports } from './medication-reports.js';
 import { dailyTimeline } from './daily-timeline.js';
 import { billDetail } from './billing.js';
-import { billingNotices } from './billing-notices.js';
+import { familyPortal } from './family-portal.js';
 import { editResident } from './profile-editor.js';
+import { residentRoster } from './resident-roster.js';
+import { register } from './admission.js';
 import { openPermissionRequest } from './permission-requests.js';
 import { displayAmount, loadProfileChoices, regionPicker } from './profile-controls.js';
 import { contactBook } from './family-contacts.js';
-import { familyInbox, familyRecipients } from './family-rounds.js';
+import { familyRecipients } from './family-rounds.js';
 import { careTimeline } from './care-timeline.js';
 import { recentChanges } from './recent-changes.js';
 import { previewSummary } from './dossier-summary.js';
@@ -21,9 +23,6 @@ import { residencyDetails } from './residency.js';
 import {
   node,
   add,
-  page,
-  table,
-  tabs,
   choose,
   btn,
   link,
@@ -116,180 +115,6 @@ async function relativeForm(ctx, resident, accountId, profile) {
         accountId
       })
   });
-}
-
-function portalTable(ctx, scope, config) {
-  const total = ctx.state.portalTotals[scope];
-  if (total <= config.rows.length) return table(ctx, config);
-  const root = node('div', 'fx-profile');
-  async function load(offset) {
-    if (!root.isConnected) return;
-    try {
-      const next = await ctx.get(
-        '/api/portal/history/' + scope + '?offset=' + offset + '&revision=' + ctx.state.revision
-      );
-      if (root.isConnected) render(next.rows, next.offset);
-    } catch (error) {
-      ctx.toast(error.message);
-    }
-  }
-  function render(rows, offset) {
-    const actions = choose(
-      offset ? btn(ctx, '上一组', () => load(Math.max(0, offset - 30))) : null,
-      node('span', 'fx-muted', offset + 1 + '–' + (offset + rows.length) + ' / ' + total),
-      offset + rows.length < total ? btn(ctx, '更早记录', () => load(offset + rows.length)) : null
-    );
-    root.replaceChildren(table(ctx, { ...config, rows, action: actions }));
-  }
-  render(config.rows, 0);
-  return root;
-}
-
-function myFamily(ctx) {
-  const me = ctx.state.user;
-  const resident = (ctx.state.residents || []).find((r) => r.id === me.residentId);
-  if (!resident) return ctx.ui.empty('此账号尚未绑定有效长辈，请联系机构。');
-  const profile = (ctx.state.relativeProfiles || []).find((r) => r.accountId === me.id) || {};
-  const body = node('article', 'fx-panel', [
-    node('header', 'fx-toolbar', node('h2', '', '我的亲属资料')),
-    node('div', 'fx-family-details', [
-      section('身份与联系', facts(displayed(relativeFields.slice(0, 4), profile))),
-      section('其他联系方式', facts(displayed(relativeFields.slice(4), profile)))
-    ])
-  ]);
-  const services = me.familyServices
-    ? table(ctx, {
-        title: '最近完成的照护服务',
-        rows: ctx.state.familyServiceHistory || [],
-        search: { placeholder: '搜索服务项目', value: (r) => r.title },
-        cols: [
-          { label: '服务项目', view: (r) => Array.isArray(r.menu) && r.menu.length ? named(r.title, r.menu.join('、')) : r.title },
-          { label: '完成日期', view: (r) => r.completedAt || '未登记' },
-          { label: '计划日期', view: (r) => r.date },
-          { label: '计划时间', view: (r) => r.time || '未登记' }
-        ],
-        empty: '目前没有已完成的照护服务。'
-      })
-    : null;
-  const identity = node('section', 'family-identity', [
-    node('span', 'family-mark', ctx.ui.icon('people', 25)),
-    node('div', '', [
-      node('small', '', me.portalSelf ? '我的入住档案' : '绑定长辈'),
-      node('h2', '', residentLabel(ctx, resident))
-    ]),
-    node('span', 'family-institution', [
-      ctx.ui.icon('building', 15),
-      ctx.state.uiSettings.institutionName
-    ])
-  ]);
-  const panels = [];
-  if (me.portalScopes.includes('billingNotices'))
-    panels.push(['billingNotices', '缴费提醒', () => billingNotices(ctx)]);
-  if (me.portalSelf && me.portalScopes.includes('personalHealth'))
-    panels.push(['personalHealth', '我的生活与健康', () => node('div', 'personal-life', [
-      residentDailyReadOnly(ctx, resident.id), healthProfile(ctx, resident), dailyTimeline(ctx, resident),
-    ])]);
-  if (me.portalSelf && me.portalScopes.includes('medicationReport'))
-    panels.push(['medicationReport', '我的用药自报', () => renderMedicationReports(ctx, resident.id)]);
-  if (services) panels.push(['completed', '已完成服务', () => services]);
-  if (ctx.state.portalTasks)
-    panels.push([
-      'tasks',
-      '照护工单进度',
-      () =>
-        portalTable(ctx, 'careSchedule', {
-          title: '照护工单进度',
-          rows: ctx.state.portalTasks,
-          cols: [
-            { label: '服务项目', view: (r) => r.title },
-            { label: '计划时间', view: (r) => [r.date, r.time].filter(Boolean).join(' ') },
-            { label: '状态', view: (r) => r.status },
-            { label: '完成日期', view: (r) => r.completedAt || '—' },
-            {
-              label: '服务评价',
-              view: (r) =>
-                r.rating
-                  ? r.rating + ' 分'
-                  : r.status === '已完成'
-                    ? link(ctx, '评价', () =>
-                        ctx.dialog({
-                          title: '评价本次服务',
-                          description: r.title,
-                          fields: [
-                            {
-                              name: 'rating',
-                              label: '满意度（1 至 5 分）',
-                              type: 'number',
-                              min: 1,
-                              max: 5,
-                              required: true
-                            },
-                            {
-                              name: 'note',
-                              label: '评价意见',
-                              type: 'textarea',
-                              maxLength: 500,
-                              required: false
-                            }
-                          ],
-                          onSubmit: (v) =>
-                            ctx.command('portal.feedback', {
-                              taskId: r.id,
-                              rating: Number(v.rating),
-                              note: v.note
-                            })
-                        })
-                      )
-                    : '—'
-            }
-          ],
-          empty: '暂无照护工单。'
-        })
-    ]);
-  if (ctx.state.portalMedication)
-    panels.push([
-      'medication',
-      '医嘱与给药记录',
-      () =>
-        portalTable(ctx, 'medication', {
-          title: '医嘱与给药记录',
-          rows: ctx.state.portalMedication,
-          cols: [
-            { label: '药品', view: (r) => r.name },
-            { label: '已复核医嘱', view: (r) => r.instruction },
-            { label: '计划时间', view: (r) => r.scheduledAt?.replace('T', ' ') || '未登记' },
-            { label: '状态', view: (r) => r.status },
-            {
-              label: '实际执行',
-              view: (r) => (r.executedTime || r.executedAt || '—').replace('T', ' ')
-            }
-          ],
-          empty: '暂无已复核的医嘱。'
-        })
-    ]);
-  if (ctx.state.familyRoundInbox) {
-    const unread = ctx.state.familyRoundInbox.messages.filter((m) => !m.readAt).length;
-    panels.push(['briefs', unread ? '巡查简报 · ' + unread + ' 未读' : '巡查简报', () => familyInbox(ctx, resident)]);
-  }
-  if (me.portalSelf && ctx.state.familyRoundRecipients)
-    panels.push(['sharing', '分享授权', () => familyRecipients(ctx, resident)]);
-  if (!me.portalSelf) panels.push(['relative', '我的亲属资料', () => body]);
-  const content =
-    panels.length > 1
-      ? tabs('family', panels)
-      : panels.length
-        ? panels.map(([, , render]) => render())
-        : ctx.ui.empty('目前没有开通服务记录查阅，可在环境导览中参观院区。');
-  return page(
-    ctx,
-    me.portalSelf ? '长辈服务' : '家属服务',
-    '',
-    me.portalSelf
-      ? null
-      : btn(ctx, '编辑本人资料', () => relativeForm(ctx, resident, me.id, profile), 'primary'),
-    identity,
-    content
-  );
 }
 
 function label(caption, control, required = false) {
@@ -597,7 +422,7 @@ function medicalDetails(ctx, resident, archived, stay) {
   const reopen = live => {
     const current = live.state.residents.find(row => row.id === resident.id);
     if (!current) return;
-    const existing = [...document.querySelectorAll('.resident-dossier-dialog[open]')].find(
+    const existing = [...document.querySelectorAll('.resident-dossier-dialog[open], .resident-record-workspace')].find(
       dialog => dialog.dataset.roundsResidentId === resident.id
     );
     if (existing) existing.querySelector('[data-dossier-tab="medical"]')?.click();
@@ -707,6 +532,7 @@ function dossierViews(ctx, views, requested) {
     if (!selected.panel.firstElementChild) selected.panel.append(selected.render());
     selected.panel.scrollTop = 0;
     contents.closest('dialog')?.scrollTo({top: 0});
+    selected.button.dispatchEvent(new CustomEvent('dossier-section', {bubbles:true, detail:selected.id}));
   }
   for (const [index, entry] of entries.entries()) {
     entry.button.addEventListener('click', () => show(entry));
@@ -744,8 +570,8 @@ function dossierSections(ctx, resident, lifeEvent, initialSection) {
     : node('p', 'fx-muted', '当前岗位没有可查阅的详细资料。');
 }
 
-export function openDossier(ctx, resident, lifeEvent, initialSection) {
-  const sections = node('div', '', dossierSections(ctx, resident, lifeEvent, lifeEvent ? 'timeline' : initialSection));
+function dossierContent(ctx, resident, lifeEvent, initialSection) {
+  const sections = node('div', '', dossierSections(ctx, resident, lifeEvent, initialSection || (lifeEvent ? 'timeline' : undefined)));
   const history = node('section', 'resident-dossier-history');
   history.id = 'resident-dossier-' + ++nextDossierPanel + '-history';
   history.hidden = true;
@@ -785,44 +611,73 @@ export function openDossier(ctx, resident, lifeEvent, initialSection) {
     sections,
     history,
   ]);
-  const dialog = ctx.detail('长辈详细档案', body);
+  body.dataset.roundsResidentId = resident.id;
+  return body;
+}
+
+export function residentWorkspaceTab(ctx, id, initialSection, lifeEvent) {
+  if (typeof id !== 'string' || !id.startsWith('resident-') || ctx.state.user.kind === 'family') return null;
+  const rid = id.slice('resident-'.length);
+  const person = ctx.state.residents?.find(r => r.id === rid);
+  if (!person) return null;
+  return {
+    id, title: residentLabel(ctx, person),
+    render(live) {
+      const current = live.state.residents.find(r => r.id === rid);
+      if (!current || live.state.user.kind === 'family') return live.ui.empty('当前档案已不在可查阅范围内。');
+      const state = live.workspaceState || {};
+      if (lifeEvent && !state.dossierEvent) state.dossierEvent = lifeEvent;
+      const body = node('section','resident-record-workspace');
+      body.dataset.roundsResidentId = rid;
+      function repaint() {
+        body.replaceChildren(dossierContent(live, current, state.dossierEvent, state.dossierSection || initialSection));
+      }
+      body.addEventListener('dossier-section', event => { state.dossierSection = event.detail; });
+      body.addEventListener('dossier-open', event => {
+        const { section, target } = event.detail;
+        const changed = target && (target.eventId !== state.dossierEvent?.eventId || target.day !== state.dossierEvent?.day);
+        if (changed || body.querySelector('.resident-dossier-history:not([hidden])')) {
+          if (target) state.dossierEvent = target;
+          state.dossierSection = section;
+          repaint();
+        } else {
+          const tab = [...body.querySelectorAll('[data-dossier-tab]')].find(b => b.dataset.dossierTab === section);
+          tab?.click();
+        }
+      });
+      repaint();
+      return body;
+    },
+  };
+}
+
+export function openDossier(ctx, resident, lifeEvent, initialSection) {
+  const tab = ctx.openWorkspaceTab && residentWorkspaceTab(ctx, 'resident-' + resident.id, initialSection, lifeEvent);
+  if (tab) {
+    const route = ['dossier', 'residents', 'billing', 'longCare'].find(id => ctx.available(id));
+    if (route) {
+      const current = ctx.openWorkspaceTab(route, tab);
+      if (initialSection || lifeEvent) {
+        const section = lifeEvent ? 'timeline' : initialSection;
+        const panel = [...document.querySelectorAll('.resident-record-workspace')].find(el => el.dataset.roundsResidentId === resident.id);
+        panel?.dispatchEvent(new CustomEvent('dossier-open', {detail:{section,target:lifeEvent}}));
+      }
+      return current;
+    }
+  }
+  const dialog = ctx.detail('长辈详细档案', dossierContent(ctx, resident, lifeEvent, initialSection));
   dialog.classList.add('resident-dossier-dialog');
   dialog.dataset.roundsResidentId = resident.id;
   return dialog;
 }
 
 export function renderDossier(route, ctx) {
-  if (route === 'family') return myFamily(ctx);
-  return page(
-    ctx,
-    '个人与医疗档案',
-    '查阅长辈的登记资料、亲属联系方式和按日期归档的医疗记录。',
-    null,
-    table(ctx, {
-      title: '长辈名册',
-      rows: ctx.state.residents || [],
-      search: {
-        placeholder: '搜索姓名或档案号',
-        value: (r) => residentLabel(ctx, r) + ' ' + r.id
-      },
-      cols: [
-        {
-          label: '长辈',
-          view: (r) =>
-            node('div', 'fx-person-cell', [
-              node('span', 'fx-person-mark', ctx.ui.icon('people', 16)),
-              named(residentAnchor(ctx, r), r.id)
-            ])
-        },
-        {
-          label: '入住状态',
-          view: (r) => (r.status ? badge(ctx, r.status) : '—')
-        },
-        {
-          label: '操作',
-          view: (r) => link(ctx, '打开详细档案', () => openDossier(ctx, r, undefined, 'medical'))
-        }
-      ]
-    })
-  );
+  if (route === 'family') return familyPortal(ctx, relativeFields, relativeForm);
+  const create = canAct(ctx, 'care.register') ? () => register(ctx) : null;
+  return residentRoster(ctx, {
+    mode:'dossier', create,
+    detail: resident => openDossier(ctx, resident),
+    medical: resident => openDossier(ctx, resident, undefined, 'medical'),
+    edit: resident => editResident(ctx, resident, (ctx.state.dossierProfiles || []).find(p => p.residentId === resident.id) || {}),
+  });
 }

@@ -18,6 +18,7 @@ function history(ctx, person, rows) {
           [
             ['办理结果', e.displayStatus],
             ['参保统筹地区', e.regionLabel],
+            ['参保险种', e.insuranceType],
             ['正式文书编号', e.reference],
             ['评估等级', e.grade],
             ['核定服务方式', e.service],
@@ -48,6 +49,7 @@ export async function registerLongCare(ctx, people = currentResidents(ctx), init
   roster.add(new Option('选择已建档的长辈', ''));
   for (const r of people) roster.add(new Option(residentLabel(ctx, r) + ' · ' + r.id, r.id));
   roster.value = initial || '';
+  const insurance = picker('参保险种（据参保凭证）', catalog.insuranceTypes || []);
   const stage = picker('办理事项', [], '', true);
   const day = textControl('经办日期', today(ctx), 'date', { required: true, max: today(ctx) });
   const ref = textControl('正式文书或受理编号', '', 'text', { required: true, maxLength: 100 });
@@ -85,6 +87,7 @@ export async function registerLongCare(ctx, people = currentResidents(ctx), init
         stage.control.add(new Option(value, value));
     region = regionPicker(regions, '参保统筹地区', last?.region, '', true);
     where.replaceChildren(region.element);
+    insurance.control.value = last?.insuranceType || '';
     day.control.min = last?.date || '';
     sync();
   }
@@ -101,6 +104,7 @@ export async function registerLongCare(ctx, people = currentResidents(ctx), init
       group('经办资料', [
         node('label', 'field', [node('span', '', '长辈档案'), roster]),
         stage.element,
+        insurance.element,
         day.element,
         ref.element,
       ]),
@@ -123,6 +127,7 @@ export async function registerLongCare(ctx, people = currentResidents(ctx), init
         date: day.control.value,
         reference: ref.control.value,
         region: place,
+        insuranceType: insurance.control.value,
         grade: grade.control.disabled ? '' : grade.control.value,
         service: service.control.disabled ? '' : service.control.value,
         startsOn: starts.control.disabled ? '' : starts.control.value,

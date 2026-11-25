@@ -171,7 +171,7 @@ def use_security(state, resident, bill, today):
     deposit = lookup(state, "bills", deposit_id, "押金凭证")
     if deposit.get("kind") != "security" or deposit["residentId"] != resident["id"]:
         raise ValueError("押金凭证与长辈不匹配")
-    remaining = Decimal(str(deposit["paid"])) - sum(
+    remaining = Decimal(str(deposit["paid"])) - Decimal(str(deposit.get("refundedSecurity", 0))) - sum(
         (Decimal(str(row["amount"])) for row in state["payments"] if row.get("securityBillId") == deposit_id),
         Decimal(0),
     )

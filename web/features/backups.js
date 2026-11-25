@@ -1,5 +1,5 @@
-import { node, btn } from './shared.js';
-import { request, settings, importDialog, exportPoint, managePoint } from './backup-exchange.js';
+import { badge, btn, facts, link, node, table } from './shared.js';
+import { request, settings, importDialog, exportPoint, managePoint, maintenanceHeader, maintenanceLog, maintenanceViews } from './backup-exchange.js';
 
 const dateFormat = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai',
@@ -30,6 +30,8 @@ const locationStates = {
   changed: '需重新核对配置',
 };
 
+const origins = {automatic:'自动备份', manual:'手动创建', import:'文件导入', protection:'恢复前保护点', upgrade:'更新前保护点'};
+const volume = value => value == null ? '—' : (value/1048576).toFixed(2) + ' MiB';
 let pendingPoint = null;
 export function openBackupPoint(ctx, id) {
   if (!/^ak-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{32}$/.test(id)) return;
@@ -40,8 +42,11 @@ export function openBackupPoint(ctx, id) {
 
 class BackupPanel extends HTMLElement {
   connectedCallback() {
-    this.className = 'backup-panel fx-panel';
-    this.cursors = [0];
+    this.className = 'recovery-page';
+    this.preferences = this.ctx.workspaceState || {};
+    this.view = this.preferences.backupSection || 'points';
+    this.cursors ||= [0];
+    if (!this.firstChild) this.append(node('p','fx-muted','正在读取备份设置…'));
     this.refresh();
     if (pendingPoint) {
       const pending = pendingPoint;
@@ -62,7 +67,7 @@ class BackupPanel extends HTMLElement {
     await this.refresh();
   }
   async refresh() {
-    if (this.loading) return;
+    if (this.loading) { this.refreshAgain = true; return; }
     this.loading = true;
     try {
       const cursor = this.cursors[this.cursors.length - 1];
@@ -71,16 +76,21 @@ class BackupPanel extends HTMLElement {
       if (!this.isConnected) return;
       const signature = JSON.stringify(data);
       if (this.rendered !== signature) {
+        this.data = data;
         this.draw(data);
         this.rendered = signature;
       }
     } catch (error) {
       if (this.isConnected) {
-        this.textContent = error.message;
+        this.replaceChildren(node('p','form-error',error.message),btn(this.ctx,'重试读取备份',()=>this.refresh()));
         this.rendered = null;
       }
     } finally {
       this.loading = false;
+      if (this.refreshAgain && this.isConnected) {
+        this.refreshAgain = false;
+        this.refresh();
+      }
     }
   }
   action(label, path, payload, primary = false) {
@@ -103,6 +113,7 @@ class BackupPanel extends HTMLElement {
           if (!choice) return;
           const values = typeof payload === 'function' ? payload() : payload;
           await request(path, { ...values, comment: choice.comment });
+          if (button.closest('.recovery-detail')) button.closest('dialog')?.close();
           this.ctx.toast(
             path === '/points'
               ? '已提交加密快照'
@@ -125,131 +136,96 @@ class BackupPanel extends HTMLElement {
       primary ? 'primary' : 'secondary',
     );
   }
+  pointActions(data, point) {
+    const open = fn => async () => {
+      try { await fn(this,point.id); } catch (error) { this.ctx.toast(error.message); }
+    };
+    if (point.state === 'ready') return [
+      btn(this.ctx,'恢复',open(managePoint),'primary'),
+      btn(this.ctx,'导出',open(exportPoint)),
+      this.action('核验','/points/'+point.id+'/verify',{}),
+    ];
+    return point.copies.filter(c=>c.state==='verified' &&
+      data.locations.some(l=>l.id===c.provider && l.state==='linked')).map(c=>{
+        const label=data.locations.find(l=>l.id===c.provider).label;
+        return this.action('从'+label+'取回','/points/'+point.id+'/fetch',{provider:c.provider});
+      });
+  }
+
+  inspect(data, point) {
+    const controls = this.pointActions(data,point);
+    this.ctx.detail('恢复点详情', node('div','recovery-detail',[
+      facts([['创建时间',stamp(point.created)],['快照来源',origins[point.kind] || point.kind],
+        ['恢复点编号',point.id],['业务修订',point.revision==null?'待生成':'v'+point.revision],
+        ['本机状态',states[point.state] || point.state],['采集完成',stamp(point.captured)],
+        ['最近核验',stamp(point.checked)],['快照文件',volume(point.bytes)],['压缩前',volume(point.sourceBytes)],
+        ...(point.sourceBytes>0?[['压缩节省',Math.round((1-point.bytes/point.sourceBytes)*100)+'%']]:[]),
+        ...(point.error?[['异常说明',point.error]]:[])]),
+      table(this.ctx,{title:'此恢复点的异地副本', rows:point.copies,
+        cols:[{label:'配送位置',view:c=>data.locations.find(l=>l.id===c.provider)?.label || c.provider},
+          {label:'状态',view:c=>badge(this.ctx,states[c.state] || c.state)},
+          {label:'最近校验',view:c=>stamp(c.verified)},{label:'异常说明',view:c=>c.error || '—'}],
+        empty:'此恢复点尚无异地副本记录'}),
+      controls.length ? node('div','dialog-actions',controls) : null,
+    ]));
+  }
+
   draw(data) {
-    const action = this.action(
-      '立即创建快照',
-      '/points',
-      () => ({ requestId: crypto.randomUUID() }),
-      true,
-    );
-    const points = data.points;
-    const onFirst = this.cursors.length === 1;
-    const latest = points.find((p) => p.state === 'ready');
-    const linked = data.locations.filter((t) => t.state === 'linked');
-    const good =
-      latest?.copies.filter(
-        (c) => c.state === 'verified' && linked.some((l) => l.id === c.provider),
-      ).length || 0;
-    const metric = (label, value) =>
-      node('div', 'backup-metric', [node('small', '', label), node('strong', '', value)]);
-    const toolbar = node('header', 'fx-toolbar', [
-      node('h2', 'access-settings-heading', [this.ctx.ui.icon('shield', 20), '加密快照与异地备份']),
-      node('div', 'backup-controls', [
-        btn(this.ctx, '备份设置', () => settings(this, data, locationStates)),
-        btn(this.ctx, '导入备份', () => importDialog(this, data.policy)),
-        action,
-      ]),
-    ]);
-    const meters = node('div', 'backup-metrics', [
-      metric('最近可用时间点', stamp(latest?.captured)),
-      metric('下次自动备份 · 北京时间', stamp(data.nextAutomatic)),
-      metric(
-        '最近快照的异地校验',
-        linked.length ? good + ' / ' + linked.length + ' 个位置' : '尚未接入位置',
-      ),
-    ]);
-    const table = node('table', 'fx-table');
-    table.append(
-      node(
-        'thead',
-        '',
-        node(
-          'tr',
-          '',
-          ['创建时间', '来源', '业务版本', '本机状态', '快照大小', '异地副本', '操作'].map((t) =>
-            node('th', '', t),
-          ),
-        ),
-      ),
-    );
-    const rows = node('tbody');
-    for (const p of points) {
-      const copy = p.copies.map(
-        (c) =>
-          (data.locations.find((t) => t.id === c.provider)?.label || c.provider) +
-          ' · ' +
-          (c.error || states[c.state]),
-      );
-      const values = [
-        stamp(p.captured || p.created),
-        {
-          automatic: '每日一次',
-          manual: '管理员创建',
-          import: '文件导入',
-          protection: '恢复前保护点',
-          upgrade: '更新前保护点',
-        }[p.kind] || '管理员创建',
-        p.revision === null ? '—' : 'v' + p.revision,
-        p.error || states[p.state],
-        p.bytes ? (p.bytes / 1048576).toFixed(2) + ' MiB' +
-          (p.sourceBytes > p.bytes ? ' · 节省 ' + Math.round(100*(1-p.bytes/p.sourceBytes)) + '%' : '') : '—',
-        copy.join('；') || '等待异地位置',
-      ];
-      const trial = node('td', '');
-      if (p.state === 'ready') {
-        if (p.checked) trial.append(node('small', '', '最近核验 ' + stamp(p.checked)));
-        const task = (fn) => async () => {
-          try {
-            await fn(this, p.id);
-          } catch (error) {
-            this.ctx.toast(error.message);
-          }
-        };
-        trial.append(
-          node('div', 'backup-controls', [
-            btn(this.ctx, '恢复', task(managePoint)),
-            btn(this.ctx, '导出', task(exportPoint)),
-            this.action('核验', '/points/' + p.id + '/verify', {}),
-          ]),
-        );
-      } else {
-        const replica = p.copies.find(
-          (c) => c.state === 'verified' && linked.some((location) => location.id === c.provider),
-        );
-        if (replica)
-          trial.append(
-            this.action('从异地取回', '/points/' + p.id + '/fetch', { provider: replica.provider }),
-          );
-        else trial.textContent = '—';
-      }
-      rows.append(node('tr', '', [...values.map((text) => node('td', '', text)), trial]));
+    const ctx = this.ctx;
+    const linked = data.locations.filter(t=>t.state==='linked').length;
+    const recent = data.points.find(p=>p.state==='ready');
+    if (this.cursors.length === 1) this.latest = recent?.captured;
+    const header = maintenanceHeader(ctx,'机构备份策略',[
+      ['自动周期','每 '+data.intervalHours+' 小时'], ['下次自动备份',stamp(data.nextAutomatic)],
+      ['最近可用恢复点',stamp(this.latest)],['已连接异地位置',linked+' 个'],
+      ['本机保留',data.policy.retentionDays ? data.policy.retentionDays+' 天' : '长期保留'],
+      ['单次导入上限',data.policy.uploadLimitMiB+' MiB'],
+    ],[btn(ctx,'备份设置',()=>settings(this,data,locationStates)),
+       btn(ctx,'导入备份',()=>importDialog(this,data.policy)),
+       this.action('立即创建快照','/points',()=>({requestId:crypto.randomUUID()}),true)]);
+    const views = maintenanceViews(ctx, [['points','恢复点台账'],['locations','异地配送'],['logs','操作记录']],
+      this.view, key=>{this.view=this.preferences.backupSection=key;this.draw(this.data);});
+    let content;
+    if (this.view==='logs') {
+      content = this.querySelector('.recovery-log') || maintenanceLog(ctx,'backup');
+    } else if (this.view==='locations') {
+      content = table(ctx,{title:'异地配送位置',rows:data.locations,
+        filter:{label:'授权状态',value:r=>locationStates[r.state]},
+        search:{placeholder:'搜索配送位置',value:r=>r.label},
+        action:btn(ctx,'管理配送设置',()=>settings(this,data,locationStates)),
+        cols:[{label:'位置',view:r=>r.label},{label:'服务状态',view:r=>badge(ctx,locationStates[r.state])},
+          {label:'服务端授权',view:r=>r.available?'已配置':'待授权'},
+          {label:'详情',view:r=>link(ctx,'查看位置',()=>ctx.detail('异地配送位置',facts([
+            ['服务商',r.label],['授权状态',locationStates[r.state]],
+            ['可连接',r.available?'已在机构服务器配置':'尚未提供有效配置'],
+          ])))}]});
+    } else {
+      const controls = node('div','fx-actions');
+      if (this.cursors.length>1) controls.append(btn(ctx,'较新的 50 个恢复点',()=>{
+        this.cursors.pop();this.refresh();
+      }));
+      if (data.nextCursor) controls.append(btn(ctx,'更早的 50 个恢复点',()=>{
+        if (this.cursors.at(-1)!==data.nextCursor) this.cursors.push(data.nextCursor);
+        this.refresh();
+      }));
+      if (data.points.some(p=>p.state==='failed'||p.copies.some(c=>c.state==='failed')))
+        controls.append(this.action('重试失败的备份','/retry',{}));
+      content = table(ctx,{
+        title:'机构恢复点', rows:data.points,action:controls,
+        search:{placeholder:'搜索本批编号、日期、来源或修订',value:p=>[p.id,stamp(p.created),origins[p.kind], 'v'+p.revision].join(' ')},
+        filter:{label:'本机状态',value:p=>states[p.state] || p.state},
+        cols:[{label:'创建时间（北京）',view:p=>stamp(p.created)},
+          {label:'来源',view:p=>origins[p.kind] || p.kind},
+          {label:'业务修订',view:p=>p.revision==null?'—':'v'+p.revision},
+          {label:'本机状态',view:p=>badge(ctx,states[p.state] || p.state,p.state==='ready'?'green':p.error?'red':'amber')},
+          {label:'快照大小',view:p=>volume(p.bytes)},
+          {label:'已校验异地副本',view:p=>p.copies.filter(c=>c.state==='verified').length+' 个'},
+          {label:'操作',view:p=>link(ctx,'查看恢复点',()=>this.inspect(data,p))}],
+        empty:'当前批次没有恢复点。',
+      });
     }
-    table.append(rows);
-    const list = node('div', 'backup-history', [
-      node('h3', '', '机构恢复点'),
-      points.length
-        ? node('div', 'fx-table-wrap', table)
-        : node('p', 'fx-muted', '首次完整快照准备中。'),
-    ]);
-    const nav = node('div', 'backup-controls backup-navigation');
-    if (!onFirst)
-      nav.append(
-        btn(this.ctx, '上一页', async () => {
-          this.cursors.pop();
-          await this.refresh();
-        }),
-      );
-    if (data.nextCursor)
-      nav.append(
-        btn(this.ctx, '更早的时间点', async () => {
-          this.cursors.push(data.nextCursor);
-          await this.refresh();
-        }),
-      );
-    this.replaceChildren(toolbar, ...(onFirst ? [meters] : []), list, nav);
-    if (data.configError) this.append(node('p', 'fx-attention', data.configError));
-    if (points.some((p) => p.state === 'failed' || p.copies.some((c) => c.state === 'failed')))
-      this.append(this.action('重试失败的备份', '/retry', {}));
+    this.replaceChildren(header,views,content);
+    if (data.configError) this.append(node('p','fx-attention',data.configError));
   }
 }
 if (!customElements.get('backup-panel')) customElements.define('backup-panel', BackupPanel);

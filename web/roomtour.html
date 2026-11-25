@@ -1,32 +1,16 @@
 <!doctype html>
 <html lang="zh-CN" class="visitor-site">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f7f9f4">
-  <meta name="description" content="可旋转、换房间的养老机构环境导览。">
-  <title>3D 环境导览 · 养老机构</title>
-  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/visit.css">
-  <link rel="stylesheet" href="/roomtour.css">
-  <link rel="stylesheet" href="/color-mode.css">
-  <script type="module" src="/roomtour.js"></script>
-</head>
-<body>
-  <a class="skip-link" href="#main">跳到导览</a>
-  <header class="site-header">
-    <div class="site-wrap site-nav">
-      <a class="site-brand" href="/visit"><img src="/assets/mark.svg" width="34" height="34" alt=""><strong data-tour-brand>养老机构</strong></a>
-      <nav aria-label="导览导航"><a href="/visit">官网首页</a><a href="/visit#book-visit">预约参观</a></nav>
-      <div class="site-actions account-actions">
-        <a class="staff-link" href="/?workspace=1">账号登录</a>
-        <a class="secondary" href="/visitor-register.html">免手机号注册</a>
-      </div>
-    </div>
-  </header>
-  <main id="main" class="site-wrap tour-workspace">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#ffffff"><meta name="description" content="在线体验四处可旋转的示范空间。">
+  <title>3D 环境导览 · 医养服务</title><link rel="icon" href="/assets/desk-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/color-mode.css"><link rel="stylesheet" href="/visit.css"><link rel="stylesheet" href="/roomtour.css"><script type="module" src="/roomtour.js"></script>
+</head><body><a class="skip-link" href="#main">跳到主要内容</a>
+<header class="site-header"><div class="site-wrap site-nav"><a class="site-brand" href="/visit"><span class="brand-mark"><img src="/assets/desk-mark.svg" width="34" height="32" alt=""></span><strong data-brand>医养服务</strong></a>
+      <nav aria-label="官网导航"><a href="/visit">机构首页</a><a href="/roomtour" aria-current="page">环境导览</a><a href="/visit#care">照护服务</a><a href="/faq">常见问题</a></nav>
+      <div class="site-actions account-actions"><a class="staff-link" href="/?workspace=1">账号登录</a><a class="secondary" href="/visitor-register.html">免手机号注册</a></div>
+    </div></header>  <main id="main" class="site-wrap tour-workspace">
     <header class="tour-title">
-      <div><h1>3D 环境导览</h1><p>示范场景供线上体验，实际环境请来院参观。</p></div>
+      <div><p class="visit-crumb"><a href="/visit">机构首页</a> / 环境导览</p><h1>3D 环境导览</h1><p>选择空间，拖动查看全景布局。场景为设计示意。</p></div>
       <a href="/visit#book-visit" class="primary">预约实地参观</a>
     </header>
     <div class="tour-layout">
@@ -37,7 +21,7 @@
           </div>
           <canvas class="tour-canvas" id="tour-canvas" tabindex="0" aria-label="可旋转的三维场景" aria-describedby="tour-guide"></canvas>
           <div class="tour-hotspots" id="tour-hotspots"></div>
-          <p class="tour-empty" id="tour-empty" hidden>此浏览器暂时无法绘制 3D 场景，仍可查看右侧的空间介绍。</p>
+          <p class="tour-empty" id="tour-empty" hidden>此浏览器暂时无法绘制 3D 场景，仍可选择空间并阅读介绍。</p>
           <div class="tour-pad" aria-label="控制视角" role="group">
             <button type="button" data-tour-turn="left" aria-label="向左旋转" title="向左旋转">‹</button>
             <button type="button" data-tour-turn="right" aria-label="向右旋转" title="向右旋转">›</button>
@@ -48,11 +32,11 @@
         </div>
         <footer class="tour-viewer-footer">
           <p id="tour-guide">拖动旋转。键盘可用方向键旋转，按加号或减号缩放。</p>
-          <span>3D 示范</span>
+
         </footer>
       </section>
       <aside class="tour-sidebar" aria-labelledby="tour-places">
-        <h2 id="tour-places">选择参观空间</h2>
+        <h2 id="tour-places">参观路线</h2>
         <div class="tour-stops" id="tour-stops"></div>
         <section class="tour-current" aria-labelledby="tour-current-title">
           <h3 id="tour-current-title">场景介绍</h3><p id="scene-description" aria-live="polite"></p>
@@ -60,5 +44,6 @@
       </aside>
     </div>
   </main>
-</body>
-</html>
+<footer class="site-footer"><div class="site-wrap footer-layout"><a class="site-brand" href="/visit"><span class="brand-mark"><img src="/assets/desk-mark.svg" width="34" height="32" alt=""></span><strong data-brand>医养服务</strong></a>
+      <nav aria-label="页脚导航"><a href="/roomtour">环境导览</a><a href="/visit#book-visit">预约来院</a><a href="/faq">常见问题</a><a href="/?workspace=1">账号登录</a></nav>
+    </div></footer></body></html>

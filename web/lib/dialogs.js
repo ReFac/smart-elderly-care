@@ -34,8 +34,9 @@ function modal(title) {
   return dialog;
 }
 
-export function detail(title, content) {
+export function detail(title, content, { drawer = false } = {}) {
   const dialog = modal(title);
+  if (drawer) dialog.classList.add('desk-detail-drawer');
   const body = el('section', 'dialog-body');
   body.append(content);
   dialog.append(body);

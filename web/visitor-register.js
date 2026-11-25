@@ -1,6 +1,6 @@
-import { colorModeControl } from './lib/color-mode.js';
+import { publicPage } from './public-site.js';
 
-document.querySelector('.account-actions').prepend(colorModeControl());
+publicPage('访客注册');
 const form = document.querySelector('#visitor-register');
 const submit = form.querySelector('[type=submit]');
 const error = document.querySelector('#register-error');

@@ -11,23 +11,10 @@ import { openFacilityTour } from './room-tour.js';
 import { button, statusText, pathName, heading, lookup, failure } from './room-elements.js';
 export { tourPage, openFacilityTour } from './room-tour.js';
 
-const memory = new Map();
-
-export async function goToRoom(ctx, id) {
-  try {
-    const room = await lookup(ctx, '/rooms/' + encodeURIComponent(id));
-    memory.set(ctx.state.user.id, {
-      campusId: room.campusId,
-      buildingId: room.buildingId,
-      floorId: room.floorId,
-      roomId: room.id,
-    });
-    const hash = '#beds?' + new URLSearchParams({tab: 'plan', room: id});
-    if (location.hash !== hash) location.hash = hash;
-    else ctx.go('beds', 'plan');
-  } catch (error) {
-    ctx.toast(error.message);
-  }
+export function goToRoom(ctx, id) {
+  if (!ctx.available('beds') || !id) return;
+  const hash = '#beds?' + new URLSearchParams({tab:'plan',room:id});
+  if (location.hash !== hash) location.hash = hash;
 }
 
 function scopedAgent(ctx, place, label) {
@@ -297,7 +284,7 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
         node('h2', '', room.number + ' 房'),
       ]),
     ]),
-    node('div', 'room-detail-meta', [node('span', '', '照护区'), node('strong', '', room.ward)]),
+    node('div', 'room-detail-meta', [node('span', '', '照护区'), node('strong', '', room.areaPath || '未分区')]),
     node('div', 'room-detail-meta', [
       node('span', '', '房间类型'),
       node('div', 'room-type-actions', [
@@ -351,18 +338,20 @@ export function roomsPage(ctx, embedded=false) {
     controls,
     stage
   );
-  const actor = ctx.state.user.id;
-  const saved = memory.get(actor) || {};
+  const memory = ctx.workspaceState || {};
+  const saved = memory.floorPlan || {};
+  const params = new URLSearchParams(location.hash.split('?')[1]);
+  let linkedRoom;
   let directory, campus, building, floor, room, floorMap, detailPanel;
   let floorRequest = 0,
     detailRequest = 0;
   function remember() {
-    memory.set(actor, {
+    memory.floorPlan = {
       campusId: campus?.id,
       buildingId: building?.id,
       floorId: floor?.id,
       roomId: room?.id
-    });
+    };
   }
   async function chooseRoom(id, names = []) {
     const ticket = ++detailRequest;
@@ -370,8 +359,9 @@ export function roomsPage(ctx, embedded=false) {
     room = null;
     detailPanel.replaceChildren(statusText('正在读取房间…'));
     try {
-      const data = await lookup(ctx, '/rooms/' + encodeURIComponent(id));
-      if (ticket !== detailRequest || !root.isConnected) return;
+      const data = linkedRoom?.id === id ? linkedRoom : await lookup(ctx, '/rooms/' + encodeURIComponent(id));
+      linkedRoom = null;
+      if (ticket !== detailRequest) return;
       room = data;
       remember();
       detailPanel.replaceChildren(
@@ -407,10 +397,12 @@ export function roomsPage(ctx, embedded=false) {
       chip.setAttribute('aria-pressed', String(lv.id === floor?.id));
       chips.append(chip);
     }
+    const ledger = node('a','btn btn-ghost','查看本层床位台账');
+    if (floor) ledger.href='#beds?'+new URLSearchParams({tab:'all',building:building.id,floor:floor.id});
     return node('div', 'room-locator', [
       node('label', 'room-building', [node('span', '', '分院'), branch]),
       building ? node('label', 'room-building', [node('span', '', '楼栋'), pick]) : null,
-      chips,
+      chips, floor ? ledger : null,
       scopedAgent(ctx, { campusId: campus.id }, campus.name)
     ]);
   }
@@ -441,7 +433,7 @@ export function roomsPage(ctx, embedded=false) {
     }
     try {
       const data = await lookup(ctx, '/floors/' + encodeURIComponent(floor.id));
-      if (ticket !== floorRequest || !root.isConnected) return;
+      if (ticket !== floorRequest) return;
       floor = data;
       floorMap = floorPlan(ctx, data, chooseRoom);
       detailPanel = node('aside', 'room-detail');
@@ -486,25 +478,22 @@ export function roomsPage(ctx, embedded=false) {
     stage.replaceChildren(statusText('正在读取分院…'));
     try {
       directory = await lookup(ctx, '');
-      if (!root.isConnected) return;
       if (!directory.campuses.length) {
         stage.replaceChildren(statusText('当前账号没有获授权的分院'));
         return;
       }
       stage.replaceChildren(area);
-      const params = new URLSearchParams(location.hash.split('?')[1]);
       const requestedRoom = params.get('room');
       const requestedFloor = params.get('floor');
       const requestedBuilding = directory.buildings.find(b => b.floors.some(f => f.id === requestedFloor));
       let initial = saved;
       if (requestedFloor && requestedBuilding) {
         initial = {campusId: requestedBuilding.campusId, buildingId: requestedBuilding.id, floorId: requestedFloor};
-      } else if (requestedFloor) ctx.toast('没有可查看的楼层');
+      } else if (requestedFloor && root.isConnected) ctx.toast('没有可查看的楼层');
       if (requestedRoom) {
         const place = await lookup(ctx, '/rooms/' + encodeURIComponent(requestedRoom)).catch(() => null);
-        if (!root.isConnected) return;
-        if (place) initial = { ...place, roomId: place.id };
-        else ctx.toast('没有可查看的房间');
+        if (place) { initial = { ...place, roomId: place.id }; linkedRoom=place; }
+        else if (root.isConnected) ctx.toast('没有可查看的房间');
       }
       await switchCampus(initial.campusId, initial);
       const action = params.get('edit');

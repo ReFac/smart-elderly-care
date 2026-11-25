@@ -13,6 +13,7 @@ export const quickDestinations = [
   { label: '健康工作台', words: '健康管理 智慧照护 异常上报', route: 'care', tab: 'healthDesk' },
   { label: '等级判定', words: '评估结果 护理等级', route: 'assessments', tab: 'grading' },
   { label: '用药安全筛查', words: '用药冲突 过敏核对 重复用药', route: 'medications', tab: 'safety' },
+  { label: '药品接收登记', words: '药品交接台账 交接药品 家属送药', route: 'medications', tab: 'receiving', grant: 'care.receiveMedication' },
   { label: '定时工单', words: '自动工单 伙食排期 伙食工单 定时巡查 菜单 照护排程', route: 'care', tab: 'scheduledWork', grant: 'care.completeTask' },
   { label: 'AI 用量', words: 'DeepSeek 用量 模型用量 API 用量 Token 用量 OCR ASR 缓存命中率 员工用量', route: 'settings', tab: 'deepseekUsage' },
   { label: '登记集体活动', words: '集体用餐 早餐 午餐 晚餐 登记餐单', route: 'care', tab: 'groupLife', grant: 'care.proposeGroupActivity' },
@@ -51,6 +52,7 @@ function pageDestination(ctx, entry) {
     return null;
   const dest = route === 'intake' ? 'residents' : route === 'rooms' ? 'beds' : route;
   const params = {};
+  if (dest === 'overview' && entry.params?.view === 'cockpit') params.view = 'cockpit';
   if (dest === 'beds' && entry.params && typeof entry.params === 'object') {
     for (const key of ['campus', 'building', 'floor', 'room']) {
       if (/^[A-Za-z0-9_-]{1,100}$/.test(entry.params[key] || '')) params[key] = entry.params[key];

@@ -25,38 +25,3 @@
 .access-login-panel .color-mode-control { margin-top: 12px; }
 .account-info .color-mode-control { width: 100%; }
 .faq-public-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 20px; }
-
-.visitor-site[data-color-mode='dark'] {
-  --paper: #111b18;
-  --ink: #ecf3ef;
-  --muted: #aec3b8;
-  --forest: #61ae95;
-  --forest-dark: #a5dccb;
-  --line: #34483e;
-  --sage: #253a32;
-  --visitor-surface: #192b24;
-  --color-mode-surface: var(--visitor-surface);
-  color: var(--ink);
-  background: var(--paper);
-}
-.visitor-site[data-color-mode='dark'] :is(.site-header, .site-footer, .care-grid article,
-  .questions, .callback-card, .form-card, dialog, .tour-viewer, .tour-sidebar,
-  .tour-stop, .tour-scene-info, .tour-pad, .tour-hotspot, .tour-current, .hero-figure figcaption) {
-  background: var(--visitor-surface);
-  border-color: var(--line);
-}
-.visitor-site[data-color-mode='dark'] :is(input, textarea, select, .secondary) {
-  background: var(--visitor-surface);
-  color: var(--ink);
-  border-color: var(--line);
-}
-.visitor-site[data-color-mode='dark'] .primary { color: #10291f; }
-.visitor-site[data-color-mode='dark'] .form-error { color: #ffada9; }
-.visitor-site[data-color-mode='dark'] .plan-steps li { border-color: var(--line); }
-.visitor-site[data-color-mode='dark'] .tour-stage {
-  background: linear-gradient(165deg, #263b32 12%, #17231e 100%);
-}
-.visitor-site[data-color-mode='dark'] :is(.tour-stop:hover, .tour-stop[aria-pressed='true'], .tour-hotspot:hover) {
-  background: var(--sage);
-  border-color: var(--forest);
-}

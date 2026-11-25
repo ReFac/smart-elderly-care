@@ -1,4 +1,3 @@
-import { staffLabel } from './people-labels.js';
 import {
   canAct,
   hasGrant,
@@ -7,11 +6,9 @@ import {
   table,
   tabs,
   field,
-  staffField,
   select,
   options,
   memo,
-  residentName,
   choose,
   btn,
   link,
@@ -192,98 +189,7 @@ export function inventory(ctx) {
   );
 }
 
-export function shiftForm(ctx) {
-  runForm(ctx, {
-    title: '安排班次',
-    action: 'ops.shift',
-    fields: [
-      select(
-        'campusId',
-        '值班分院',
-        (ctx.state.campusOptions || []).map((c) => ({ value: c.id, label: c.name })),
-      ),
-      staffField(ctx, 'staff', '值班人员'),
-      field('date', '排班日期', {
-        type: 'date',
-        value: today(ctx),
-      }),
-      select('period', '班次', options(['早班', '中班', '夜班'])),
-    ],
-  });
-}
-
-export function shifts(ctx) {
-  const state = ctx.state;
-  const workload = (staff, date) =>
-    state.tasks.filter((t) => t.assignee === staff && t.date === date && t.status !== '已取消');
-  return page(
-    ctx,
-    '排班管理',
-    hasGrant(ctx, 'care')
-      ? '安排值班人员并查看当日工单量。'
-      : '按分院和日期安排值班人员。',
-    btn(ctx, '安排班次', () => shiftForm(ctx), 'primary'),
-    table(ctx, {
-      title: '人员排班',
-      rows: [...state.shifts].sort((a, b) => b.date.localeCompare(a.date)),
-      search: {
-        placeholder: '搜索人员或日期',
-        value: (s) => s.staff + ' ' + s.date,
-      },
-      filter: {
-        value: (s) => s.period,
-        all: '全部班次',
-      },
-      cols: [
-        {
-          label: '值班日期',
-          view: (s) => s.date,
-        },
-        {
-          label: '值班人员',
-          view: (s) => staffLabel(ctx, s.staff),
-        },
-        {
-          label: '班次',
-          view: (s) => badge(ctx, s.period, 'blue'),
-        },
-        {
-          label: '值班分院',
-          view: (s) =>
-            (ctx.state.campusOptions || []).find((c) => c.id === (s.campusId || 'campus-main'))
-              ?.name || '本部',
-        },
-        ...(hasGrant(ctx, 'care')
-          ? [
-              {
-                label: '当日工单',
-                view: (s) => workload(s.staff, s.date).length + ' 项',
-              },
-              {
-                label: '操作',
-                align: 'end',
-                view: (s) =>
-                  link(ctx, '查看工作量', () =>
-                    ctx.detail(
-                      staffLabel(ctx, s.staff) + ' · ' + s.date,
-                      records(
-                        workload(s.staff, s.date),
-                        (t) =>
-                          named(
-                            t.title + ' · ' + residentName(ctx, t.residentId),
-                            t.time + ' · ' + t.status
-                          ),
-                        '当日暂无照护工单'
-                      )
-                    )
-                  ),
-              },
-            ]
-          : []),
-      ],
-    })
-  );
-}
+export { shiftForm, shifts } from './shift-desk.js';
 
 function reportDetails(ctx, r) {
   const issues = Array.isArray(r.issues) ? r.issues : [];

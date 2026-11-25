@@ -8,22 +8,31 @@ import { changePreview, confirmChange } from './lib/change-review.js';
 
 import { detail, formDialog } from './lib/dialogs.js';
 
-import { groups, routes } from './lib/navigation.js';
+import { routes } from './lib/navigation.js';
 
-import { dashboard } from './dashboard.js';
+import { dashboard, operationalOverview } from './dashboard.js';
 
 import { renderFeature } from './features/index.js';
 
-import { selectTab } from './features/shared.js';
+import { selectTab, resetSelectedTabs } from './features/shared.js';
 
 import { profile, renewalReminders, reopenBedFilter } from './features/residency.js';
 import { dueMedicationCount } from './features/medication-rules.js';
 import { pendingLeadCalls } from './features/leads.js';
 import { residentLabel, residentHref, staffLabel } from './features/people-labels.js';
-import { openDossier } from './features/dossier.js';
+import { openDossier, residentWorkspaceTab } from './features/dossier.js';
 import { canOpenPermissionRequests, openPermissionRequests, pendingPermissionRequests } from './features/permission-requests.js';
 import { colorModeControl, setColorModeAccount } from './lib/color-mode.js';
 
+import { restoreCarePlanTab } from './features/care-plan-editor.js';
+import { WorkspaceTabs } from './lib/workspace-tabs.js';
+import { menuFor, deskPath, viewIcon } from './lib/desk-navigation.js';
+import { officeHome } from './features/office-home.js';
+
+const desk = new WorkspaceTabs();
+const expandedGroups = new Set();
+let deskMenu = [], sidebarScroll = 0, compact = false, largeText = false;
+let lastMenuGroup, restoredTabsFor;
 const { el, icon, button, toast } = ui;
 
 const root = document.getElementById('app');
@@ -41,6 +50,8 @@ let residentOverlay = null;
 function openChanges(filters = {}) {
   if (!available('history')) return;
   historyScope = { ...filters };
+  const historyPage = desk.pages.get('#history');
+  if (historyPage) historyPage.node = null;
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   if (route === 'history') render();
   else go('history');
@@ -59,6 +70,8 @@ function signedOut() {
   epoch++;
   deferredRefresh = null;
   state = null;
+  resetDesk();
+  root.classList.remove("desk-shell");
   residentOverlay = null;
   clearChat();
   revision = null;
@@ -112,8 +125,24 @@ async function signOut() {
     toast(error.message);
   }
 }
+function visibilityChanged(snapshot) {
+  if (!state) return false;
+  if (state.actorStamp !== snapshot.actorStamp ||
+      JSON.stringify(state.uiSettings.hiddenRoutes) !== JSON.stringify(snapshot.data.uiSettings.hiddenRoutes)) return true;
+  const visible = new Set(snapshot.data.residents.map(person => person.id));
+  return state.residents.some(person => !visible.has(person.id));
+}
+
 function applySnapshot(snapshot) {
   deferredRefresh = null;
+  if (visibilityChanged(snapshot)) {
+    document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+    residentOverlay = null;
+    historyScope = {};
+    focusIds = [];
+    clearChat();
+    resetDesk();
+  } else desk.invalidate();
   state = {
     ...snapshot.data,
     actorStamp: snapshot.actorStamp,
@@ -121,6 +150,14 @@ function applySnapshot(snapshot) {
     audit: snapshot.audit,
     revision: snapshot.revision,
   };
+  for (const [key,page] of desk.pages) {
+    const work = new URLSearchParams(key.split('?')[1]).get('work');
+    if (work && page.render) {
+      const current = restoreWorkspaceDocument(page.route,work);
+      if (!current) desk.pages.delete(key);
+      else page.title = current.title;
+    }
+  }
   checkChatUser(context());
   revision = snapshot.revision;
   branding = state.uiSettings;
@@ -169,55 +206,105 @@ function go(destination, tab, onArrival, query) {
     toast('当前账号未开放此模块');
     return;
   }
-  if (tab) selectTab(destination, tab);
-  if ((query && destination === 'beds') || destination === 'faq') {
-    closeMenu();
-    if (destination === 'beds') reopenBedFilter();
-    const params = new URLSearchParams(query);
-    if (tab) params.set('tab', tab);
-    const search = params.toString();
-    window.history.pushState(null, '', '#' + destination + (search ? '?' + search : ''));
-    render();
-    window.scrollTo(0, 0);
-    onArrival?.();
-    return;
-  }
-  if (route === destination) {
-    closeMenu();
-    if (tab) render();
-    onArrival?.();
-  } else if (onArrival) {
-    document.querySelectorAll('dialog[open]').forEach((dialog) => dialog.close());
-    window.history.pushState(null, '', '#' + destination);
-    render();
-    window.scrollTo(0, 0);
-    onArrival();
-  } else location.hash = destination;
+  if (destination === 'rooms') { destination = 'beds'; tab = 'plan'; }
+  if (destination === 'intake') destination = 'residents';
+  const params = new URLSearchParams(query);
+  if (tab) params.set('tab', tab);
+  if (query && destination === 'beds') reopenBedFilter();
+  navigateHash('#' + destination + (params.size ? '?' + params : ''), onArrival);
 }
 
-let openedBedLink = '';
+function navigateHash(hash, onArrival) {
+  closeMenu();
+  if (location.hash !== hash) {
+    document.querySelectorAll('dialog[open]').forEach(d => d.close());
+    residentOverlay = null;
+    window.history.pushState(null, '', hash);
+    render();
+  } else if (!desk.active) render();
+  onArrival?.();
+}
+
+function saveDesk() {
+  if (!state || !restoredTabsFor) return;
+  // Only route/view IDs belong in session storage. Never serialize a search, form, name or record.
+  const keys = [...desk.pages.keys()].filter(key=>/^#[a-zA-Z]+(?:\?(?:view=cockpit|tab=[a-zA-Z0-9_-]+))?$/.test(key));
+  try { sessionStorage.setItem('nh-open-views',JSON.stringify({scope:restoredTabsFor,keys})); } catch {}
+}
+
+function restoreDeskPages() {
+  if (restoredTabsFor === state.actorStamp) return;
+  restoredTabsFor=state.actorStamp;
+  let saved;
+  try { saved=JSON.parse(sessionStorage.getItem('nh-open-views')); } catch {}
+  if (saved?.scope !== restoredTabsFor || !Array.isArray(saved.keys)) return;
+  const visible = menuFor(context());
+  for (const key of saved.keys) {
+    if (typeof key!=='string' || !/^#[a-zA-Z]+(?:\?(?:view=cockpit|tab=[a-zA-Z0-9_-]+))?$/.test(key)) continue;
+    const [r,query]=key.slice(1).split('?');
+    if (!routes.has(r) || !available(r)) continue;
+    const params = new URLSearchParams(query),tab=params.get('tab') || undefined,view=params.get('view') || undefined;
+    const path=deskPath(visible,r,tab,view);
+    // Views without static labels are rendered and named on first access.
+    desk.ensure({key,route:r,tab,view,title:path.label || routes.get(r).label});
+  }
+}
+
+function resetDesk() {
+  desk.clear();
+  restoredTabsFor = null;
+  try { sessionStorage.removeItem('nh-open-views'); } catch {}
+  expandedGroups.clear();
+  resetSelectedTabs();
+  lastMenuGroup = null;
+  sidebarScroll = 0;
+}
+
+function openWorkspaceTab(destination, spec) {
+  if (!available(destination) || !spec?.id || typeof spec.render !== 'function') return false;
+  const hash = '#' + destination + '?' + new URLSearchParams({work: spec.id});
+  desk.ensure({key:hash, route:destination, ...spec});
+  navigateHash(hash);
+  return true;
+}
+
+function closeWorkspaceTab(key = desk.active) {
+  const next = desk.remove(key);
+  saveDesk();
+  if (next) navigateHash(next);
+  else if (desk.active) updateTabStrip();
+}
+
+function updateTabStrip() {
+  root.querySelector('.desk-tabbar')?.replaceWith(tabStrip());
+}
+
+function tabStrip() {
+  return desk.strip({activate: navigateHash, close: closeWorkspaceTab,
+    refresh: async () => {
+      const here = desk.active;
+      try { if (await readState()) { render(); if (desk.active === here) toast('已刷新当前页签'); } }
+      catch (error) { toast(error.message); }
+    },
+    manage: () => {
+      const box = el('div', 'desk-tab-manager');
+      for (const page of desk.pages.values()) {
+        const row = el('div');
+        row.append(button(page.title, () => { dialog.close(); navigateHash(page.key); }, 'ghost'));
+        if (!page.pinned) row.append(button('关闭', () => {
+          dialog.close(); closeWorkspaceTab(page.key);
+        }));
+        box.append(row);
+      }
+      const dialog = detail('已打开的页签',box);
+    }});
+}
+
 function getRoute() {
   const original=location.hash.slice(1).split('?')[0];
   const params = new URLSearchParams(location.hash.split('?')[1]);
   const tab = params.get('tab');
-  if (original === 'care' && available('care') && tab === 'scheduledWork' &&
-      ['care', 'clinical', 'care.schedule'].some(permitted)) {
-    selectTab('care', tab);
-    history.replaceState(null, '', '#care');
-  }
-  if (original === 'settings' && available('settings') && tab === 'platformUpdates') {
-    selectTab('settings', tab);
-    history.replaceState(null, '', '#settings');
-  }
-  if (original === 'beds' && available('beds') && tab === 'zones' && permitted('care.areas')) {
-    selectTab('beds', tab);
-    history.replaceState(null, '', '#beds');
-  }
-  if (original !== 'beds' || !tab) openedBedLink = '';
-  if (original === 'beds' && available('beds') && ['all', 'plan'].includes(tab) && openedBedLink !== location.hash) {
-    selectTab('beds', tab);
-    openedBedLink = location.hash;
-  }
+  if (tab && available(original)) selectTab(original, tab);
   if (original === 'assistants') {
     const home = landing();
     window.history.replaceState(null, '', '#' + home);
@@ -226,17 +313,14 @@ function getRoute() {
   }
   if (original === 'rooms' && available('beds')) {
     selectTab('beds', 'plan');
-    history.replaceState(null, '', '#beds');
+    history.replaceState(null, '', '#beds?tab=plan');
     return 'beds';
   }
   if (['residents', 'intake'].includes(original) && available('residents')) {
-    const knownTab = ['all', 'notAdmitted', 'trials', 'renew', 'followups'].includes(tab);
-    if (knownTab) selectTab('residents', tab);
-    else if (original === 'intake') selectTab('residents', 'all');
-    if (original === 'intake' || knownTab) {
-      params.delete('tab');
-      const remaining = params.toString();
-      history.replaceState(history.state, '', '#residents' + (remaining ? '?' + remaining : ''));
+    if (original === 'intake') {
+      if (!tab) params.set('tab', 'all');
+      selectTab('residents', params.get('tab'));
+      history.replaceState(null, '', '#residents?' + params);
     }
     return 'residents';
   }
@@ -377,8 +461,8 @@ async function submitChange({ action, url, payload, review = {}, dossierDialog }
       destination = ['care', 'completed'];
     } else if (action === 'history.undo' && !dossierDialog) historyScope.revision = result.revision;
     if (destination) {
-      selectTab(...destination);
-      if (route !== destination[0]) window.history.pushState(null, '', '#' + destination[0]);
+      const hash = '#' + destination[0] + '?' + new URLSearchParams({tab:destination[1]});
+      if (location.hash !== hash) window.history.pushState(null,'',hash);
     }
     render();
     if (!review.quiet) {
@@ -398,10 +482,20 @@ async function submitChange({ action, url, payload, review = {}, dossierDialog }
 }
 
 function context() {
+  const page = desk.pages.get(desk.active);
   return {
     current: context,
+    workspaceState: page?.state,
+    openWorkspaceTab, closeWorkspaceTab,
     state,
-    get,
+    get: page ? async path => {
+      page.pendingReads++;
+      try { return await get(path); }
+      finally {
+        page.pendingReads--;
+        if (page.key !== desk.active) page.node = null;
+      }
+    } : get,
     historyScope,
     openChanges,
     undoRevision,
@@ -422,73 +516,87 @@ function context() {
     proposeRoom: (payload) =>
       submitChange({ action: 'gw.propose', payload, url: '/api/agent/room-proposals' }),
     dialog: formDialog,
-    detail,
+    detail: (title,content) => detail(title,content,{drawer:true}),
     toast,
     ui,
   };
 }
 
-function visibleGroups() {
-  return groups
-    .map(([name, items]) => [name, items.filter(([id]) => available(id))])
-    .filter(([, items]) => items.length);
-}
-
-function moduleLink([id, label, iconName]) {
-  if (id === 'family' && state.user.portalSelf) label = '长辈服务';
-  const active = route === id;
-  const link = el('a', 'nav-item' + (active ? ' active' : ''));
-  link.href = '#' + id;
-  if (active) link.setAttribute('aria-current', 'page');
-  link.append(icon(iconName, 18), el('span', '', label));
-  if (id === 'family') {
-    const unread = state.familyRoundInbox?.messages.filter((m) => !m.readAt).length;
-    if (unread) link.append(el('small', 'family-unread', unread + ' 未读'));
-    else if (todayBillingNotices()) link.append(el('small', 'family-unread', '今日账务提醒'));
-  }
-  if (active) link.append(icon('chevron', 13));
-  link.addEventListener('click', closeMenu);
-  return link;
-}
-
 function sidebar() {
   const side = el('aside', 'sidebar');
   side.id = 'sidenav';
-  const groupName = routes.get(route)?.group;
+  const brand = el('a', 'desk-brand');
+  brand.href = '#' + landing();
+  const mark = el('img'); mark.src = '/assets/desk-mark.svg'; mark.alt = '';
+  brand.append(mark, el('strong', '', state.uiSettings.brandName));
+  brand.title = state.uiSettings.brandName;
   const nav = el('nav', 'nav-list');
   nav.setAttribute('aria-label', '业务模块');
-  for (const [name, items] of visibleGroups()) {
-    const section = el('section', 'nav-group' + (name === groupName ? ' current' : ''));
-    const head = el('h2', 'nav-label', name);
-    section.append(head, ...items.map(moduleLink));
-    nav.append(section);
+  const current = desk.pages.get(desk.active);
+  const path = deskPath(deskMenu,route,current?.tab,current?.view);
+  if (path.group && lastMenuGroup !== path.group) {
+    expandedGroups.clear();
+    expandedGroups.add(path.group);
   }
-  const shortcuts = ['beds', 'inbox', 'residents', 'reports'].filter(
-    (id) => available(id) && routes.get(id).group !== groupName,
-  );
-  if (shortcuts.length) {
-    const section = el('section', 'nav-shortcuts');
-    section.append(
-      el('h2', 'nav-label', '常用入口'),
-      ...shortcuts.map((id) => {
-        const { label, icon: iconName } = routes.get(id);
-        return moduleLink([id, label, iconName]);
-      }),
-    );
-    nav.append(section);
+  lastMenuGroup = path.group;
+  function entry(id, label, glyph, tab, view) {
+    if (id === 'family' && state.user.portalSelf) label = '长辈服务';
+    const active = route === id && (current?.tab || undefined) === tab && current?.view === view;
+    const a = el('a', 'nav-item' + (active ? ' active' : ''));
+    const params = new URLSearchParams();
+    if (tab) params.set('tab',tab);
+    if (view) params.set('view',view);
+    a.href = '#' + id + (params.size ? '?' + params : '');
+    a.title = label;
+    if (active) a.setAttribute('aria-current','page');
+    a.append(icon(glyph,16),el('span','',label));
+    a.onclick = e => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault(); navigateHash(a.hash);
+    };
+    return a;
   }
-  const org = el('div', 'side-org');
-  const orgWords = el('div');
-  orgWords.append(el('small', '', '当前机构'), el('strong', '', state.uiSettings.institutionName));
-  org.append(icon('building', 22), orgWords);
-  side.append(nav, org);
+  for (const group of deskMenu) {
+    if (group.route) {
+      nav.append(entry(group.route,group.label,group.icon,undefined,group.view));
+      continue;
+    }
+    const section = el('section','desk-nav-section');
+    const toggle = el('button','desk-nav-group');
+    toggle.type = 'button'; toggle.title = group.label;
+    toggle.append(icon(group.icon,17),el('span','',group.label),icon('down',12));
+    const children = el('div','desk-nav-children');
+    for (const [id,label,tab] of group.children)
+      children.append(entry(id,label,viewIcon(tab,routes.get(id).icon),tab));
+    function expand() {
+      const open = expandedGroups.has(group.label);
+      toggle.setAttribute('aria-expanded',String(open));
+      section.classList.toggle('current',path.group === group.label);
+      children.hidden = !open;
+    }
+    toggle.onclick = () => {
+      if (compact && !smallScreen()) { compact = false; applyDeskSize(); expandedGroups.add(group.label); }
+      else if (expandedGroups.has(group.label)) expandedGroups.delete(group.label);
+      else expandedGroups.add(group.label);
+      expand();
+    };
+    expand(); section.append(toggle,children); nav.append(section);
+  }
+  side.append(brand,nav);
   return side;
 }
 
+const smallScreen = () => matchMedia('(max-width: 760px)').matches;
+function applyDeskSize() {
+  root.classList.toggle('desk-compact',compact);
+  document.documentElement.classList.toggle('desk-large-text',largeText);
+  root.querySelector('.menu-trigger')?.setAttribute('aria-expanded',
+    String(smallScreen() ? root.classList.contains('menu-open') : !compact));
+}
 function closeMenu() {
   const menu = root.querySelector('.menu-trigger');
   root.classList.remove('menu-open');
-  menu?.setAttribute('aria-expanded', 'false');
+  menu?.setAttribute('aria-expanded', String(!smallScreen() && !compact));
 }
 
 function searchDialog() {
@@ -500,7 +608,13 @@ function searchDialog() {
   const list = el('div', 'search-results');
   content.append(input, list);
   const modal = detail('全局搜索', content);
+  const directory = deskMenu.flatMap(group => group.children
+    ? group.children.map(([route,label,tab])=>({label,keywords:group.label + ' ' + label,
+        icon:viewIcon(tab,routes.get(route).icon),meta:group.label,open:()=>go(route,tab)}))
+    : [{label:group.label,keywords:group.label,icon:group.icon,meta:'业务页面',
+        open:()=>go(group.route,undefined,undefined,group.view ? {view:group.view} : undefined)}]);
   const data = [
+    ...directory,
     ...quickDestinations.filter(r => available(r.route) && (!r.grant || state.allowedActions.includes(r.grant))).map(r => ({
       label: r.label, keywords: r.words, icon: routes.get(r.route).icon, meta: routes.get(r.route).label,
       open: () => go(r.route, r.tab),
@@ -525,9 +639,13 @@ function searchDialog() {
   ];
   function update() {
     const q = input.value.trim().normalize('NFKC').toLowerCase();
-    const subset = data
-      .filter((r) => (r.label + ' ' + r.keywords).normalize('NFKC').toLowerCase().includes(q))
-      .slice(0, 12);
+    const subset = [], matched = new Set();
+    for (const row of data) {
+      const key = row.href || row.label;
+      if (matched.has(key) || !(row.label + ' ' + row.keywords).normalize('NFKC').toLowerCase().includes(q)) continue;
+      matched.add(key); subset.push(row);
+      if (subset.length === 12) break;
+    }
     list.replaceChildren(
       ...subset.map((r) => {
         const b = el(r.href ? 'a' : 'button', 'result');
@@ -718,14 +836,37 @@ function accountMenu() {
   );
 }
 
-function masthead() {
+function viewSwitcher(rootViews) {
+  if (!rootViews?.childElementCount) return null;
+  const pop = el('details','desk-view-switcher');
+  const summary = el('summary','','业务视图');
+  summary.append(icon('down',12));
+  const list = el('nav'); list.setAttribute('aria-label','当前模块的业务视图');
+  for (const choice of rootViews.children) {
+    const key = choice.dataset.key;
+    const a = el('a','',choice.textContent);
+    a.href='#' + route + '?' + new URLSearchParams({tab:key});
+    if (choice.getAttribute('aria-selected')==='true') a.setAttribute('aria-current','page');
+    a.onclick = event => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+      event.preventDefault(); pop.open=false; go(route,key);
+    };
+    list.append(a);
+  }
+  pop.addEventListener('focusout',event=>{ if (!pop.contains(event.relatedTarget)) pop.open=false; });
+  pop.addEventListener('keydown',event=>{ if(event.key==='Escape'){pop.open=false;summary.focus();} });
+  pop.append(summary,list);
+  return pop;
+}
+function masthead(rootViews) {
   const bar = el('header', 'masthead');
   const menu = button(
     '',
     () => {
+      if (!smallScreen()) { compact = !compact; applyDeskSize(); return; }
       const open = root.classList.toggle('menu-open');
-      menu.setAttribute('aria-expanded', String(open));
-      if (open) root.querySelector('.nav-item.active')?.focus();
+      menu.setAttribute('aria-expanded',String(open));
+      if (open) root.querySelector('.sidebar a')?.focus();
     },
     'icon',
     'menu',
@@ -734,26 +875,14 @@ function masthead() {
   menu.setAttribute('aria-label', '业务导航');
   menu.setAttribute('aria-controls', 'sidenav');
   menu.setAttribute('aria-expanded', 'false');
-  const brand = el('a', 'brand');
-  brand.href = '#' + landing();
-  const mark = el('img', 'brand-mark');
-  mark.src = '/assets/mark.svg';
-  mark.alt = '';
-  const words = el('span', 'brand-words');
-  words.append(
-    el('strong', '', state.uiSettings.brandName),
-    el('small', '', state.uiSettings.institutionName),
-  );
-  brand.append(mark, words);
-  const categories = el('nav', 'primary-nav');
-  categories.setAttribute('aria-label', '业务分区');
-  for (const [name, items] of visibleGroups()) {
-    const current = routes.get(route)?.group === name;
-    const link = el('a', current ? 'current' : '', name);
-    link.href = '#' + (current ? route : items[0][0]);
-    if (current) link.setAttribute('aria-current', 'true');
-    categories.append(link);
-  }
+  const crumb = el('nav','desk-crumbs');
+  crumb.setAttribute('aria-label','当前位置');
+  const home = el('a','','首页'); home.href = '#' + landing(); crumb.append(home);
+  const page = desk.pages.get(desk.active);
+  const path = deskPath(deskMenu,route,page?.tab,page?.view);
+  const parent = page?.render && path.label !== page.title ? path.label : '';
+  for (const value of [path.group, parent, page?.title].filter(item => item && item !== '首页'))
+    crumb.append(el('i','','/'),el('span','',value));
   const controls = el('div', 'global-tools');
   if (state.user.kind !== 'family') {
     const search = el('button', 'top-search');
@@ -785,7 +914,14 @@ function masthead() {
       state.inventory.some((i) => i.quantity < i.minimum)
     )
       bell.classList.add('has-notice');
-    controls.append(search, bell);
+    const fullscreen = button('', async () => {
+      try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); }
+      catch { toast('当前浏览器未开放全屏显示'); }
+    }, 'icon','fullscreen');
+    fullscreen.setAttribute('aria-label','切换全屏'); fullscreen.title = '切换全屏';
+    const size = button('', () => {largeText = !largeText; applyDeskSize(); size.setAttribute('aria-pressed',String(largeText));}, 'icon','font');
+    size.setAttribute('aria-label','放大字号'); size.title = '放大字号'; size.setAttribute('aria-pressed',String(largeText));
+    controls.append(search, fullscreen, size, bell);
   }
   controls.prepend(chatLauncher(() => toggleChat(context)));
   const account = el('button', 'account-trigger');
@@ -798,31 +934,10 @@ function masthead() {
   );
   account.addEventListener('click', accountMenu);
   controls.append(account);
-  bar.append(menu, brand, categories, controls);
-  return bar;
-}
-
-function contextBar() {
-  const bar = el('div', 'contextbar');
-  const crumbs = el('div', 'crumbs');
-  const info = routes.get(route);
-  crumbs.append(
-    icon('location', 14),
-    el('span', '', info.group),
-    icon('chevron', 11),
-    el('strong', '', route === 'family' && state.user.portalSelf ? '长辈服务' : info.label),
-  );
-  const date = el('time', 'business-date');
-  date.dateTime = state.today;
-  const [year, month, day] = state.today.split('-');
-  const weekday = new Intl.DateTimeFormat('zh-CN', { weekday: 'long', timeZone: 'UTC' }).format(
-    new Date(state.today + 'T12:00:00Z'),
-  );
-  date.append(
-    icon('calendar', 14),
-    document.createTextNode(year + '年' + Number(month) + '月' + Number(day) + '日 · ' + weekday),
-  );
-  bar.append(crumbs, date);
+  bar.append(menu, crumb);
+  const switcher = viewSwitcher(rootViews);
+  if (switcher) bar.append(switcher);
+  bar.append(controls);
   return bar;
 }
 
@@ -839,35 +954,76 @@ function render() {
     route = landing();
     history.replaceState(null, '', '#' + route);
   }
+  deskMenu = menuFor(context());
+  const home = landing();
+  const homeKey = '#' + home;
+  desk.ensure({key:homeKey,route:home,title:home === 'overview' ? '首页' : routes.get(home).label,pinned:true});
+  restoreDeskPages();
+  const params = new URLSearchParams(location.hash.split('?')[1]);
+  const tab = params.get('tab') || undefined, view = params.get('view') || undefined;
+  let key = location.hash || homeKey;
+  if (params.has('resident') || params.has('bedcard')) key = '#' + route;
+  if (params.has('work') && !desk.pages.has(key)) {
+    const restored = restoreWorkspaceDocument(route,params.get('work'));
+    if (restored) desk.ensure({key,route,...restored});
+    else {
+      key = '#' + route;
+      toast('此工作页已关闭或当前账号无权访问');
+      history.replaceState(null,'',key);
+    }
+  }
+  const path = deskPath(deskMenu,route,tab,view);
+  const page = desk.ensure({key,route,tab,view,title:path.label || routes.get(route).label});
+  const previous = desk.pages.get(desk.active);
+  const switching = page !== previous;
+  if (previous && switching) {
+    previous.scroll = window.scrollY;
+    // Detached views can discard late responses. Rebuild them when they are opened again.
+    if (previous.pendingReads) previous.node = null;
+  }
+  sidebarScroll = root.querySelector('.nav-list')?.scrollTop ?? sidebarScroll;
+  desk.active = key;
+  if (page.tab) selectTab(route,page.tab);
+  else if (!page.render && !page.node) selectTab(route,undefined);
+  root.classList.add('desk-shell');
   closeMenu();
-  document.title =
-    (route === 'family' && state.user.portalSelf
-      ? '长辈服务'
-      : routes.get(route)?.label || '找不到页面') +
-    ' · ' +
-    state.uiSettings.brandName;
   const wrap = el('div', 'app-main');
-  const main = el('main', 'content');
-  main.id = 'content';
-  main.tabIndex = -1;
-  if (route === 'overview') main.append(dashboard(context()));
-  else if (routes.has(route)) main.append(renderFeature(route, context()));
-  else
-    main.append(
-      ui.heading(
-        '找不到此页面',
-        '请从左侧业务导航进入工作台。',
-        button('返回运营总览', () => go('overview'), 'primary'),
-      ),
-    );
-  wrap.append(contextBar(), main);
-  const shade = el('button', 'menu-backdrop');
-  shade.type = 'button';
-  shade.setAttribute('aria-label', '收起业务导航');
-  shade.addEventListener('click', closeMenu);
-  root.replaceChildren(masthead(), sidebar(), shade, wrap);
+  let main = page.node;
+  if (!main || !switching) {
+    main = el('main','content'); main.id = 'content'; main.tabIndex = -1;
+    main.dataset.route = route;
+    if (page.view === 'cockpit' && !page.render) main.classList.add('desk-cockpit');
+    if (page.render) main.append(page.render(context()));
+    else if (route === 'overview') main.append(page.view === 'cockpit' ? dashboard(context()) : officeHome(context()));
+    else main.append(renderFeature(route, context()));
+    page.node = main;
+    if (tab && !page.render) {
+      const choice = main.querySelector('.fx-tabs > [aria-selected="true"]');
+      if (choice?.dataset.key === tab && (!path.label || !deskMenu.some(g => g.children?.some(([r,,k]) => r === route && k === tab))))
+        page.title = choice.textContent;
+    }
+  }
+  document.title = page.title + ' · ' + state.uiSettings.brandName;
+  wrap.append(tabStrip(),main);
+  const shade = el('button','menu-backdrop'); shade.type = 'button';
+  shade.setAttribute('aria-label','收起业务导航'); shade.onclick = closeMenu;
+  const rootViews = page.render ? null : main.querySelector('.fx-tabs[data-route="' + CSS.escape(route) + '"]');
+  if (rootViews) rootViews.hidden = true;
+  root.replaceChildren(sidebar(),masthead(rootViews),shade,wrap);
+  root.querySelector('.nav-list').scrollTop = sidebarScroll;
+  applyDeskSize();
+  if (switching) window.scrollTo(0,page.scroll);
+  saveDesk();
   openLinkedResident();
   openLinkedBedCard(context());
+}
+
+function restoreWorkspaceDocument(route,id) {
+  if (!available(route)) return null;
+  if (route === 'overview' && id === 'operations-detail') return {id, view:'cockpit', title:'日常运营明细', render:operationalOverview};
+  if (route === 'assessments') return restoreCarePlanTab(context(),id);
+  if (['dossier','residents','billing','longCare'].includes(route)) return residentWorkspaceTab(context(),id);
+  return null;
 }
 
 function openLinkedResident() {
@@ -889,6 +1045,7 @@ function openLinkedResident() {
   const modal = destination === 'residents'
     ? profile(context(), row, lifeEvent)
     : openDossier(context(), row, lifeEvent, destination === 'dossier' ? 'medical' : undefined);
+  if (!(modal instanceof HTMLDialogElement)) { residentOverlay = null; return; }
   modal.dataset.linkedResident = id;
   const target = location.hash;
   modal.addEventListener('close', () => {
@@ -941,6 +1098,13 @@ document.addEventListener('click', (event) => {
   openLinkedResident();
 });
 
+root.addEventListener('desk:view',event => {
+  const target = event.detail;
+  if (!state || target.route !== route || !available(target.route) || event.target.closest('dialog')) return;
+  event.preventDefault();
+  go(target.route,target.key);
+});
+
 window.addEventListener('hashchange', (event) => {
   if (openResetFromLocation()) return;
   if (state) {
@@ -957,7 +1121,6 @@ window.addEventListener('hashchange', (event) => {
     }
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
     render();
-    window.scrollTo(0, 0);
   }
 });
 
@@ -1033,18 +1196,17 @@ async function refresh() {
     const lostFamilyAccess = state.familyRoundInbox?.messages.some(
       (message) => !inbox?.messages.some((m) => m.id === message.id),
     );
+    const visibleResidents = new Map(snapshot.data.residents.map(person => [person.id, person]));
     const movedResident = [...document.querySelectorAll('[data-rounds-resident-id], [data-linked-resident]')].some((el) => {
       const id = el.dataset.roundsResidentId || el.dataset.linkedResident;
       const before = state.residents.find((r) => r.id === id);
-      const after = snapshot.data.residents.find((r) => r.id === id);
+      const after = visibleResidents.get(id);
       return before && (!after || before.bedId !== after.bedId || before.status !== after.status);
     });
     const changedUser =
-      movedResident ||
+      visibilityChanged(snapshot) || movedResident ||
       lostFamilyAccess ||
-      JSON.stringify(state.user) !== JSON.stringify(snapshot.data.user) ||
-      JSON.stringify(state.uiSettings.hiddenRoutes) !==
-        JSON.stringify(snapshot.data.uiSettings.hiddenRoutes);
+      JSON.stringify(state.user) !== JSON.stringify(snapshot.data.user);
     const dialogs = [...document.querySelectorAll('dialog[open]')];
     if (editing && !changedUser && !dialogs.length) {
       deferRefresh(snapshot, dialogs);

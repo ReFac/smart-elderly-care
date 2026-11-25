@@ -17,6 +17,12 @@ def screen(state, p, today):
     subject = required_field(p, "subject", "筛查项目")
     finding = required_field(p, "finding", "观察或筛查结果")
     operator = required_field(p, "operator", "筛查登记人")
+    report = None
+    if "riskReport" in p:
+        from .risk_reports import record
+        report = record(p["riskReport"], today)
+        if subject != report["topic"]:
+            raise ValueError("专项报告与筛查项目不一致")
     state.setdefault("followups", [])
     append_record(
         state,
@@ -27,6 +33,7 @@ def screen(state, p, today):
         openedBy=operator,
         date=today,
         status="待分级",
+        **({"riskReport": report} if report else {}),
     )
     return f"登记{resident['name']}的筛查结果，等待分级安排"
 

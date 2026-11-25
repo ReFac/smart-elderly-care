@@ -32,6 +32,7 @@ RELATED = {
     "care.reassignTrialFollowup": ("taskId", "trialFollowups"),
     "care.finishTrialFollowup": ("taskId", "trialFollowups"),
     "care.approvePlan": ("planId", "plans"),
+    "care.revisePlan": ("planId", "plans"),
     "care.completeTask": ("taskId", "tasks"),
     "care.quality": ("taskId", "tasks"),
     "portal.feedback": ("taskId", "tasks"),
@@ -70,11 +71,14 @@ PERSON_ACTIONS = {
     "care.addTask",
     "care.handover",
     "care.addMedication",
+    "care.receiveMedication",
     "care.vital",
     "care.archive",
     "ops.bill",
     "ops.deposit",
     "ops.residentBillingPolicy",
+    "ops.subsidyMaterial",
+    "ops.dischargeSettlement",
     "dossier.document",
     "dossier.linkVisitDocument",
     "care.screen",
@@ -98,6 +102,13 @@ def for_person(data, resident_id):
 
 
 def locate(db, data, action, payload, actor):
+    if action == "ops.subsidyList":
+        ids = payload.get("residentIds")
+        if not isinstance(ids, list) or not all(isinstance(r, str) for r in ids):
+            return {}
+        if len(ids) == 1:
+            return for_person(data, ids[0])
+        return {"residentIds": ids}
     if action in ("facility.updateRoom", "facility.setLayout"):
         from .facility import floor, room
 
@@ -208,23 +219,37 @@ def page(db, user, room="", actor="", before=None, limit=50):
     for value in (room, actor):
         if not isinstance(value, str) or len(value) > 150:
             raise ValueError("筛选值过长")
-    if campus_access.bound(user):
-        state = json.loads(
-            db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
-        )
+    scope_cte = ""
+    scope = user.get("facilityScope") or {}
+    if any(key in scope for key in ("campusIds", "buildingIds", "floorIds", "roomIds")):
+        from . import facility
+
+        state = json.loads(db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0])
         permitted = campus_access.resident_ids(
-            state, campus_access.allowed_beds(db, user), user
+            state, campus_access.allowed_beds(db, user, include_rooms=True), user
         )
-        clause = "a.residentId IN (SELECT value FROM json_each(?)) OR a.action LIKE 'agent.%'"
-        params.append(json.dumps(sorted(permitted)))
+        where, args = facility._restrictions(facility._access(db, user, environment=True))
+        positions = db.execute("SELECT r.id,b.campusId FROM " + facility.ROOM_TABLE + where, args).fetchall()
+        rooms = [r[0] for r in positions]
+        # A campus-only record (such as a new reception lead) cannot be assigned to an individual room.
         campuses = campus_access.registration_campuses(user)
-        if campuses and access.has(user, "intake"):
-            clause += """ OR (a.action LIKE 'leads.%' AND EXISTS (
-                SELECT 1 FROM history_targets t WHERE t.revision=a.revision AND t.kind='campus')
-                AND NOT EXISTS (SELECT 1 FROM history_targets t WHERE t.revision=a.revision
-                AND t.kind='campus' AND t.entity NOT IN (SELECT value FROM json_each(?))))"""
-            params.append(json.dumps(campuses))
-        filters.append("(" + clause + ")")
+        reachable_campuses = set(campuses).union(r[1] for r in positions)
+        scope_cte = """WITH permitted_people(id) AS (SELECT value FROM json_each(?)),
+            permitted_rooms(id) AS (SELECT value FROM json_each(?)),
+            permitted_campuses(id) AS (SELECT value FROM json_each(?)),
+            reachable_campuses(id) AS (SELECT value FROM json_each(?)) """
+        params.extend(json.dumps(list(ids)) for ids in (permitted, rooms, campuses, reachable_campuses))
+        filters.append("""(a.action LIKE 'agent.%' OR (
+            (a.residentId='' OR a.residentId IN permitted_people)
+            AND (a.residentId<>'' OR (a.action='ops.subsidyList' AND EXISTS (
+                SELECT 1 FROM history_targets t WHERE t.revision=a.revision
+                AND t.kind='resident')) OR (a.action LIKE 'leads.%' AND EXISTS (
+                SELECT 1 FROM history_targets t WHERE t.revision=a.revision
+                AND t.kind='campus' AND t.entity IN permitted_campuses)))
+            AND NOT EXISTS (SELECT 1 FROM history_targets t WHERE t.revision=a.revision AND
+                ((t.kind='resident' AND t.entity NOT IN permitted_people)
+                 OR (t.kind='room' AND t.entity NOT IN permitted_rooms)
+                 OR (t.kind='campus' AND t.entity NOT IN reachable_campuses)))) )""")
     if room:
         filters.append("(instr(a.room,?)>0 OR instr(a.previousRoom,?)>0)")
         params.extend((room, room))
@@ -245,7 +270,7 @@ def page(db, user, room="", actor="", before=None, limit=50):
     query = """SELECT a.*, r.actor AS agentInitiator, s.grants AS agentGrants
                FROM audit a LEFT JOIN agent_audit_scope s ON s.runId=a.agentRunId
                LEFT JOIN agent_runs r ON r.id=s.runId"""
-    for record in db.execute(query + where + " ORDER BY a.revision DESC", params):
+    for record in db.execute(scope_cte + query + where + " ORDER BY a.revision DESC", params):
         item = dict(record)
         initiator = item.pop("agentInitiator")
         grants = (item.pop("agentGrants") or "").split()

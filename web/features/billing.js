@@ -1,3 +1,6 @@
+import { subsidies } from './subsidies.js';
+import { financeContext } from './finance-dialogs.js';
+import { medicalFees, dischargeBilling, dayClosing } from './finance-reports.js';
 import { residentLabel, residentAnchor } from './people-labels.js';
 import {
   node,
@@ -55,7 +58,8 @@ function residentBillingPolicy(ctx, person) {
   });
 }
 
-export function generate(ctx, selected, onIssued) {
+export function generate(ctx, selected, onIssued, firstCategory) {
+  ctx = financeContext(ctx);
   if (!ctx.state.allowedActions.includes('ops.bill')) return ctx.toast('当前账号无权核算账单');
   const due = new Map((ctx.state.billingDue || []).map((r) => [r.residentId, r]));
   const people = ctx.state.residents.filter((r) =>
@@ -73,7 +77,7 @@ export function generate(ctx, selected, onIssued) {
       !ctx.state.bills.some((b) => !['trial', 'security'].includes(b.kind) && b.residentId === r.id && b.month === month)
   );
   resident.value = selected?.residentId || due.keys().next().value || unbilled?.id || people[0].id;
-  const editor=chargesEditor(ctx);
+  const editor=chargesEditor(ctx, firstCategory);
   const schedule = node('p', 'fx-muted');
   schedule.setAttribute('aria-live', 'polite');
   const dialog = ctx.dialog({
@@ -145,6 +149,7 @@ export function generate(ctx, selected, onIssued) {
 }
 
 export function admissionPayment(ctx, residentId) {
+  ctx = financeContext(ctx);
   if (!canAct(ctx, 'ops.pay') && !canAct(ctx, 'ops.paymentOrder')) return;
   const person = ctx.state.residents.find((r) => r.id === residentId);
   if (!person) return;
@@ -174,6 +179,7 @@ export function admissionPayment(ctx, residentId) {
 }
 
 export function billDetail(ctx, bill) {
+  ctx = financeContext(ctx);
   const monthly = !['trial', 'security'].includes(bill.kind);
   const payments = ctx.state.payments.filter((p) => p.billId === bill.id);
   const contractRenewal = bill.contractRenewal;
@@ -197,7 +203,7 @@ export function billDetail(ctx, bill) {
       ['应收总额', money(bill.amount)],
       ['已核销总额', money(bill.paid)],
       ['待缴余额', money(bill.balance)],
-      ...(securityUsed != null ? [['已用于账单冲抵', money(securityUsed)], ['在账押金余额', money((bill.paid || 0) - securityUsed)]] : []),
+      ...(securityUsed != null ? [['已用于账单冲抵', money(securityUsed)], ['退住时已退押金',money(bill.refundedSecurity)], ['在账押金余额', money((bill.paid || 0) - securityUsed - (bill.refundedSecurity || 0))]] : []),
     ]),
     contractRenewal ? section('续住结果', facts([
       ['续住方式', '缴费到账后自动延长一个月'],
@@ -250,95 +256,154 @@ export function billDetail(ctx, bill) {
   ]);
   const vouchers = receiptRows(ctx.state).filter((r) => r.billId === bill.id || r.bills.has(bill.id));
   if (vouchers.length) content.append(section('原始收款凭证', records(vouchers, (row) => receiptFacts(row, bill.id))));
-  if (bill.balance > 0) content.append(cashierActions(ctx, bill));
-  ctx.detail('账单明细', content);
+  ctx.detail('账单明细', content, bill.balance > 0 ? cashierActions(ctx, bill) : null);
 }
 
 export function billing(ctx) {
+  ctx = financeContext(ctx);
   const bills = ctx.state.bills;
-  return page(
+  function summary() {
+    const day = today(ctx);
+    const period = day.slice(0, 7);
+    const receipts = receiptRows(ctx.state);
+    const monthReceipts = receipts.filter((r) => r.date.startsWith(period) && r.date <= day);
+    const collections = monthReceipts.reduce((sum, r) => sum + r.gross, 0) / 100;
+    const balances = bills.filter((b) => b.balance > 0);
+    const entries = [
+      ['bills', '收费账单', bills.length + ' 张账单'],
+      ['due', '待出月账单', (ctx.state.billingDue || []).length + ' 个待出账期'],
+      ['deposits', '预缴余额', (ctx.state.deposits || []).length + ' 个账户'],
+      ['receipts', '实收流水', monthReceipts.length + ' 笔本月到账'],
+      ['payments', '账单核销记录', (ctx.state.payments || []).length + ' 笔核销'],
+      ['orders', '渠道对账', (ctx.state.paymentOrders || []).length + ' 个支付订单'],
+      ['expenses', '支出登记', (ctx.state.expenses || []).length + ' 笔支出'],
+      ['reminders', '欠费提醒', balances.length + ' 张待缴账单'],
+      ['subsidies', '民政补贴申报材料', '按月核对证件、发票和清单'],
+    ];
+    return node('div', 'finance-summary', [
+      node('h1', '', '财务总览'),
+      kpis([
+        ['累计应收', money(bills.reduce((s, b) => s + b.amount, 0))],
+        ['本月实收', money(collections)],
+        ['待缴余额', money(balances.reduce((s, b) => s + b.balance, 0))],
+        ['可用预缴金', money((ctx.state.deposits || []).reduce((s, r) => s + r.amount, 0))],
+      ]),
+      node(
+        'section',
+        'finance-entries',
+        entries.map(([key, title, detail]) => {
+          const b = btn(ctx, title, () => ctx.go('billing', key));
+          b.append(node('small', '', detail));
+          return b;
+        }),
+      ),
+    ]);
+  }
+  function billsTable(unpaid) {
+    return table(ctx, {
+      title: unpaid ? '待收费账单' : '账单明细',
+      action: canAct(ctx, 'ops.bill') && btn(ctx, '核算账单', () => generate(ctx), 'primary'),
+      rows: unpaid ? bills.filter((b) => b.balance > 0) : bills,
+      search: {
+        placeholder: '搜索长辈或账期',
+        value: (b) => residentName(ctx, b.residentId) + ' ' + b.month,
+      },
+      filter: {
+        value: (b) => b.status,
+      },
+      cols: [
+        {
+          label: '长辈',
+          view: (b) => residentAnchor(ctx, b.residentId),
+        },
+        {
+          label: '账期',
+          view: (b) => named(b.billingDate || b.month, billType(b)),
+        },
+        {
+          label: '应收金额',
+          view: (b) => money(b.amount),
+        },
+        {
+          label: '待缴余额',
+          view: (b) => money(b.balance),
+        },
+        {
+          label: '状态',
+          view: (b) =>
+            b.contractRenewal
+              ? node('div', 'fx-named', [
+                  badge(ctx, b.status),
+                  node('small', '', '已续住至 ' + b.contractRenewal.endDate),
+                ])
+              : badge(ctx, b.status),
+        },
+        {
+          label: '操作',
+          align: 'end',
+          view: (b) => link(ctx, '查看明细', () => billDetail(ctx, b)),
+        },
+      ],
+    });
+  }
+  const module = page(
     ctx,
-    '财务管理',
-    '按项核算房间床位、饮食、护理及约定费用，核对欠费和预交金。',
-    choose(
-      ctx.state.allowedActions.includes('ops.paymentFees') && btn(ctx, '收款手续费设置', () => feeSettings(ctx)),
-      btn(ctx, '登记预缴金', () => recordCash(ctx)),
-      btn(ctx, '核算账单', () => generate(ctx), 'primary')
-    ),
-    kpis([
-      ['累计应收', money(bills.reduce((s, b) => s + b.amount, 0))],
-      ['已收金额', money(bills.reduce((s, b) => s + b.paid, 0))],
-      ['待缴余额', money(bills.reduce((s, b) => s + b.balance, 0))],
-    ]),
+    '费用管理',
+    '',
+    null,
     tabs('billing', [
+      ['summary', '财务总览', summary],
+      ['unpaid', '待收费', () => billsTable(true)],
+      ['bills', '收费账单', () => billsTable(false)],
       [
-        'bills',
-        '收费账单',
+        'due',
+        '待出月账单',
         () =>
           table(ctx, {
-            title: '账单明细',
-            rows: bills,
-            search: {
-              placeholder: '搜索长辈或账期',
-              value: (b) => residentName(ctx, b.residentId) + ' ' + b.month,
-            },
-            filter: {
-              value: (b) => b.status,
-            },
+            title: '已到账单日的月付账期',
+            action: canAct(ctx, 'ops.bill') && btn(ctx, '核算账单', () => generate(ctx), 'primary'),
+            rows: ctx.state.billingDue || [],
+            empty: '当前没有已到期且尚未出账的约定月付账期。',
+            search: { placeholder: '搜索长辈', value: (r) => residentName(ctx, r.residentId) },
             cols: [
-              {
-                label: '长辈',
-                view: (b) => residentAnchor(ctx, b.residentId),
-              },
-              {
-                label: '账期',
-                view: (b) => named(b.billingDate || b.month, billType(b)),
-              },
-              {
-                label: '应收金额',
-                view: (b) => money(b.amount),
-              },
-              {
-                label: '待缴余额',
-                view: (b) => money(b.balance),
-              },
-              {
-                label: '状态',
-                view: (b) => b.contractRenewal ? node('div', 'fx-named', [
-                  badge(ctx, b.status), node('small', '', '已续住至 ' + b.contractRenewal.endDate),
-                ]) : badge(ctx, b.status),
-              },
+              { label: '长辈', view: (r) => residentAnchor(ctx, r.residentId) },
+              { label: '本期账单日', view: (r) => r.billingDate },
+              { label: '计费区间', view: (r) => r.startDate + ' 至 ' + r.endDate },
               {
                 label: '操作',
                 align: 'end',
-                view: (b) => link(ctx, '查看明细', () => billDetail(ctx, b)),
+                view: (r) =>
+                  ctx.state.allowedActions.includes('ops.bill')
+                    ? link(ctx, '核算本期', () => generate(ctx, r))
+                    : null,
               },
             ],
           }),
       ],
-      ['due', '待出月账单', () => table(ctx, {
-        title: '已到账单日的月付账期',
-        rows: ctx.state.billingDue || [],
-        empty: '当前没有已到期且尚未出账的约定月付账期。',
-        search: { placeholder: '搜索长辈', value: (r) => residentName(ctx, r.residentId) },
-        cols: [
-          { label: '长辈', view: (r) => residentAnchor(ctx, r.residentId) },
-          { label: '本期账单日', view: (r) => r.billingDate },
-          { label: '计费区间', view: (r) => r.startDate + ' 至 ' + r.endDate },
-          { label: '操作', align: 'end', view: (r) => ctx.state.allowedActions.includes('ops.bill')
-            ? link(ctx, '核算本期', () => generate(ctx, r)) : null },
-        ],
-      })],
       ['orders', '渠道对账', () => channelOrders(ctx)],
+      [
+        'medicalFees',
+        '医疗费用',
+        () =>
+          medicalFees(
+            ctx,
+            (bill) => billDetail(ctx, bill),
+            () => generate(ctx, null, null, 'medical'),
+          ),
+      ],
+      ['discharge', '退住结算', () => dischargeBilling(ctx, (bill) => billDetail(ctx, bill))],
+      ['daily', '日结报表', () => dayClosing(ctx)],
       ['reminders', '欠费提醒', () => reminders(ctx)],
       ['billingNotices', '账务提醒', () => billingNotices(ctx, (bill) => billDetail(ctx, bill))],
       ['expenses', '支出登记', () => expensePanel(ctx)],
       [
         'deposits',
-        '预交余额',
+        '预缴余额',
         () =>
           table(ctx, {
-            title: '预交账户',
+            title: '预缴账户',
+            action:
+              canAct(ctx, 'ops.deposit') && btn(ctx, '登记预缴金', () => recordCash(ctx), 'primary'),
             rows: ctx.state.deposits,
             search: {
               placeholder: '搜索长辈姓名',
@@ -366,15 +431,24 @@ export function billing(ctx) {
                       '预交金到账记录',
                       records(
                         ctx.state.depositEntries.filter((e) => e.residentId === r.residentId),
-                        (e) => named(money(e.amount), receiptDescription(e))
-                      )
-                    )
+                        (e) => named(money(e.amount), receiptDescription(e)),
+                      ),
+                    ),
                   ),
               },
             ],
           }),
       ],
-      ['receipts', '实收流水', () => receiptLedger(ctx)],
+      ['subsidies', '民政补贴申报材料', () => subsidies(ctx)],
+      [
+        'receipts',
+        '实收流水',
+        () =>
+          node('div', 'fx-profile', [
+            canAct(ctx, 'ops.paymentFees') && choose(btn(ctx, '收款手续费设置', () => feeSettings(ctx))),
+            receiptLedger(ctx),
+          ]),
+      ],
       [
         'payments',
         '账单核销记录',
@@ -411,14 +485,16 @@ export function billing(ctx) {
                 label: '核销金额',
                 view: (r) => money(r.amount),
               },
-              { label: '机构手续费', view: (r) => r.feeAmount == null ? '—' : money(r.feeAmount) },
+              { label: '机构手续费', view: (r) => (r.feeAmount == null ? '—' : money(r.feeAmount)) },
               {
                 label: '净入账',
-                view: (r) => r.netAmount == null ? '—' : money(r.netAmount),
+                view: (r) => (r.netAmount == null ? '—' : money(r.netAmount)),
               },
             ],
           }),
       ],
-    ])
+    ]),
   );
+  module.classList.add('finance-workspace');
+  return module;
 }

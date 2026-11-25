@@ -32,7 +32,9 @@ function question(item, opened) {
 }
 
 function notes(parent, items, initial, field) {
-  const categories = [...new Set(items.map(item => item.category))];
+  const totals = new Map();
+  for (const item of items) totals.set(item.category, (totals.get(item.category) || 0) + 1);
+  const categories = [...totals.keys()];
   const selection = items.find(item => item.id === initial);
   let active = selection?.category || '';
   const filters = el('nav', 'faq-filters');
@@ -50,6 +52,9 @@ function notes(parent, items, initial, field) {
   const choices = new Map(['', ...categories].map(category => {
     const button = el('button', 'faq-filter', category || '全部问题');
     button.type = 'button';
+    const count = el('small', '', totals.get(category) || items.length);
+    count.setAttribute('aria-hidden','true');
+    button.append(count);
     button.addEventListener('click', () => {
       active = category;
       display();

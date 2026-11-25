@@ -3,7 +3,7 @@
 from http.server import ThreadingHTTPServer
 import os
 from pathlib import Path
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Lock
 
 
 LARGE_BODY = 512 * 1024
@@ -51,7 +51,7 @@ def configured_limits():
 def heavy_request(method, path, content_length):
     if method == "GET":
         return path == "/api/backups/download" or path.startswith((
-            "/api/medical-visits/originals/", "/api/finance/expense-import/files/", "/tour-media/",
+            "/api/medical-visits/originals/", "/api/finance/subsidies/materials/", "/api/finance/expense-import/files/", "/tour-media/",
         )) or (
             path.startswith("/api/documents/") and ("/pages/" in path or path.endswith("/image"))
         ) or (path.startswith("/api/staff/") and path.endswith("/original"))
@@ -64,13 +64,26 @@ def heavy_request(method, path, content_length):
 
 class CapacityServer(ThreadingHTTPServer):
     def __init__(self, address, handler, *, workers, heavy_workers):
+        self._usage_lock = Lock()
+        self._usage = dict(active=0, peak=0, limit=workers, rejected=0)
         self.connections = BoundedSemaphore(workers)
         self.heavy_slots = BoundedSemaphore(heavy_workers)
         self.request_queue_size = workers * 2
         super().__init__(address, handler)
 
+    def usage(self):
+        with self._usage_lock:
+            return self._usage.copy()
+
+    def release_connection(self):
+        with self._usage_lock:
+            self._usage["active"] -= 1
+        self.connections.release()
+
     def process_request(self, request, client_address):
         if not self.connections.acquire(blocking=False):
+            with self._usage_lock:
+                self._usage["rejected"] += 1
             try:
                 request.settimeout(0.2)
                 request.sendall(OVERLOAD_REPLY)
@@ -80,14 +93,17 @@ class CapacityServer(ThreadingHTTPServer):
                 self.shutdown_request(request)
             return
         try:
+            with self._usage_lock:
+                self._usage["active"] += 1
+                self._usage["peak"] = max(self._usage["peak"], self._usage["active"])
             request.settimeout(15)
             super().process_request(request, client_address)
         except BaseException:
-            self.connections.release()
+            self.release_connection()
             raise
 
     def process_request_thread(self, request, client_address):
         try:
             super().process_request_thread(request, client_address)
         finally:
-            self.connections.release()
+            self.release_connection()

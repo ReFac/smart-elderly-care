@@ -12,6 +12,7 @@ CARE_COLLECTIONS = (
     "plans",
     "tasks",
     "medications",
+    "medicationReceipts",
     "vitals",
     "handovers",
     "leaves",

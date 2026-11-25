@@ -3,13 +3,16 @@ import { staffNotices } from './assistant-actions.js';
 import { commentInput } from '../lib/change-review.js';
 import { voiceProposal } from './speech-input.js';
 import { roundsInbox } from './rounds-desk.js';
-import { canOpenPermissionRequests, pendingPermissionRequests, permissionRequestsPanel } from './permission-requests.js';
+import { canOpenPermissionRequests, permissionRequestsPanel } from './permission-requests.js';
 import {
   node,
   page,
   btn,
   choose,
   facts,
+  table,
+  named,
+  link,
   section,
   badge,
   runForm,
@@ -113,7 +116,7 @@ function mark(ctx, name, tone = '') {
   return node('span', 'gw-mark ' + tone, ctx.ui.icon(name, 20));
 }
 
-function inspectAlert(ctx, row) {
+export function inspectAlert(ctx, row) {
   const pending = row.status === '待复核';
   const headline = node('div', 'gw-event-heading', [
     mark(ctx, 'bell', pending ? 'gw-gold' : ''),
@@ -176,7 +179,7 @@ function changePreview(ctx, task, row) {
   ]);
 }
 
-async function confirmProposal(ctx, row, trigger) {
+export async function confirmProposal(ctx, row, trigger) {
   try {
     const changes = await ctx.get('/api/voice-proposals/' + encodeURIComponent(row.id));
     if (!trigger.isConnected) return;
@@ -241,187 +244,59 @@ async function confirmProposal(ctx, row, trigger) {
   ctx.detail('确认语音申请', content).dataset.proposalId = row.id;
 }
 
-function searchBox(ctx, placeholder) {
-  const input = node('input');
-  input.type = 'search';
-  input.placeholder = placeholder;
-  input.setAttribute('aria-label', placeholder);
-  return { input, label: node('label', 'gw-search', [ctx.ui.icon('search', 17), input]) };
-}
-
-function queueRow(ctx, row, alerts) {
-  const pending = row.status === '待复核';
-  const title = alerts ? signals[row.signal] : row.title;
-  const meta = alerts
-    ? row.observations.map((e) => sources[e.source]).join('、')
-    : '申请人 ' + row.requester;
-  const note = alerts ? row.observation : null;
-  const action = btn(
-    ctx,
-    alerts ? (pending ? '查看并复核' : '查看记录') : '核对改动',
-    (event) => (alerts ? inspectAlert(ctx, row) : confirmProposal(ctx, row, event.currentTarget)),
-    'secondary',
-  );
-  return node('li', 'gw-event', [
-    mark(ctx, alerts ? 'pulse' : 'care', alerts && pending ? 'gw-gold' : ''),
-    node('div', 'gw-event-main', [
-      node('div', 'gw-event-title', [
-        node('strong', '', title),
-        alerts && pending
-          ? badge(ctx, row.priority, row.signal === 'possible_fall' ? 'red' : 'neutral')
-          : null,
-        badge(ctx, alerts ? row.status : '待确认', pending || !alerts ? 'amber' : 'blue'),
-      ]),
-      node('div', 'gw-event-meta', [
-        node('span', '', row.room),
-        node('span', '', alerts ? meta : residentName(ctx, row.residentId) + ' · ' + meta),
-      ]),
-      note ? node('p', '', note) : null,
-    ]),
-    node('div', 'gw-event-action', [
-      node('time', '', stamp(alerts ? row.observedAt : row.createdAt)),
-      action,
-    ]),
-  ]);
-}
-
 function queuePanel(ctx, alerts) {
-  const rows = alerts ? ctx.state.gatewayAlerts : ctx.state.voiceQueue;
-  const search = searchBox(ctx, alerts ? '搜索房间、事件编号或设备来源' : '搜索房间、工单或申请人');
-  const filter = node('select', 'gw-select');
-  filter.setAttribute('aria-label', '筛选预警状态');
-  for (const [value, label] of [
-    ['pending', '待复核'],
-    ['resolved', '已复核记录'],
-    ['all', '全部预警'],
-  ])
-    filter.add(new Option(label, value));
-  const count = node('span', 'gw-count');
-  count.setAttribute('aria-live', 'polite');
-  const list = node('ul', 'gw-feed');
-  const blank = node('div', 'gw-blank');
-  const more = btn(ctx, '显示更多记录', () => {
-    limit += 12;
-    render();
-  });
-  let limit = 12;
-  function render() {
-    const needle = search.input.value.trim().toLocaleLowerCase();
-    const subset = rows.filter((r) => {
-      if (
-        alerts &&
-        ((filter.value === 'pending' && r.status !== '待复核') ||
-          (filter.value === 'resolved' && r.status === '待复核'))
-      )
-        return false;
-      const keys = alerts
-        ? [
-            r.room,
-            r.priority,
-            signals[r.signal],
-            ...r.observations.flatMap((e) => [e.eventId, sources[e.source]]),
-          ]
-        : [r.room, r.title, r.requester, residentName(ctx, r.residentId)];
-      return !needle || keys.join(' ').toLocaleLowerCase().includes(needle);
+  if (alerts) {
+    const sourceNames = r => r.observations.map(event=>sources[event.source] || event.source).join('、');
+    return table(ctx,{
+      title:'房间设备事件',rows:ctx.state.gatewayAlerts,empty:'当前没有设备预警记录',
+      search:{placeholder:'搜索房间、事件编号或设备来源',
+        value:r=>[r.room,r.priority,signals[r.signal],sourceNames(r),...r.observations.map(o=>o.eventId)].join(' ')},
+      filter:{label:'复核状态',options:['待复核','已复核'],initial:'待复核',all:'全部预警',
+        matches:(r,status)=>(r.status==='待复核')===(status==='待复核')},
+      cols:[{label:'房间',view:r=>r.room},{label:'预警事项',view:r=>named(signals[r.signal] || r.signal,r.observation)},
+        {label:'设备来源',view:sourceNames},{label:'优先级',view:r=>badge(ctx,r.priority)},
+        {label:'复核状态',view:r=>badge(ctx,r.status)},
+        {label:'操作',align:'end',view:r=>link(ctx,r.status==='待复核'?'查看并复核':'查看记录',()=>inspectAlert(ctx,r))}],
     });
-    count.textContent = subset.length + ' 条';
-    list.replaceChildren(...subset.slice(0, limit).map((r) => queueRow(ctx, r, alerts)));
-    blank.hidden = !!subset.length;
-    blank.replaceChildren(
-      ctx.ui.icon(alerts ? 'bell' : 'check', 26),
-      node(
-        'span',
-        '',
-        needle
-          ? '没有匹配的记录'
-          : alerts
-            ? filter.value === 'pending'
-              ? '当前没有待复核预警'
-              : '当前没有设备预警记录'
-            : '当前没有待确认申请',
-      ),
-    );
-    more.hidden = subset.length <= limit;
   }
-  const reset = () => {
-    limit = 12;
-    render();
-  };
-  search.input.addEventListener('input', reset);
-  filter.addEventListener('change', reset);
-  render();
-  return node('section', 'gw-panel', [
-    node('header', 'gw-panel-head', [
-      node('div', 'gw-title-line', [
-        node('h2', '', alerts ? '房间设备事件' : '语音变更申请'),
-        count,
-      ]),
-      node('div', 'gw-tools', [search.label, alerts ? filter : null]),
-    ]),
-    list,
-    blank,
-    node('div', 'gw-more', more),
-  ]);
+  return table(ctx,{title:'待确认语音申请',rows:ctx.state.voiceQueue,empty:'当前没有待确认申请',
+    search:{placeholder:'搜索房间、工单或申请人',value:r=>[r.room,r.title,r.requester,residentName(ctx,r.residentId)].join(' ')},
+    cols:[{label:'工单',view:r=>r.title},{label:'房间',view:r=>r.room},{label:'长辈',view:r=>residentName(ctx,r.residentId)},
+      {label:'申请人',view:r=>r.requester},{label:'操作',align:'end',view:r=>
+        link(ctx,'核对改动',evt=>confirmProposal(ctx,r,evt.currentTarget))}],
+  });
 }
 
 function inbox(ctx) {
-  const actions = choose(),
-    views = [],
-    metadata = {};
+  const actions = choose(), views = [];
   if (has(ctx, 'gateway.simulate')) actions.append(btn(ctx, '模拟设备信号', () => simulate(ctx)));
   if (has(ctx, 'voice') && has(ctx, 'care'))
     actions.append(btn(ctx, '登记语音草稿', () => newProposal(ctx), 'primary'));
   if (has(ctx, 'audit') && ctx.available('activity'))
     actions.append(btn(ctx, '查看操作日志', () => ctx.go('activity')));
   if (has(ctx, 'alerts')) {
-    metadata.alerts = [
-      'bell',
-      '待护士现场复核',
-      ctx.state.gatewayAlerts.filter((a) => a.status === '待复核').length,
-    ];
     views.push(['alerts', '设备预警', () => queuePanel(ctx, true)]);
   }
   if (has(ctx, 'voice.confirm') && has(ctx, 'care')) {
-    metadata.voice = ['care', '待授权护工确认', ctx.state.voiceQueue.length];
     views.push(['voice', '待确认语音', () => queuePanel(ctx, false)]);
   }
   if (has(ctx, 'care') || has(ctx, 'clinical')) {
-    metadata.rounds = ['care', '待核对的照护事项', null];
     views.push(['rounds', '巡查提醒', () => roundsInbox(ctx)]);
   }
   if (canOpenPermissionRequests(ctx)) {
-    metadata.permissionRequests = ['shield', '办理临时档案授权', pendingPermissionRequests(ctx) || null];
     views.push(['permissionRequests', '权限申请', () => permissionRequestsPanel(ctx)]);
   }
   if (ctx.state.user.kind !== 'family') {
-    metadata.notices = ['bell', '全体员工可见', (ctx.state.staffNotices || []).length];
     views.push(['notices', '全员通知', () => staffNotices(ctx)]);
   }
   let queue;
   if (views.length) {
     queue = tabs('inbox', views);
-    queue.classList.add('gw-queues');
-    for (const tab of queue.querySelectorAll('[role=tab]')) {
-      const label = tab.textContent,
-        [ic, hint, count] = metadata[tab.dataset.key];
-      tab.replaceChildren(
-        mark(ctx, ic),
-        node('span', 'gw-tab-text', [node('strong', '', label), node('small', '', hint)]),
-        ...(count === null ? [] : [node('b', 'gw-tab-count', count)]),
-      );
-      tab.setAttribute('aria-label', label + '，' + hint + (count === null ? '' : count + '条'));
-    }
   } else queue = ctx.ui.empty('可以通过上方按钮登记设备观测或提交语音变更申请。');
   return page(ctx, '预警与人工确认', '', actions, queue);
 }
 
-const groupIcons = {
-  工牌与定位: 'location',
-  质控与通知: 'shield',
-  报表与人员: 'reports',
-  院内设备: 'pulse',
-  语音与文档: 'file',
-};
+
 
 function schemaDetails(ctx, title, schema, open = false) {
   const fields = Object.entries(schema.properties || {});
@@ -495,81 +370,18 @@ function inspectContract(ctx, row) {
 
 function integrations(ctx) {
   const rows = ctx.state.integrationCatalog;
-  const counts = new Map();
-  for (const r of rows) counts.set(r.group, (counts.get(r.group) || 0) + 1);
-  const nav = node('nav', 'gw-category');
-  nav.setAttribute('aria-label', '接口分类');
-  nav.append(node('h2', '', '能力分类'));
-  const search = searchBox(ctx, '搜索接口名称、编号或用途');
-  const grid = node('div', 'gw-contracts');
-  const label = node('h2', '', '全部接口'),
-    result = node('span', 'gw-count');
-  result.setAttribute('aria-live', 'polite');
-  let selected = '';
-  const controls = new Map();
-  for (const [group, count] of [['', rows.length], ...counts]) {
-    const menu = node('button', 'gw-category-item', [
-      ctx.ui.icon(groupIcons[group] || 'layers', 16),
-      node('span', '', group || '全部接口'),
-      node('b', '', count),
-    ]);
-    menu.type = 'button';
-    menu.addEventListener('click', () => {
-      selected = group;
-      render();
-    });
-    controls.set(group, menu);
-    nav.append(menu);
-  }
-  function render() {
-    for (const [key, button] of controls)
-      button.setAttribute('aria-pressed', String(key === selected));
-    const needle = search.input.value.trim().toLocaleLowerCase();
-    const matches = rows.filter(
-      (r) =>
-        (!selected || selected === r.group) &&
-        [r.title, r.id, r.group, r.description].join(' ').toLocaleLowerCase().includes(needle),
-    );
-    result.textContent = matches.length + ' 个接口';
-    label.textContent = selected || '全部接口';
-    grid.replaceChildren(
-      ...matches.map((r) => {
-        const card = node('button', 'gw-contract', [
-          node('span', 'gw-contract-meta', [
-            node('span', '', [ctx.ui.icon(groupIcons[r.group], 15), r.group]),
-            node('small', '', '待接入'),
-          ]),
-          node('strong', '', r.title),
-          node('p', '', r.description),
-          node('span', 'gw-contract-id', [node('code', '', r.id), ctx.ui.icon('chevron', 15)]),
-        ]);
-        card.type = 'button';
-        card.addEventListener('click', () => inspectContract(ctx, r));
-        return card;
-      }),
-    );
-    if (!matches.length)
-      grid.append(node('div', 'gw-blank', [ctx.ui.icon('search', 24), '没有匹配的接口']));
-  }
-  search.input.addEventListener('input', render);
-  render();
-  const catalog = node('div', 'gw-catalog', [
-    nav,
-    node('section', 'gw-catalog-main', [
-      node('header', 'gw-panel-head', [
-        node('div', 'gw-title-line', [label, result]),
-        search.label,
-      ]),
-      grid,
-    ]),
-  ]);
-  return page(
-    ctx,
-    '设备与模型接口',
-    '查看设备能力、请求字段和接入条件。当前预留端口统一返回 HTTP 501。',
-    null,
-    catalog,
-  );
+  return page(ctx, '设备与接口', '', null, table(ctx,{
+    title:'设备与模型接口台账', rows,
+    search:{placeholder:'搜索接口、编号或用途',value:r=>[r.title,r.id,r.group,r.description].join(' ')},
+    filter:{label:'接口分类',all:'全部分类',value:r=>r.group},
+    cols:[
+      {label:'接口名称',view:r=>named(r.title,r.id)},
+      {label:'分类',view:r=>r.group}, {label:'用途',view:r=>r.description},
+      {label:'控制权限',view:r=>r.ownerOnly ? '仅 Owner' : '按机构授权'},
+      {label:'接入状态',view:()=>badge(ctx,'预留端口','neutral')},
+      {label:'操作',align:'end',view:r=>link(ctx,'查看接口',()=>inspectContract(ctx,r))},
+    ],
+  }));
 }
 
 export function renderGateways(route, ctx) {

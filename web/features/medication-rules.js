@@ -15,7 +15,7 @@ import {
   table,
 } from './shared.js';
 
-function due(row, now) {
+export function medicationDue(row, now) {
   return (
     row.status === '待执行' &&
     Boolean(row.scheduledAt) &&
@@ -24,7 +24,7 @@ function due(row, now) {
 }
 
 export const dueMedicationCount = (rows, now = Date.now()) =>
-  rows.filter((r) => due(r, now)).length;
+  rows.filter((r) => medicationDue(r, now)).length;
 
 class MedicationSchedule extends HTMLElement {
   connectedCallback() {
@@ -65,7 +65,7 @@ export function medicationReminders(ctx, execute) {
           {
             label: '提醒',
             view: (r) =>
-              due(r, now) ? badge(ctx, '已到时', 'amber') : badge(ctx, '待到时', 'neutral'),
+              medicationDue(r, now) ? badge(ctx, '已到时', 'amber') : badge(ctx, '待到时', 'neutral'),
           },
           { label: '办理', view: (r) => link(ctx, '登记执行', () => execute(r)) },
         ],

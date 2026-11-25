@@ -15,11 +15,11 @@ function number(min, step) {
 }
 const field = (label, el) => node('label', 'field', [node('span', '', label), el]);
 
-export function chargesEditor(ctx) {
+export function chargesEditor(ctx, firstCategory) {
   const catalog = ctx.state.chargeCatalog;
   const rows = new Map(),
     list = node('div', 'invoice-rows');
-  function append() {
+  function append(initialCode) {
     const code = picker(Object.entries(catalog.categories));
     const unit = picker(catalog.units.map((x) => [x, x]));
     const basis = picker([
@@ -65,7 +65,10 @@ export function chargesEditor(ctx) {
       sync();
     };
     basis.onchange = sync;
-    sync();
+    if (typeof initialCode === 'string' && catalog.categories[initialCode]) {
+      code.value = initialCode;
+      code.onchange();
+    } else sync();
     rows.set(row, () => ({
       code: code.value,
       unit: unit.value,
@@ -76,6 +79,7 @@ export function chargesEditor(ctx) {
     }));
     list.append(row);
   }
+  if (firstCategory) append(firstCategory);
   return {
     element: node('section', 'fx-section', [
       node('h3', '', '饮食及其他费用'),

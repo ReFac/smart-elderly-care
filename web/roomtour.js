@@ -1,7 +1,7 @@
 import { stops, tourModel } from './roomtour-model.js';
-import { colorModeControl } from './lib/color-mode.js';
+import { publicPage } from './public-site.js';
 
-document.querySelector('.account-actions').prepend(colorModeControl());
+publicPage('3D 环境导览');
 
 const byId = new Map(stops.map(stop => [stop.id, stop]));
 const canvas = document.querySelector('#tour-canvas');
@@ -57,7 +57,14 @@ for (const stop of stops) {
   const item = viewButton(stop.name, 'tour-stop', () => visitRoom(stop));
   const location = document.createElement('small');
   location.textContent = stop.place;
-  item.append(location);
+  const preview = document.createElement('img');
+  preview.src = '/assets/visit/' + stop.id + '.webp';
+  preview.alt = '';
+  preview.width = 74;
+  preview.height = 46;
+  const label = document.createElement('span');
+  label.append(stop.name, location);
+  item.replaceChildren(preview, label);
   scenes.set(stop.id, item);
   navigation.append(item);
 }
@@ -70,12 +77,3 @@ const turns = {left:() => model.turn(-.31), right:() => model.turn(.31), in:() =
   out:() => model.zoom(-.16), reset:() => model.reset()};
 for (const control of document.querySelectorAll('[data-tour-turn]'))
   control.addEventListener('click', turns[control.dataset.tourTurn]);
-
-fetch('/api/public/reception', {credentials:'omit'})
-  .then(response => response.ok ? response.json() : null)
-  .then(data => {
-    if (!data?.institutionName) return;
-    document.querySelector('[data-tour-brand]').textContent = data.institutionName;
-    document.title = '3D 环境导览 · ' + data.institutionName;
-  })
-  .catch(() => {});

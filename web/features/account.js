@@ -1,10 +1,10 @@
 import { residentLabel, staffLabel } from './people-labels.js';
-import { groups } from '../lib/navigation.js';
+import { menuFor } from '../lib/desk-navigation.js';
 import { colorModeControl } from '../lib/color-mode.js';
 import { openEmployment } from './staff-employment.js';
 import { bindFlow, passwordFlow } from './identity.js';
 import { passkeyButton, passkeySettings } from './passkeys.js';
-import { canAct, node, page } from './shared.js';
+import { canAct, node, page, tabs, table, btn } from './shared.js';
 import { canOpenPermissionRequests, openPermissionRequests } from './permission-requests.js';
 
 const passwordAction = 'account.changePassword';
@@ -46,37 +46,19 @@ function identity(ctx) {
   return card;
 }
 
-function moduleLinks(ctx, allowed) {
-  const content = node('div', 'personal-module-groups');
-  for (const [group, items] of groups) {
-    const links = [];
-    for (const [id, label, icon] of items) {
-      if (id === 'account' || !allowed.has(id)) continue;
-      const anchor = node('a', 'personal-module-link', [
-        ctx.ui.icon(icon, 17),
-        node('span', '', id === 'family' && ctx.state.user.portalSelf ? '长辈服务' : label),
-        ctx.ui.icon('chevron', 13),
-      ]);
-      anchor.href = '#' + id;
-      links.push(anchor);
-    }
-    if (links.length)
-      content.append(
-        node('section', 'personal-module-group', [
-          node('h3', '', group),
-          node('div', 'personal-module-links', links),
-        ]),
-      );
-  }
-  if (!content.childElementCount) content.append(ctx.ui.empty('当前账号暂无可用业务模块'));
-  return node('section', 'fx-panel personal-panel', [
-    node('h2', 'personal-panel-title', [ctx.ui.icon('layers', 19), '可用模块']),
-    content,
-  ]);
+function moduleLinks(ctx) {
+  const rows = menuFor(ctx).flatMap(group=>group.children
+    ? group.children.map(([route,label,tab])=>({group:group.label,label,route,tab}))
+    : [{group:'工作台',label:group.label,route:group.route,view:group.view}]);
+  return table(ctx,{title:'本人可用的业务入口',rows,
+    search:{placeholder:'搜索栏目或页面',value:r=>r.group + ' ' + r.label},
+    cols:[{label:'栏目',view:r=>r.group},{label:'页面',view:r=>r.label},{label:'操作',align:'end',
+      view:r=>btn(ctx,'打开',()=>ctx.go(r.route,r.tab,undefined,r.view ? {view:r.view} : undefined),'ghost')}],
+  });
 }
 
 export function accountCenter(ctx) {
-  const { routes, permissions } = ctx.state.selfAccess;
+  const { permissions } = ctx.state.selfAccess;
   const grants = node('section', 'fx-panel personal-panel', [
     node('h2', 'personal-panel-title', [ctx.ui.icon('shield', 19), '我的权限']),
     canOpenPermissionRequests(ctx)
@@ -102,7 +84,10 @@ export function accountCenter(ctx) {
     '个人中心',
     '',
     colorModeControl(),
-    identity(ctx),
-    node('div', 'personal-layout', [moduleLinks(ctx, new Set(routes)), grants]),
+    tabs('account',[
+      ['identity','账户资料',()=>identity(ctx)],
+      ['grants','我的权限',()=>grants],
+      ['modules','可用页面',()=>moduleLinks(ctx)],
+    ]),
   );
 }

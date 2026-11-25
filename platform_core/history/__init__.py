@@ -240,7 +240,7 @@ class Reader:
             return own and can_read_agent_history(self.db, self.user, row["revision"])
         if action in ("leads.public", "trial.expire"):
             return policy.has(self.user, "intake")
-        if action == "ops.billingLifecycle":
+        if action in ("ops.billingLifecycle", "ops.readSubsidyMaterial"):
             return policy.has(self.user, "finance")
         if action == "permissionRequest.editProfile":
             return policy.has(self.user, "intake")
@@ -298,6 +298,8 @@ class Reader:
         if self.user["kind"] == "owner":
             return True
         name = c["collection"]
+        if name in ("subsidy_materials", "subsidy_claims", "subsidy_policy"):
+            return policy.has(self.user, "finance")
         if name.startswith("daily_life_"):
             return policy.has(self.user, "care") or policy.has(self.user, "care.groupConfirm")
         if name == "medication_round_receipts":

@@ -165,14 +165,31 @@ function registry(ctx, archive) {
   const sourceFilters = Object.entries(sources).map(([id, text]) => ({
     text, match: r => r.source === id || (id === 'callback' && requestedCallbacks.has(r.id)),
   }));
-  const choices = archive ? sourceFilters : [...filters, ...sourceFilters];
-  return table(ctx, {
+  const memory = ctx.workspaceState || {};
+  const key = archive?'archivedLeads':'activeLeads';
+  const saved=memory[key] ||= {campus:'',source:''};
+  const body=node('div');
+  function pick(title, field, choices) {
+    const select=node('select','fx-input');
+    select.setAttribute('aria-label',title);
+    select.replaceChildren(new Option('全部',''),...choices.map(([id,name])=>new Option(name,id)));
+    select.value=saved[field];saved[field]=select.value;
+    select.onchange=()=>{saved[field]=select.value;draw();};
+    return node('label','agenda-field',[title,select]);
+  }
+  const controls=node('div','agenda-filter',[
+    pick('接待分院','campus',(ctx.state.leadCampuses || []).map(c=>[c.id,c.name])),pick('客户来源','source',Object.entries(sources)),
+  ]);
+  function draw() {
+    const scoped=rows.filter(r=>(!saved.campus || r.campusId===saved.campus) &&
+      (!saved.source || sourceFilters.find(f=>f.text===sources[saved.source])?.match(r)));
+    body.replaceChildren(table(ctx, {
     title: archive ? '近 365 天归档客户' : '跟进中的客户',
-    rows, empty: archive ? '尚无归档客户' : '暂无待跟进客户，可手工登记来电或来访。',
+    rows:scoped, empty: archive ? '当前筛选没有归档客户。' : '当前筛选暂无待跟进客户。',
     search: { placeholder: '搜索客户、电话、床号或关联长辈', value: r => [leadName(r), r.phone, relationships(r), campusName(ctx, r.campusId)].join(' ') },
-    filter: { label: '筛选客户', all: '全部客户', options: choices.map(c => c.text), matches: (r, text) => choices.find(c => c.text === text)?.match(r) },
+    filter: archive ? null : { label: '跟进状态', all: '全部客户', options: filters.map(c => c.text), matches: (r, text) => filters.find(c => c.text === text)?.match(r) },
     cols: [
-      { label: '客户', view: r => named(leadName(r), r.phone) },
+      { label: '客户', view: r => named(link(ctx,leadName(r),()=>detail(ctx,r)), r.phone) },
       { label: '号码关联', view: r => relationships(r) || '—' },
       { label: '来源 / 分院', view: r => named(sources[r.source], campusName(ctx, r.campusId)) },
       { label: archive ? '归档时间' : '最近跟进', view: r => stamp(archive ? r.archivedAt : r.updatedAt) },
@@ -184,7 +201,10 @@ function registry(ctx, archive) {
         link(ctx, '查看记录', () => detail(ctx, r)),
       ) },
     ],
-  });
+    }));
+  }
+  draw();
+  return node('div','lead-schedule',[controls,body]);
 }
 
 function incomingList(ctx, campusId, date) {

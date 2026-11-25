@@ -93,18 +93,18 @@
 }
 :root[data-color-mode='dark'] .fx-module-mark { background: var(--soft); color: var(--accent); }
 :root[data-color-mode='dark'] :is(.fx-person-mark, .fx-initial) { background: var(--soft); }
-:root[data-color-mode='dark'] :is(.fx-table th, .op-task-table th) {
+:root[data-color-mode='dark'] :is(.fx-table th) {
   color: var(--muted);
   background: var(--surface-hover);
   border-color: var(--line);
 }
-:root[data-color-mode='dark'] :is(.fx-table tbody tr:nth-child(even), .op-task-table tbody tr:nth-child(even)) {
+:root[data-color-mode='dark'] :is(.fx-table tbody tr:nth-child(even)) {
   background: var(--surface-soft);
 }
-:root[data-color-mode='dark'] :is(.fx-table tbody tr:hover, .op-task-table tbody tr:hover) {
+:root[data-color-mode='dark'] :is(.fx-table tbody tr:hover) {
   background: var(--surface-hover);
 }
-:root[data-color-mode='dark'] :is(.fx-table tr + tr td, .op-task-table td) { border-color: var(--line); }
+:root[data-color-mode='dark'] :is(.fx-table tr + tr td) { border-color: var(--line); }
 :root[data-color-mode='dark'] .badge-blue { color: var(--accent); background: var(--soft); }
 :root[data-color-mode='dark'] .badge-neutral { color: var(--muted); background: var(--surface-hover); }
 :root[data-color-mode='dark'] :is(.badge-green, .usage-status-ok) {
@@ -113,7 +113,7 @@
 }
 :root[data-color-mode='dark'] :is(.badge-amber, .rounds-warning, .medical-visit-warning, .fx-attention,
   .admission-match:not(:empty), .usage-notice, .usage-status-wait, .access-role.owner, .gw-gold,
-  .gw-contract-meta small, .op-open-count, .room-bed-row.matched, .history-comment) {
+  .gw-contract-meta small, .room-bed-row.matched, .history-comment) {
   color: var(--warning-text);
   background: var(--warning-surface);
 }
@@ -129,7 +129,7 @@
 }
 :root[data-color-mode='dark'] :is(
   .access-login-entry, .access-check, .access-templates, .access-settings,
-  .usage-filters, .usage-service, .op-white-card, .op-ring-inner, .op-shortcut
+  .usage-filters, .usage-service
 ) { background: var(--surface); border-color: var(--line); }
 :root[data-color-mode='dark'] .access-login-form .field input { background: var(--surface-field); border-color: var(--input-line); }
 :root[data-color-mode='dark'] .access-login-form .field input::placeholder { color: var(--muted); }
@@ -142,29 +142,20 @@
   background: var(--soft);
   color: var(--accent);
 }
-:root[data-color-mode='dark'] :is(.access-template, .access-credential, .op-queue-item, .op-zero-count) {
+:root[data-color-mode='dark'] :is(.access-template, .access-credential) {
   background: var(--surface-soft);
   border-color: var(--line);
 }
-:root[data-color-mode='dark'] :is(.access-template:hover, .op-queue-item:hover, .op-shortcut:hover) {
+:root[data-color-mode='dark'] :is(.access-template:hover) {
   background: var(--surface-hover);
   border-color: var(--input-line);
 }
-:root[data-color-mode='dark'] :is(.access-credential strong, .usage-partial, .op-queue-icon.op-warning) {
+:root[data-color-mode='dark'] :is(.access-credential strong, .usage-partial) {
   color: var(--warning-text);
 }
 :root[data-color-mode='dark'] .access-credential strong { background: var(--warning-surface); }
 :root[data-color-mode='dark'] .usage-view-controls button[aria-pressed='true'] { background: var(--soft); }
 :root[data-color-mode='dark'] .usage-service .usage-muted { color: var(--muted); }
-:root[data-color-mode='dark'] :is(.op-meta-sep, .op-ward-strip i:not(.op-occupied), .op-key-vacant) { background: var(--line); }
-:root[data-color-mode='dark'] .op-key-vacant { box-shadow: none; }
-:root[data-color-mode='dark'] .op-card-head { border-color: var(--line); }
-:root[data-color-mode='dark'] .op-bed-ring {
-  background: conic-gradient(from -90deg, var(--op-blue) 0 var(--occupied), var(--line) var(--occupied) 100%);
-}
-:root[data-color-mode='dark'] .op-zero-count { color: var(--muted); }
-:root[data-color-mode='dark'] .op-cash-item:first-child strong { color: var(--good-text); }
-
 /* Assistant, publicly shareable FAQ and authorization dialogs. */
 :root[data-color-mode='dark'] :is(.assistant-launch, .assistant-reader, .assistant-mark,
   .assistant-page-link, .permission-views .btn[aria-pressed='true']) {

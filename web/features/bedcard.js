@@ -1,3 +1,4 @@
+import { printResidentSheet } from './resident-print.js';
 import { openMedicationRound, parseBedCard } from './med-rounds.js';
 import { residentLabel, staffLabel } from './people-labels.js';
 import {
@@ -68,53 +69,20 @@ function barcode(code) {
   return svg;
 }
 
-async function printCard(ctx, card) {
-  const sheet = window.open('', '_blank', 'popup,width=540,height=540');
-  if (!sheet) {
-    ctx.toast('请允许此站点打开床头卡打印窗口。');
-    return;
-  }
-  sheet.opener = null;
-  const doc = sheet.document;
-  doc.documentElement.lang = 'zh-CN';
-  doc.title = '打印床头卡';
-  const style = doc.createElement('style');
-  style.textContent = `@page { margin: 12mm; }
-    body { margin: 0; color: #182843; font: 16px/1.5 sans-serif; }
-    article { box-sizing: border-box; width: 90mm; max-width: 100%; border: 1px solid #536580; border-top: 1.5mm solid #1c3557; }
-    header { display:flex; justify-content:space-between; padding:2mm 4mm; border-bottom:1px solid #bfc5d1; }
-    h3 { margin: 3mm 4mm 0; font-size: 22px; } p { margin:0 4mm 3mm; }
-    .fx-card-barcode { border-top:1px dashed #a6823b; text-align:center; padding:3mm; }
-    svg, strong { display:block; margin:auto; } strong { font: bold 17px monospace; letter-spacing:.18em; }`;
-  doc.head.append(style);
-  doc.body.append(doc.importNode(card, true));
-  sheet.addEventListener('afterprint', () => sheet.close(), {
-    once: true
-  });
-  sheet.focus();
-  try {
-    await Promise.all([...doc.querySelectorAll('img')].map(img => img.decode()));
-    sheet.print();
-  } catch {
-    sheet.close();
-    ctx.toast('二维码尚未加载，请刷新床头卡后打印。');
-  }
+export function hasBedCard(ctx, resident) {
+  const card = ctx.state.currentBedCards?.[resident.id];
+  return Boolean(resident.status === '在住' && resident.bedId && card?.bedId === resident.bedId &&
+    /^\d{8}$/.test(card.code) && ctx.state.beds.some(bed => bed.id === resident.bedId && bed.residentId === resident.id));
 }
 
-export function bedCard(ctx, resident) {
-  const assignment = assignments(ctx).get(resident.id);
-  const bed = ctx.state.beds.find(
-    (row) => row.id === resident.bedId && row.residentId === resident.id
-  );
-  if (!bed || !assignment || assignment.bedId !== bed.id || resident.status !== '在住') {
-    ctx.toast('长辈当前没有有效床头卡。');
-    return;
-  }
+function cardContent(ctx, resident) {
+  const assignment = ctx.state.currentBedCards[resident.id];
+  const bed = ctx.state.beds.find(row => row.id === resident.bedId);
   const qr = node('img');
   qr.src = '/api/medication-rounds/cards/' + assignment.code + '.png';
   qr.alt = bed.label + ' 床核验二维码';
   qr.width = qr.height = 140;
-  const card = node('article', 'fx-bedcard', [
+  return node('article', 'fx-bedcard', [
     node('header', 'fx-bedcard-head', [
       node('span', '', '床旁身份核验'),
       node('span', '', bed.ward)
@@ -123,12 +91,47 @@ export function bedCard(ctx, resident) {
     node('p', '', [bed.label + ' 床', resident.level].filter(Boolean).join(' · ')),
     node('div', 'fx-card-barcode', [qr, barcode(assignment.code), node('strong', '', assignment.code)])
   ]);
+}
+
+export async function printBedCards(ctx, ids) {
+  const live = ctx.current?.() || ctx;
+  const people = new Map(live.state.residents.map(row => [row.id, row]));
+  const selected = [...new Set(ids)].map(id => people.get(id));
+  if (!selected.length || selected.some(row => !row || !hasBedCard(live, row))) {
+    ctx.toast('请选择仍有有效床头卡的在住长辈，核对床位后重试。');
+    return;
+  }
+  const styles = `    main {display:grid;grid-template-columns:repeat(2, 88mm);gap:5mm;}
+    article {break-inside:avoid;box-sizing:border-box;border:1px solid #536580;border-top:1.5mm solid #1c3557;}
+    header {display:flex;justify-content:space-between;padding:2mm 3mm;border-bottom:1px solid #bfc5d1;}
+    h3 {margin:2mm 3mm 0;font-size:19px;} p {margin:0 3mm 2mm;}
+    .fx-card-barcode {border-top:1px dashed #999;display:grid;justify-items:center;align-items:center;padding:2mm;}
+    .fx-card-barcode img {width:28mm;height:28mm;} svg {width:48mm;height:9mm;} strong {font:14px monospace;}
+    footer {padding:2mm 3mm;color:#555;font-size:10px;}`;
+  const cards = node('main');
+  const printedBy = staffLabel(live, live.state.user);
+  for (const person of selected) {
+    const card = cardContent(live, person);
+    const footer = node('footer');
+    footer.textContent = [today(live), printedBy].join(' · ');
+    card.append(footer);
+    cards.append(card);
+  }
+  return printResidentSheet(live, '床头卡', cards, styles, '未能载入全部床位二维码，请刷新名册后重试。');
+}
+
+export function bedCard(ctx, resident) {
+  if (!hasBedCard(ctx, resident)) {
+    ctx.toast('长辈当前没有有效床头卡。');
+    return;
+  }
+  const card = cardContent(ctx, resident);
   ctx.detail(
     '床头卡',
     node('div', 'fx-profile', [
       card,
       choose(
-        btn(ctx, '打印床头卡', () => printCard(ctx, card)),
+        btn(ctx, '打印床头卡', () => printBedCards(ctx, [resident.id])),
         canAct(ctx, 'care.completeTask')
           ? btn(ctx, '床旁核验', () => bedside(ctx), 'primary')
           : null

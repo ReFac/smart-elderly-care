@@ -1,0 +1,38 @@
+.desk-view-switch {display:inline-flex;gap:2px;flex-wrap:nowrap;padding:2px;border:1px solid var(--line);border-radius:5px;background:var(--desk-head,var(--paper));}
+.desk-view-switch .btn[aria-pressed=true] {background:var(--desk-surface,var(--surface,#fff));color:var(--accent);box-shadow:0 1px 4px #23364d25;}
+.agenda-filter,.agenda-toolbar,.agenda-date {display:flex;flex-wrap:wrap;align-items:center;gap:9px 14px;}
+.agenda-filter {align-items:end;padding:12px 15px;border:1px solid var(--line);border-radius:6px;background:var(--desk-surface,var(--surface,#fff));}
+.agenda-filter > .desk-view-switch {margin-left:auto;}
+.agenda-field {display:grid;gap:4px;font-size:var(--desk-small-size,12px);font-weight:550;color:var(--muted);}
+.agenda-field .fx-input,.agenda-date .fx-input {color:var(--ink);width:min(170px,40vw);}
+.agenda-toolbar {justify-content:space-between;padding:10px 13px;border-bottom:1px solid var(--line);}
+.agenda-toolbar .fx-named {min-width:0;}
+.agenda-date {gap:4px;}
+.agenda-results {min-width:0;}
+.shift-calendar {border-collapse:collapse;width:100%;min-width:745px;text-align:left;font-size:var(--desk-row-size,13px);}
+.shift-calendar th,.shift-calendar td {border:1px solid var(--line);padding:8px;vertical-align:top;}
+.shift-calendar thead th,.shift-calendar tbody th {background:var(--desk-head,var(--paper));font-size:var(--desk-small-size,12px);}
+.shift-calendar tbody th {width:58px;}
+.shift-calendar td {width:13%;height:75px;}
+.shift-calendar td .btn {display:block;min-height:22px;}
+.shift-calendar .shift-add {font-size:11px;color:var(--muted);padding:1px 3px;white-space:nowrap;}
+.shift-calendar .agenda-today {background:var(--soft);color:var(--accent);}
+.desk-shell .bed-list-fields {grid-template-columns:minmax(160px,1.5fr) repeat(5,minmax(95px,1fr));}
+.desk-shell .bed-list-fields .fx-input {width:100%;}
+.desk-shell .bed-list .bed-list-status {justify-content:start;gap:8px 14px;}
+.desk-shell .bed-list-status .desk-view-switch {margin-left:auto;}
+.desk-shell .bed-list-grid:has(.fx-table) {display:block;}
+.desk-shell .room-controls,.desk-shell .room-locator {padding:10px 14px;background:var(--desk-surface);border:1px solid var(--line);border-radius:6px;align-items:end;}
+.desk-shell .room-detail {min-width:0;}
+.desk-shell .room-card-head,.desk-shell .care-area-workspace-header {padding:10px 12px;border-color:var(--line);}
+.desk-shell .care-area-workspace-header,.desk-shell .care-area-office,.desk-shell .care-area-tags span {background:var(--desk-surface);}
+.desk-shell .care-area-sidebar,.desk-shell .care-area-position-row {background:var(--desk-head);}
+.desk-shell .lead-counts {background:var(--desk-surface);}
+.desk-shell .lead-counts > div {padding:10px 15px;}
+.desk-shell .lead-day > .agenda-filter {border-inline:0;border-bottom:0;border-radius:0;}
+.desk-shell .lead-day-info {background:var(--desk-head);}
+.desk-shell .lead-grid-scroll {max-height:clamp(300px,47vh,610px);}
+.desk-shell .lead-grid tbody tr {height:34px;}
+.desk-shell .lead-status .badge,.roster-notes .badge {justify-self:start;}
+@media(max-width:1100px){.desk-shell .bed-list-fields {grid-template-columns:repeat(3,minmax(100px,1fr));}}
+@media(max-width:700px){.desk-shell .bed-list-fields {grid-template-columns:repeat(2,minmax(0,1fr));}.agenda-filter,.agenda-toolbar {gap:7px;}.agenda-filter>.desk-view-switch {margin-left:0;}}

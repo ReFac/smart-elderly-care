@@ -1,3 +1,4 @@
+import { stops } from './tour-stops.js';
 import { node, page, canAct, runForm } from './shared.js';
 import { button, statusText, pathName, heading, lookup, failure } from './room-elements.js';
 
@@ -9,7 +10,6 @@ function tourViewer(ctx, scope, initialLabel) {
     container.replaceChildren(statusText('正在读取环境导览…'));
     try {
       const data = await lookup(ctx, '/tour', scope);
-      if (!container.isConnected) return;
       if (!data.scenes.length) {
         container.replaceChildren(
           node('div', 'room-tour-empty', [
@@ -25,6 +25,9 @@ function tourViewer(ctx, scope, initialLabel) {
       const count = node('span', 'room-context');
       const places = node('div', 'room-tour-stops');
       const controls = [];
+      const memory = ctx.workspaceState ||= {};
+      const positions = memory.tourPositions ||= {};
+      const scopeKey = JSON.stringify(scope);
       let active = 0;
       const move = (delta) => show(active + delta);
       const prev = ctx.ui.button('上一站', () => move(-1));
@@ -63,12 +66,14 @@ function tourViewer(ctx, scope, initialLabel) {
       function show(index) {
         if (index < 0 || index >= data.scenes.length) return;
         active = index;
+        positions[scopeKey] = data.scenes[index].id;
         const scene = data.scenes[index];
         const panoramic = scene.kind === 'panorama';
         const image = node('img', 'room-scene-photo');
         image.alt = scene.title;
         image.referrerPolicy = 'no-referrer';
         image.draggable = false;
+        image.decoding = 'async';
         const frame = node('div', 'room-scene-media' + (panoramic ? ' panorama' : ''));
         if (panoramic) {
           frame.tabIndex = 0;
@@ -131,7 +136,7 @@ function tourViewer(ctx, scope, initialLabel) {
           ])
         ])
       );
-      show(0);
+      show(Math.max(0, data.scenes.findIndex(scene => scene.id === positions[scopeKey])));
     } catch (error) {
       failure(ctx, container, error, load);
     }
@@ -144,15 +149,42 @@ export function openFacilityTour(ctx, scope = {}, label = '') {
   return ctx.detail('房间环境导览', tourViewer(ctx, scope, label));
 }
 
-export function tourPage(ctx) {
-  if (ctx.state.user.registeredCustomer) {
-    const entry = node('a', 'btn btn-primary', '打开 3D 环境导览');
-    entry.href = '/roomtour';
-    return page(ctx, '环境导览', '浏览机构对外开放的 3D 示范场景。', entry);
+function publicTourEntry() {
+  const places = node('div', 'family-tour-places');
+  for (const {id, name, place} of stops) {
+    const preview = node('img');
+    preview.src = '/assets/visit/' + id + '.webp';
+    preview.width = 320;
+    preview.height = 154;
+    preview.decoding = 'async';
+    preview.alt = '';
+    const link = node('a', 'family-tour-stop', [preview,
+      node('div', '', [node('strong', '', name), node('small', '', place)])]);
+    link.href = '/roomtour?scene=' + id;
+    link.setAttribute('aria-label', '在 3D 环境导览中查看' + name);
+    places.append(link);
   }
-  const manage =
-    canAct(ctx, 'facility.setScene') && ctx.available('rooms')
-      ? ctx.ui.button('前往楼层平面图', () => ctx.go('beds','plan'), 'secondary', 'building')
-      : null;
-  return page(ctx, '环境导览', '浏览机构已发布的环境照片与全景视点。', manage, tourViewer(ctx, {}));
+  const start = node('a', 'btn btn-primary', '打开 3D 环境导览');
+  start.href = '/roomtour';
+  return node('section', 'fx-panel family-tour-demo', [
+    node('header', 'fx-toolbar', [node('div', '', [
+      node('h2', '', '3D 示范空间'), node('p', 'fx-muted', '选择起点，拖动或使用方向键参观设计示意。'),
+    ]), start]),
+    places,
+  ]);
+}
+
+export function tourPage(ctx) {
+  const registered = ctx.state.user.registeredCustomer;
+  const manage = !registered && canAct(ctx, 'facility.setScene') && ctx.available('beds')
+    ? ctx.ui.button('前往楼层平面图', () => ctx.go('beds', 'plan'), 'secondary', 'building')
+    : null;
+  const pageRoot = page(ctx, '环境导览', '', manage,
+    !registered ? node('section', 'family-tour-published', [
+      node('h2', '', '机构已发布视点'), tourViewer(ctx, {}),
+    ]) : null,
+    publicTourEntry(),
+  );
+  pageRoot.classList.add('family-tour-desk');
+  return pageRoot;
 }

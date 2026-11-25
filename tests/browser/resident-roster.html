@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>入住名册和档案工作台回归</title>
+<body><main></main><output>运行中</output><script type="module">
+import { residentRoster, rosterRows } from '../../web/features/resident-roster.js';
+import { residentWorkspaceTab } from '../../web/features/dossier.js';
+import { printBedCards } from '../../web/features/bedcard.js';
+import * as ui from '../../web/lib/ui.js';
+
+const main = document.querySelector('main'), result = document.querySelector('output');
+const residents = Array.from({length:16}, (_, i) => ({
+  id:'r'+i, name:['测试甲','测试乙','历史丙'][i] || '示例'+i,
+  status:i===2?'已退住':'在住', bedId:i===2?'':'b'+i,
+  stayType:i===1?'trial':'formal', level:'自理', age:70+i, admittedAt:'2026-11-01',
+}));
+const beds = residents.filter(p=>p.bedId).map((p, i) => ({
+  id:p.bedId, label:(101+i)+'-A', ward:'演示楼层',residentId:p.id,status:'已入住',
+}));
+const cards = Object.fromEntries(beds.map((b,i)=>[b.residentId,{id:'assignment-'+i,bedId:b.id,code:String(10000000+i)}]));
+const state = {user:{id:'demo',kind:'owner',displayName:'测试员'}, allowedActions:[],
+  residents,beds,currentBedCards:cards,today:'2026-11-25',bedDirectory:Object.fromEntries(
+    beds.map((b,i)=>[b.id,{buildingId:i%2?'east':'west',buildingName:i%2?'东楼':'西楼',floorId:'f'+i%2,floorLabel:i%2?'二层':'一层'}])),
+  medicalVisits:[{id:'v01',residentId:'r0',attachments:[{}]}, {id:'s01',residentId:'r0',parentVisitId:'v01',attachments:[{}]}],
+  medicalDocuments:[{residentId:'r0',hasImage:false},{residentId:'r0',hasImage:true}],
+  dossierProfiles:[{residentId:'r2',phone:'13912340000'}],
+  assessments:[{residentId:'r0',date:'2026-11-01',scale:{total:0,gradeName:'测试等级'}}],
+  followups:[{residentId:'r0',date:'2026-11-03',riskReport:{topic:'测试专项',level:'经核对等级',instrument:'示例量表'}}],
+};
+const ctx={state,ui,workspaceState:{},available:()=>true,detail:(title,node)=>{main.append(node);},toast:message=>{ctx.lastToast=message;}};
+let details='';
+const options={mode:'dossier', detail:r=>{details=r.id;},medical:()=>{},edit:()=>{}};
+const check=(v,why)=>{if(!v)throw Error(why);};
+const buttons=(root,text)=>[...root.querySelectorAll('button')].find(b=>b.textContent===text);
+function mount(config=options, current=ctx) {
+  const panel=residentRoster(current,config);
+  main.replaceChildren(panel); return panel;
+}
+function search(panel,text) {
+  const input=panel.querySelector('[type=search]'); input.value=text; input.dispatchEvent(new Event('input'));
+}
+try {
+  const first=rosterRows(ctx)[0];
+  check(first.visitCount===1 && first.fileCount===3,'补充资料不重复计为独立就诊，原件不含纯手录');
+  let panel=mount();
+  const size=panel.querySelector('[aria-label="每页档案数"]');
+  check(size.value==='20','默认二十条/页');
+  size.value='12'; size.dispatchEvent(new Event('change'));
+  check(panel.querySelectorAll('tbody tr').length===12, '首屏分页');
+  panel.querySelector('[aria-label="选择本页可打印的长辈"]').click();
+  check(!!buttons(panel,'批量打印床头卡（12）'), '批量选择当前页有效床卡');
+  buttons(panel,'下一页').click();
+  panel.querySelector('tbody input').click();
+  check(!!buttons(panel,'批量打印床头卡（13）'), '跨页累加');
+  search(panel,'1391234');
+  check(panel.querySelector('tbody').innerText.includes('历史丙') && panel.querySelector('tbody input').disabled,'跨状态手机号搜索及归档禁印');
+  panel.querySelector('tbody a').click();
+  check(details==='r2','姓名能打开匹配档案');
+  panel=mount();
+  check(panel.querySelector('[type=search]').value==='1391234' && panel.querySelector('tbody tr'),'刷新保留页签筛选');
+  buttons(panel,'重置').click(); buttons(panel,'清除选择').click();
+  const building=panel.querySelector('[aria-label="楼栋"]'); building.value='west'; building.dispatchEvent(new Event('change'));
+  check(!panel.querySelector('tbody').textContent.includes('东楼'),'楼栋过滤');
+  check(panel.querySelector('[aria-label="楼层"]').options.length===2,'楼栋限定楼层');
+  buttons(panel,'生成风险标签').click(); check(main.textContent.includes('示例量表'),'风险标签可追溯至登记依据');
+  check(residentWorkspaceTab(ctx,'resident-r0')?.id==='resident-r0' && !residentWorkspaceTab(ctx,'resident-absent'),'档案页签按可见住户恢复');
+  await printBedCards(ctx,['r2']); check(ctx.lastToast.includes('有效床头卡') && !document.querySelector('iframe'),'归档批打不能获取二维码');
+  const restricted={...ctx,state:{...state,user:{id:'n',kind:'staff',permissions:['care']},dossierProfiles:[]},workspaceState:{}};
+  panel=mount({...options,mode:'admission',rowActions:()=>document.createElement('span')},restricted);
+  check(panel.querySelector('tbody').textContent.includes('0 分') && !panel.querySelector('.roster-progress').textContent.includes('费用'),'保留零分，隐藏无权模块');
+  panel=mount(options,restricted);
+  check(![...panel.querySelectorAll('th')].some(h=>['归档资料','基础档案摘要','风险标签'].includes(h.textContent)),'临床与财务列受权限控制');
+  result.textContent='PASS';
+} catch(e) {result.textContent='FAIL '+e.stack; document.documentElement.dataset.result='fail';}
+</script></body></html>

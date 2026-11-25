@@ -365,6 +365,8 @@ def command(db, state, user, action, payload, now):
     current = json.loads(row["config"]) if row else {}
     if row and not _within(current["scope"], user, rooms, campuses, ids, existing=True):
         raise PermissionError("当前模板超出您的管理范围")
+    if current.get("planId"):
+        raise ValueError("请在对应的照护计划中调整项目，复核后生效")
     if action == "care.setScheduleEnabled":
         if set(payload) != {"id", "enabled"} or type(payload["enabled"]) is not bool:
             raise ValueError("请选择启用或暂停定时工单")
@@ -524,8 +526,9 @@ def _releases(db, state, rules, now):
                 config["title"],
                 assignee,
                 day,
-                config["time"],
-                KINDS[config["kind"]],
+                config.get("planTime", config["time"]),
+                "计划照护" if config.get("planId") else KINDS[config["kind"]],
+                **({"planId": config["planId"], "allowedRoles": config["allowedRoles"]} if config.get("planId") else {}),
                 scheduleId=sid,
                 occurrenceId=occurrence,
                 scheduledBedId=person["bedId"],

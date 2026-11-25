@@ -582,6 +582,37 @@ def apply(db, state, action, payload, user, today):
     return HANDLERS[action](db, state, payload, user, today)
 
 
+def project_roster(db, data, user):
+    """Add summaries scoped to the visible staff roster after all business modules are loaded."""
+    if user["kind"] == "family":
+        return
+    residents = {r["id"]: r for r in data.get("residents", []) if r.get("status") != "归档到期"}
+    if not residents:
+        return
+    visible = json.dumps(list(residents))
+    if access.has(user, "finance"):
+        for rid, kind, did, at in db.execute(
+            """SELECT resident_id,kind,id,at FROM subsidy_materials WHERE rowid IN (
+                 SELECT MAX(rowid) FROM subsidy_materials
+                 WHERE resident_id IN (SELECT value FROM json_each(?))
+                 AND kind IN ('idFront','idBack','household') GROUP BY resident_id,kind)""",
+            (visible,),
+        ):
+            residents[rid].setdefault("credentialMaterials", {})[kind] = {"id": did, "at": at}
+    if access.has(user, "medical") or access.has(user, "clinical"):
+        # The roster needs only the latest verified labels, never source notes or older diagnoses.
+        for rid, payload in db.execute(
+            """SELECT resident_id,refs FROM resident_health_notes WHERE rowid IN (
+                 SELECT MAX(rowid) FROM resident_health_notes WHERE kind='chronic'
+                 AND resident_id IN (SELECT value FROM json_each(?)) GROUP BY resident_id)""",
+            (visible,),
+        ):
+            entry = json.loads(payload)
+            residents[rid]["chronicRegistration"] = {
+                "status": entry["status"], "names": [item["name"] for item in entry["items"]]
+            }
+
+
 def project(db, data, user, today=None):
     """仅在基础快照完成权限投影后调用；原图独立读取。"""
     day = (

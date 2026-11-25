@@ -1,6 +1,6 @@
-import { colorModeControl } from './lib/color-mode.js';
+import { publicPage, receptionInfo } from './public-site.js';
 
-document.querySelector('.account-actions').prepend(colorModeControl());
+publicPage('养老照护与参观');
 
 const visit = document.querySelector('#visit-form');
 const callback = document.querySelector('#callback-form');
@@ -28,10 +28,12 @@ function openBooking() {
   if (!booking.open) booking.showModal();
 }
 document.querySelector('#book-visit').addEventListener('click', openBooking);
-document.querySelector('a[href="#book-visit"]').addEventListener('click', event => {
-  event.preventDefault();
-  openBooking();
-});
+for (const link of document.querySelectorAll('a[href="#book-visit"],a[href="/visit#book-visit"]')) {
+  link.addEventListener('click', event => {
+    event.preventDefault();
+    openBooking();
+  });
+}
 if (location.hash === '#book-visit') openBooking();
 document.querySelector('#open-callback').addEventListener('click', () => {
   callback.elements.campusId.value = visit.elements.campusId.value;
@@ -43,6 +45,13 @@ for (const close of document.querySelectorAll('[data-close]')) {
 
 function enableForm(form, source) {
   const send = form.querySelector('[type=submit]');
+  const receipt = form.closest('dialog').querySelector('.receipt');
+  receipt.querySelector('[data-again]').addEventListener('click', () => {
+    receipt.hidden = true;
+    form.hidden = false;
+    send.disabled = false;
+    form.elements.campusId.focus();
+  });
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (send.disabled || !form.reportValidity()) return;
@@ -65,7 +74,7 @@ function enableForm(form, source) {
       if (!response.ok) throw new Error(result.error || '提交失败，请重试。');
       form.reset();
       form.hidden = true;
-      const receipt = document.getElementById(source === 'visit' ? 'visit-receipt' : 'callback-receipt');
+      if (source === 'visit') updatePreference();
       receipt.hidden = false;
       receipt.focus();
     } catch (cause) {
@@ -79,12 +88,8 @@ enableForm(callback, 'callback');
 
 async function load() {
   try {
-    const response = await fetch('/api/public/reception', { credentials: 'omit' });
-    if (!response.ok) throw new Error();
-    const { institutionName, campuses } = await response.json();
+    const { campuses } = await receptionInfo();
     if (!campuses?.length) throw new Error();
-    document.querySelectorAll('[data-brand]').forEach(element => { element.textContent = institutionName; });
-    document.title = institutionName + ' · 养老照护与参观';
     for (const form of [visit, callback]) {
       const select = form.elements.campusId;
       select.replaceChildren(...campuses.map(campus => new Option(campus.name, campus.id)));

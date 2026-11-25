@@ -154,6 +154,9 @@ def approve_plan(state, p, today):
             and task["status"] == "待执行"
         ):
             task["status"] = "已取消"
+    for prior in state["plans"]:
+        if prior["residentId"] == resident["id"] and prior["status"] == "已派发" and not prior.get("supersededBy"):
+            prior["supersededBy"] = plan["id"]
     plan.update(
         status="已派发",
         reviewer=reviewer,
@@ -162,7 +165,10 @@ def approve_plan(state, p, today):
         careLevel=assessment["level"],
     )
     resident.update(level=assessment["level"])
-    for title in plan.get("items", ["执行个体照护计划"]):
+    if "serviceItems" in plan:
+        from .plan_items import first_day
+        first_day(state, plan, today)
+    for title in ([] if "serviceItems" in plan else plan.get("items", ["执行个体照护计划"])):
         append_task(
             state,
             resident["id"],

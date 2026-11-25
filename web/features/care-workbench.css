@@ -1,4 +1,14 @@
-.cw-desk { display: grid; gap: 18px; }
+care-health-desk,.care-register {display:grid;gap:10px;min-width:0}
+.care-digest {display:flex;flex-wrap:wrap;align-items:center;gap:10px 0;background:var(--surface,#fff);color:var(--ink,#203650);margin:0;padding:12px 15px;border:1px solid var(--line,#dce3ed);border-radius:7px}
+.care-digest div {display:flex;align-items:baseline;gap:10px;padding:0 16px;border-right:1px solid var(--line,#dce3ed)}
+.care-digest div:first-child {padding-left:0}
+.care-digest div:last-child {border-right:0}
+.care-digest dt,.care-record-heading small {color:var(--muted,#5b6776);font-size:.84rem}
+.care-digest dd {margin:0;color:var(--accent,#2368a0);font-weight:700;font-variant-numeric:tabular-nums;font-size:1.12rem}
+.care-record-heading {display:flex;align-items:center;justify-content:space-between;gap:15px;background:var(--surface-soft,#edf2f8);padding:13px 16px;border-radius:6px}
+.care-record-heading h2 {font-size:1.18rem;margin:4px 0 0}
+care-health-desk .fx-named {max-width:30em}
+care-health-desk .fx-named small {overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .cw-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(175px,1fr)); gap: 12px; }
 .cw-tile {
   display: grid;
@@ -14,7 +24,7 @@
   min-width: 0;
 }
 .cw-tile:hover { border-color: #8ca9ce; background: #f3f7ff; }
-.cw-tile:focus-visible,.cw-action:focus-visible { outline: 2px solid #3562a8; outline-offset: 3px; }
+.cw-tile:focus-visible { outline: 2px solid #3562a8; outline-offset: 3px; }
 .cw-tile--urgent { border-color: #ebcfac; background: linear-gradient(160deg,#fff4e6 0%,#fff 83%); color: #845016; }
 .cw-tile--urgent:hover { border-color: #b68344; background: #fff8ed; }
 .cw-tile-label,.cw-tile-main { display: flex; align-items: center; gap: 9px; }
@@ -22,24 +32,50 @@
 .cw-tile-main { justify-content: space-between; }
 .cw-tile-number { font-size: clamp(1.2rem,2vw,1.65rem); font-variant-numeric: tabular-nums; line-height: 1.2; }
 .cw-tile-hint { font-size: .82rem; color: #4e627e; }
-.cw-panels { display: grid; align-items: start; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 15px; }
-.cw-panel { border: 1px solid #dce4ee; border-radius: 11px; min-width: 0; background: #fff; }
-.cw-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 16px; border-bottom: 1px solid #e5ebf3; }
-.cw-panel-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 1rem; color: #19365e; }
-.cw-panel-head h3 svg { flex: 0 0 auto; }
-.cw-panel-body { display: grid; gap: 9px; padding: 13px 16px; min-width: 0; }
-.cw-summary,.cw-empty { margin: 0; padding-block: 4px; color: #4e627e; font-size: .85rem; line-height: 1.5; }
-.cw-list { margin: 0; padding: 0; list-style: none; }
-.cw-list li { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding-block: 9px; border-bottom: 1px solid #edf1f6; }
-.cw-list li:first-child { border-top: 1px solid #edf1f6; }
-.cw-list-text { display: grid; gap: 3px; min-width: 0; }
-.cw-list-text span { color: #4e627e; font-size: .84rem; overflow-wrap: anywhere; }
-.cw-action { color: #225090; background: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 3px 0; font: inherit; font-size: .83rem; font-weight: 590; text-align: start; justify-self: start; }
-.cw-action svg { flex-shrink: 0; }
-.cw-action:hover { text-decoration: underline; }
-.cw-links { display: flex; flex-wrap: wrap; gap: 8px 16px; }
-.cw-share { display: grid; gap: 8px; margin: 0; }
-.cw-share div { display: grid; grid-template-columns: minmax(73px,.29fr) 1fr; gap: 7px; color: #405673; font-size: .85rem; }
-.cw-share dt { font-weight: 650; color: #213d64; }
-.cw-share dd { margin: 0; }
-@media (max-width: 950px) { .cw-panels { grid-template-columns: 1fr; } }
+.plan-editor,.risk-panel,.risk-report {display:grid;gap:16px;min-width:0;color:var(--ink,#203650)}
+.plan-editor {border:1px solid var(--line,#d9e3eb);border-radius:10px;background:var(--surface,#fff);padding:20px}
+.plan-editor h2,.plan-editor h3,.risk-panel h2,.risk-panel h4,.plan-person p {margin:0}
+.plan-note,.risk-result {border:1px solid #e8d9ad;background:#fff9e9;color:#6f4b16;padding:10px 14px;border-radius:7px;margin:0}
+.plan-person {display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface-soft,#edf2fa);border-radius:8px}
+.plan-person .badge {margin-left:auto}
+.plan-avatar {width:38px;height:38px;display:grid;place-items:center;color:#fff;background:#487ec8;font-weight:700;border-radius:11px}
+.plan-toolbar,.plan-toolbar .fx-actions,.plan-footer,.plan-frequency,.plan-roles,.risk-tabs {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.plan-toolbar>input {margin-left:auto;max-width:220px}
+.plan-scroll {overflow:auto}
+.plan-grid {border-collapse:collapse;width:100%;min-width:910px;font-size:.86rem}
+.plan-grid td,.plan-grid th {border:1px solid var(--line,#dce3ed);text-align:left;padding:7px 8px}
+.plan-grid th {background:var(--surface-soft,#f2f5f9);white-space:nowrap}
+.plan-input {font:inherit;color:inherit;background:var(--surface,#fff);border:1px solid var(--line,#cad5de);border-radius:5px;padding:5px;max-width:100%}
+.plan-grid input[type=text] {width:10em}
+.plan-grid input[type=number] {width:4em}
+.plan-grid input[type=checkbox],.plan-toolbar input[type=checkbox] {accent-color:var(--accent,#337dc3)}
+.plan-frequency {min-width:185px}
+.plan-roles {max-width:118px}
+.plan-roles label,.plan-frequency label {display:flex;align-items:center;white-space:nowrap;gap:3px}
+.plan-footer {justify-content:flex-end;border-top:1px solid var(--line,#dae3ea);padding-top:13px}
+dialog.dialog.risk-drawer {position:fixed;margin:0 0 0 auto;inset:0 0 0 auto;width:min(1120px,78vw);min-width:min(720px,96vw);max-width:96vw;height:100dvh;max-height:100dvh;border-radius:0;overflow:auto;background:var(--surface,#fff)}
+dialog.risk-drawer .dialog-body {max-height:none;overflow:visible}
+.risk-tabs {border-bottom:1px solid var(--line,#dce3ed)}
+.risk-tabs button[aria-pressed=true] {color:var(--accent,#216bd4);border-bottom:2px solid currentColor}
+.risk-result {display:flex;justify-content:space-between;align-items:flex-start}
+.risk-result h2 {font-size:1.55rem}.risk-result p {margin:6px 0}
+.risk-score {display:grid;text-align:right;min-width:76px}.risk-score strong {font-size:1.85rem}
+.risk-columns,.risk-measures {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.risk-measures {grid-template-columns:repeat(3,minmax(0,1fr))}
+.risk-measures article,.risk-result,.risk-factor-list,.risk-panel .fx-section {overflow-wrap:anywhere}
+.risk-measures article {border:1px solid var(--line,#dae1e9);border-top:3px solid #a16653;border-radius:7px;padding:10px;background:var(--surface-soft,#faf7f4)}
+.risk-measures article:nth-child(2){border-top-color:#a37f36}.risk-measures article:nth-child(3){border-top-color:#429878}
+.risk-columns .fx-section,.risk-report>.fx-section {border:1px solid var(--line,#dce3ed);border-radius:8px;padding:10px 14px}
+.risk-factor-list,.risk-bars {display:grid;gap:6px}
+.risk-factor-list div,.risk-bars label {display:grid;grid-template-columns:1fr 1.3fr auto;align-items:center;gap:7px;border-bottom:1px solid var(--line,#dee5ed);padding:6px 0}
+.risk-factor-list dd {margin:0}.risk-bars meter {width:100%;accent-color:var(--accent,#227ac2)}
+.risk-factor-input {display:grid;grid-template-columns:1fr 2fr 75px auto;gap:5px;margin-bottom:5px}
+[data-color-mode=dark] .plan-note,[data-color-mode=dark] .risk-result {background:#342b1b;color:#efd093;border-color:#655234}
+@media(max-width:680px){.risk-columns,.risk-measures {grid-template-columns:1fr}.plan-editor {padding:12px}}
+@media print{
+  body:has(dialog.risk-drawer[open])>*:not(dialog.risk-drawer){display:none!important}
+  dialog.risk-drawer[open],dialog.risk-drawer[open] .dialog-body{position:static!important;display:block!important;inset:auto;width:100%!important;min-width:0!important;max-width:none!important;height:auto;max-height:none;overflow:visible;box-shadow:none;border:none;margin:0;padding:0}
+  dialog.risk-drawer::backdrop{background:transparent}
+  .risk-drawer .dialog-head button,.risk-drawer .risk-tabs,.risk-drawer .plan-footer{display:none}
+  .risk-report section,.risk-measures article{break-inside:avoid}
+}

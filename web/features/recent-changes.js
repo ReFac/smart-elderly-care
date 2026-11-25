@@ -266,6 +266,7 @@ export function recentChanges(ctx, { residentId, onUndo } = {}) {
     load(false);
   };
   const filters = node('details', 'history-filters');
+  if (!embedded) filters.open = true;
   const clear = btn(ctx, '清除筛选', () => {
     Object.assign(scope, {
       actorId: '',
@@ -438,7 +439,7 @@ export function recentChanges(ctx, { residentId, onUndo } = {}) {
       if (seq === sequence) more.disabled = false;
     }
   }
-  const toolbar = node('div', 'history-toolbar', [
+  const toolbar = node('div', 'history-toolbar' + (embedded ? '' : ' desk-history-toolbar'), [
     node('div', 'history-tools', [my, filters, roomLabel]),
     searchForm,
   ]);

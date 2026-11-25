@@ -1,3 +1,4 @@
+import { ledgerDigest } from './care-workbench.js';
 import { residentAnchor, staffLabel } from './people-labels.js';
 import {
   badge,
@@ -21,7 +22,7 @@ const subject = (ctx, row) => (row.residentId ? residentName(ctx, row.residentId
 const stamp = (at) => at?.slice(0, 19).replace('T', ' ');
 const mine = (ctx, row) => row.status === '待签收' && row.assigneeId === ctx.state.user.id;
 
-async function create(ctx, button) {
+export async function createHandover(ctx, button) {
   button.disabled = true;
   try {
     const { recipients, positions = {} } = await ctx.get('/api/care/handover-recipients');
@@ -119,6 +120,10 @@ async function create(ctx, button) {
 
 export function showHandover(ctx, row) {
   const body = node('div', 'fx-profile', [
+    node('div','care-record-heading',[
+      node('div','',[node('small','','交接范围'),node('h2','',subject(ctx,row))]),
+      badge(ctx,statusOf(row),row.status==='已签收' ? 'green' : 'neutral'),
+    ]),
     facts([
       ['交接范围', row.residentId ? residentAnchor(ctx, row.residentId) : subject(ctx, row)],
       ['状态', statusOf(row)],
@@ -172,9 +177,13 @@ export function showHandover(ctx, row) {
       submitLabel: '确认签收',
       onSubmit: ({ note }) => ctx.command('care.acceptHandover', { handoverId: row.id, note }),
     });
+    dialog.classList.add('care-record-drawer','desk-detail-drawer');
+    if (row.residentId) dialog.dataset.roundsResidentId = row.residentId;
     dialog.dataset.handoverId = row.id;
   } else {
     const dialog = ctx.detail(row.status === '已签收' ? '交班与签收回执' : '交班记录', body);
+    dialog.classList.add('care-record-drawer','desk-detail-drawer');
+    if (row.residentId) dialog.dataset.roundsResidentId = row.residentId;
     if (
       row.status === '待签收' &&
       row.senderId === ctx.state.user.id &&
@@ -201,10 +210,14 @@ export function showHandover(ctx, row) {
 
 export function handovers(ctx) {
   const rows = byRecent(ctx.state.handovers);
-  return table(ctx, {
+  return node('div','care-register',[
+    ledgerDigest([['待我签收',rows.filter(r => mine(ctx,r)).length],
+      ['我发出的待签收交班',rows.filter(r => r.senderId===ctx.state.user.id && r.status==='待签收').length],
+      ['今日已签收',rows.filter(r => r.acceptedAt?.slice(0,10)===ctx.state.today).length]]),
+    table(ctx, {
     title: '交班记录',
     rows,
-    action: btn(ctx, '登记交班', (event) => create(ctx, event.currentTarget)),
+    action: btn(ctx, '登记交班', (event) => createHandover(ctx, event.currentTarget)),
     search: {
       placeholder: '搜索长辈、交接人员或要点',
       value: (r) =>
@@ -215,9 +228,9 @@ export function handovers(ctx) {
     filter: {
       label: '交班筛选',
       all: '全部交班',
-      options: ['待我签收', '待签收', '已签收', '已撤回', '历史记录'],
+      options: ['待我签收', '我发出的交班', '待签收', '已签收', '已撤回', '历史记录'],
       initial: rows.some((r) => mine(ctx, r)) ? '待我签收' : '',
-      matches: (r, choice) => (choice === '待我签收' ? mine(ctx, r) : statusOf(r) === choice),
+      matches: (r, choice) => (choice === '待我签收' ? mine(ctx, r) : choice === '我发出的交班' ? r.senderId === ctx.state.user.id : statusOf(r) === choice),
     },
     cols: [
       { label: '交班时间', view: (r) => named(r.date, r.createdAt?.slice(11, 16)) },
@@ -247,5 +260,5 @@ export function handovers(ctx) {
       },
     ],
     empty: '目前没有交班记录',
-  });
+  })]);
 }

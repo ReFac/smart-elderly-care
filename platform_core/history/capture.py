@@ -102,13 +102,15 @@ def watch(db, action):
     prefixes = PREFIXES.get(action.partition(".")[0], ())
     if action == "permissionRequest.editProfile":
         prefixes += ("dossier_profiles",)
+    if action.startswith("ops.subsidy"):
+        prefixes = ("subsidy_",)
     if action == "access.setRealName":
         prefixes = ("account_real_names",)
     if action in ("care.proposeGroupActivity", "care.confirmGroupActivity", "care.confirmScheduledMeal"):
         prefixes = ("daily_life_",)
     if action.startswith("care.area"):
         prefixes = ("care_area",)
-    if action in ("care.saveSchedule", "care.setScheduleEnabled", "care.scheduleMenu", "care.releaseSchedules"):
+    if action in ("care.saveSchedule", "care.setScheduleEnabled", "care.scheduleMenu", "care.releaseSchedules", "care.approvePlan", "care.discharge", "care.endTrial"):
         prefixes = ("scheduled_work_",)
     if action == "care.confirmMedRound":
         prefixes = ("medication_round_receipts",)

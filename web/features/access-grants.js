@@ -39,6 +39,7 @@ const commands = {
       withdrawHandover: '撤回本人交班',
       confirmMedRound: '逐位签认床旁服药',
       addMedication: '登记医嘱',
+      receiveMedication: '登记接收长辈的药品',
       giveMedication: '登记给药',
       reviewMedication: '复核医嘱',
       vital: '录入体征',

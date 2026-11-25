@@ -231,6 +231,24 @@ class GatewayCases(TestCase):
         with self.assertRaises(ValueError):
             self.call("confirm", {"proposalId": proposal["id"]}, self.second)
 
+    def test_plan_role_is_checked_for_voice_confirmation_including_custom_duties(self):
+        self.task["allowedRoles"] = ["护士", "临床护理"]
+        proposal = self.pending()
+        data = {"proposalId": proposal["id"]}
+        with self.assertRaisesRegex(PermissionError, "岗位"):
+            self.call("confirm", data, {**self.first, "role": "护工"})
+        with self.assertRaisesRegex(PermissionError, "岗位"):
+            self.call("confirm", data, {**self.first, "role": "自定义", "staffDuties": ["日常照护"]})
+        self.assertEqual(self.task["status"], "待执行")
+        self.call("confirm", data, {**self.second, "role": "自定义", "staffDuties": ["临床护理"]})
+        self.assertEqual(self.task["operatorId"], self.second["id"])
+
+    def test_named_nurse_confirms_plan_voice_task_with_real_account_role(self):
+        self.task["allowedRoles"] = ["护士"]
+        proposal = self.pending()
+        self.call("confirm", {"proposalId": proposal["id"]}, {**self.first, "role": "护士"})
+        self.assertEqual(self.task["operatorId"], self.first["id"])
+
     def test_voice_target_and_action_cannot_be_changed_by_requester(self):
         with self.assertRaises(ValueError):
             self.call(

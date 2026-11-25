@@ -27,7 +27,14 @@ class Page:
 
 # The model may name a page in prose. Only this application-owned directory supplies a route or tab.
 PAGES = (
+    Page("settings","在线用户",("在线账号","活跃会话"),"onlineUsers"),
+    Page("settings","定时任务",("定时服务状态","后台调度状态"),"timers"),
+    Page("settings","数据监控",("数据库监控","存储用量"),"dataMonitor"),
+    Page("settings","服务监控",("进程负载","服务负载"),"serviceMonitor"),
+    Page("settings","缓存监控",("本机缓存命中率",),"cacheMonitor"),
+    Page("settings","缓存列表",("缓存命名空间",),"cacheList"),
     Page("overview", "运营总览", ("院务总览", "运营首页")),
+    Page("overview", "运营看板", ("医养经营管理大屏", "经营看板", "经营大屏"), params=(("view", "cockpit"),)),
     Page("residents", "入住管理", ("长辈档案", "老人档案", "档案名册", "入住名册")),
     Page(
         "residents",
@@ -51,6 +58,7 @@ PAGES = (
     Page("assessments", "等级判定", ("护理等级", "评估结果"), "grading", "care"),
     Page("assessments", "照护计划", (), "plans"),
     Page("assessments", "复评安排", (), "review"),
+    Page("assessments", "专项风险档案", ("风险评估报告", "风险档案"), "risk", "clinical"),
     Page("care", "照护服务", ("护理服务",)),
     Page("care", "健康工作台", ("健康管理", "智慧照护"), "healthDesk"),
     Page("care", "照护工单", ("护理工单",), "tasks", "care"),
@@ -69,14 +77,20 @@ PAGES = (
     Page("inventory", "护理用具工单", ("物资工单", "补货工单"), "orders"),
     Page("inventory", "出入库流水", ("物资流水",), "moves"),
     Page("billing", "财务结算", ("费用结算", "收费管理")),
+    Page("billing", "财务总览", ("费用总览",), "summary", "finance"),
+    Page("billing", "待收费", ("待缴费", "待收费账单", "未结清账单"), "unpaid", "finance"),
     Page("billing", "收费账单", ("收费明细", "账单明细"), "bills"),
-    Page("billing", "待出月账单", ("月付账单", "待出月付账单"), "due"),
+    Page("billing", "待出月账单", ("月付账单", "待出月付账单", "月度账单确认"), "due"),
+    Page("billing", "医疗费用", ("医疗费明细", "医疗费用明细"), "medicalFees", "finance"),
+    Page("billing", "退住结算", ("退住退款", "退住结算单"), "discharge", "finance"),
+    Page("billing", "民政补贴申报材料", ("补贴申报", "补贴材料", "补贴清单"), "subsidies", "finance"),
+    Page("billing", "日结报表", ("财务日结", "每日收支报表", "日结凭证"), "daily", "finance"),
     Page("billing", "渠道对账", ("支付对账",), "orders"),
     Page("billing", "欠费提醒", ("催缴提醒",), "reminders"),
     Page("billing", "账务提醒", ("账单日提醒", "缴费提醒", "月费提醒"), "billingNotices"),
     Page("billing", "支出登记", ("费用支出",), "expenses"),
-    Page("billing", "预交余额", ("预交金余额",), "deposits"),
-    Page("billing", "实收流水", ("收款流水", "到账流水", "实收凭证"), "receipts"),
+    Page("billing", "预缴余额", ("预交余额", "预交金余额", "预缴金余额"), "deposits"),
+    Page("billing", "实收流水", ("收款流水", "到账流水", "实收凭证", "收费记录"), "receipts"),
     Page("billing", "账单核销记录", ("预缴冲抵记录",), "payments"),
     Page("leads", "意向客户", ("来电登记", "意向客服", "咨询回访")),
     Page("leads", "接待时间表", ("来访排班", "接待排班表", "参观排班", "来访预约"), "schedule"),
@@ -88,6 +102,7 @@ PAGES = (
     Page("inbox", "设备预警", ("跌倒预警",), "alerts", "alerts"),
     Page("medications", "用药管理", ("药品管理",)),
     Page("medications", "用药台账", ("用药记录",), "orders"),
+    Page("medications", "药品接收登记", ("药品接收", "家属送药", "交接药品", "药品交接台账"), "receiving", "clinical"),
     Page("medications", "用药安全筛查", ("用药冲突", "过敏核对", "重复用药"), "safety", "clinical"),
     Page("medications", "定时提醒", ("给药提醒",), "reminders"),
     Page("longCare", "长期护理保险", ("长护险经办台账", "长护险", "长护保险")),
@@ -189,7 +204,7 @@ def visible(user, routes):
 
 
 def directory(pages):
-    names = {p.route: p.title for p in pages if not p.tab}
+    names = {p.route: p.title for p in pages if not p.tab and not p.params}
     content = {title: [] for title in names.values()}
     notes = {
         ("residents", "notAdmitted"): "入住管理的「待入住」筛选（在对应长辈右侧选择「办理试住」）",
@@ -208,7 +223,7 @@ def directory(pages):
         ): "备份与恢复（在此查看和管理本机及异地快照、备份导入与导出）",
     }
     for p in pages:
-        label = notes.get((p.route, p.tab), p.title if p.tab else "")
+        label = notes.get((p.route, p.tab), p.title if p.tab or p.params else "")
         if label:
             content[names[p.route]].append(label)
     return content
@@ -310,13 +325,13 @@ def resolve(question, answer, pages, previous=(), action=None, area=None):
         target = {"intake": ("residents", "all"), "rooms": ("beds", "plan")}.get(
             route, (route, "")
         )
-        matches = [p for p in pages if (p.route, p.tab) == target]
+        matches = [p for p in pages if (p.route, p.tab) == target and not p.params]
     # A specific tab already opens its parent. Show only the most useful destination once.
-    with_tab = {page.route for page in matches if page.tab}
+    with_tab = {page.route for page in matches if page.tab or page.params}
     if shortcut:
         matches = [shortcut, *(page for page in matches if page.route != "beds")]
     return list(
         dict.fromkeys(
-            page for page in matches if page.tab or page.route not in with_tab
+            page for page in matches if page.tab or page.params or page.route not in with_tab
         )
     )[:4]

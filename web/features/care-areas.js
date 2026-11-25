@@ -1,7 +1,6 @@
 import { badge, btn, choose, named, node, table } from './shared.js';
 
 const endpoint = '/api/care/areas';
-let lastView;
 
 function label(title, input) {
   return node('label', 'field', [node('span', '', title), input]);
@@ -266,12 +265,14 @@ function areaDetails(ctx, data, zone) {
   if (!zone) return ctx.ui.empty('本栋暂无可显示的区域。');
   const children = data.areas.filter(item => item.parentId === zone.id);
   const team = data.staff.filter(row => row.areaIds.includes(zone.id));
+  const ledger = node('a','btn btn-ghost','查看区域床位台账');
+  ledger.href = '#beds?' + new URLSearchParams({tab:'all',building:data.buildingId,area:zone.id});
   const heading = node('div', 'care-area-detail-heading', [
     node('div', '', [
       node('p', 'fx-muted', zone.path),
       node('h3', '', zone.name),
     ]),
-    data.canManage ? choose(
+    ledger, data.canManage ? choose(
       btn(ctx, '编辑区域', () => editArea(ctx, data, zone)),
       btn(ctx, '新增子区域', () => editArea(ctx, data, null, zone.id)),
       children.length ? null : btn(ctx, '归档区域', () => ctx.command('care.areaArchive', {
@@ -295,7 +296,8 @@ function areaDetails(ctx, data, zone) {
 
 export function careAreas(ctx) {
   const userId = ctx.state.user?.id;
-  let selection = lastView?.userId === userId ? { ...lastView } : { userId };
+  const memory = ctx.workspaceState ||= {};
+  let selection = memory.areaDesk && memory.areaDesk.userId === userId ? memory.areaDesk : { userId };
   const panel = node('section', 'care-areas');
   let serial = 0;
 
@@ -303,7 +305,7 @@ export function careAreas(ctx) {
     const area = data.areas.find(item => item.id === selection.areaId) || data.areas[0];
     const current = data.buildings.find(item => item.id === data.buildingId);
     selection = { userId, buildingId: data.buildingId, areaId: area?.id };
-    lastView = selection;
+    memory.areaDesk = selection;
     const buildings = select(data.buildings.map(item => [item.id, buildingLabel(item)]), data.buildingId);
     buildings.setAttribute('aria-label', '选择楼栋');
     buildings.addEventListener('change', () => load(buildings.value, true));
@@ -312,7 +314,8 @@ export function careAreas(ctx) {
         node('span', 'care-area-workspace-icon', ctx.ui.icon('layers', 22)),
         node('div', '', [
           node('h2', '', '区域设置'),
-          node('p', 'fx-muted', '在当前楼栋划分照护区域，并为护工安排覆盖范围。'),
+          node('p', 'fx-muted', current ? [current.name, data.floors.length + ' 层', data.rooms.length + ' 间房',
+            data.areas.length + ' 个区域'].join(' · ') : ''),
         ]),
       ]),
       node('div', 'care-area-workspace-actions', [
@@ -329,7 +332,7 @@ export function careAreas(ctx) {
     const detail = node('div', 'care-area-main');
     function update(selected) {
       selection = { ...selection, areaId: selected?.id };
-      lastView = selection;
+      memory.areaDesk = selection;
       const items = tree(data, row => {
         const control = btn(ctx, row.name, () => {
           update(row);
@@ -358,11 +361,11 @@ export function careAreas(ctx) {
     try {
       const query = buildingId ? '?' + new URLSearchParams({ buildingId }) : '';
       const data = await ctx.get(endpoint + query);
-      if (attempt !== serial || !panel.isConnected) return;
+      if (attempt !== serial) return;
       render(data);
-      if (focusBuilding) panel.querySelector('select')?.focus();
+      if (focusBuilding && panel.isConnected) panel.querySelector('select')?.focus();
     } catch (error) {
-      if (attempt === serial && panel.isConnected)
+      if (attempt === serial)
         panel.replaceChildren(node('p', 'form-error', error.message || '无法读取楼栋区域'), btn(ctx, '重新读取', () => load()));
     }
   }

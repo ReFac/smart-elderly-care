@@ -66,6 +66,15 @@ class CareAreaTests(unittest.TestCase):
             action, payload, self.store.version(self.token)["revision"], self.token
         )
 
+    def test_room_inspector_uses_the_same_area_as_the_bed_directory(self):
+        parent = self.zone("东区", floorIds=[self.floor])
+        self.zone("东区夜班", parent=parent, roomIds=[self.room])
+        room = self.store.facility_resource(self.token, "room", self.room)
+        bed = self.store.snapshot(self.token)["data"]["bedDirectory"][self.bed]
+        self.assertEqual(room["areaPath"], "东区 / 东区夜班")
+        self.assertEqual(room["areaId"], bed["areaId"])
+        self.assertEqual(room["areaPath"], bed["areaPath"])
+
     def add_building(self, *, campus=facility.HOME_CAMPUS):
         self.apply("facility.addBuilding", {"name": "二号楼", "campusId": campus})
         building = next(

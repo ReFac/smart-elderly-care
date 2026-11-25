@@ -62,7 +62,7 @@ export function dailyTimeline(ctx, resident, lifeEvent) {
       });
       list.replaceChildren(...(days.length ? days : [node('p', 'fx-muted', '这七天还没有已确认的用餐或集体活动。')]));
       if (focusRow && end === focusDate) requestAnimationFrame(() => {
-        if (focusRow.isConnected && ticket === sequence && focusRow.closest('dialog')?.open) {
+        if (focusRow.isConnected && ticket === sequence && focusRow.closest('dialog[open], .resident-record-workspace')) {
           focusRow.focus({preventScroll: true});
           focusRow.scrollIntoView({block: 'nearest'});
         }

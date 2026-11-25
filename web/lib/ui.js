@@ -6,6 +6,14 @@ export function el(tag, className = '', text = '') {
 }
 
 const paths = {
+  person: 'M8 7a4 4 0 1 0 8 0 4 4 0 1 0-8 0 M4 21v-2c0-4 3-6 8-6s8 2 8 6v2z',
+  left: 'm15 5-7 7 7 7',
+  refresh: 'M20 11a8 8 0 1 0-2 7 M20 4v7h-7',
+  fullscreen: 'M3 9V3h6m6 0h6v6m0 6v6h-6m-6 0H3v-6',
+  font: 'M3 8h10M8 8v12 M12 4h10m-5 0v16',
+  monitor: 'M3 4h18v13H3z M12 17v4m-4 0h8 M6 12l3-3 3 2 5-4',
+  settings: 'm10 3 4 0 1 3 3 .5 2 3-1.5 2.5L20 15l-2 3-3 .5-1 2.5h-4l-1-2.5-3-.5-2-3 1.5-3L4 9.5l2-3L9 6z M15 12a3 3 0 1 0-6 0 3 3 0 0 0 6 0',
+
   grid: 'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
   home: 'm3 10 9-7 9 7v10h-6v-6H9v6H3z',
   intake: 'M13 20H4v-3c0-3 3-5 7-5 M8 4a3.5 3.5 0 1 0 3.5 6A3.5 3.5 0 0 0 8 4 M18 11v8m-4-4h8',

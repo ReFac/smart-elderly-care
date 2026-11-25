@@ -26,11 +26,12 @@ ALLOWED = {
     "待遇已终止": ("登记申请", "补录已核定待遇"),
 }
 GRADES = tuple(f"{i}级" for i in range(6)) + ("其他书面等级",)
+INSURANCE_TYPES = ("城乡居民", "城镇职工")
 SERVICES = ("机构护理", "居家护理", "社区护理", "其他核定方式")
 
 
 def catalog():
-    return {"stages": ALLOWED, "grades": GRADES, "services": SERVICES}
+    return {"stages": ALLOWED, "grades": GRADES, "services": SERVICES, "insuranceTypes": INSURANCE_TYPES}
 
 
 def record(state, p, actor, today):
@@ -52,6 +53,9 @@ def record(state, p, actor, today):
     reference = text_field(
         p.get("reference"), "参保/受理/结论文书编号", required=True, limit=100
     )
+    insurance = p.get("insuranceType", last.get("insuranceType", ""))
+    if insurance not in ("", *INSURANCE_TYPES):
+        raise ValueError("请选择有效的参保险种")
     grade = p.get("grade", "")
     if event in ("登记评估结论", "补录已核定待遇"):
         if grade not in GRADES:
@@ -87,6 +91,7 @@ def record(state, p, actor, today):
         regionLabel=label,
         reference=reference,
         grade=grade,
+        insuranceType=insurance,
         service=service,
         startsOn=start,
         endsOn=end,

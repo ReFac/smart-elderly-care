@@ -5,6 +5,7 @@ import json
 # Live identity, grants, payer callbacks, AI quotas and audit have their own authority.
 # Live originals may only be extended. These tables support replacement of mutable records.
 MUTABLE = {
+    "subsidy_policy": "补贴备料规则",
     "staff_paydays": "员工工资日",
     "facility_buildings": "楼栋",
     "facility_campuses": "分院",
@@ -27,6 +28,8 @@ MUTABLE = {
     "scheduled_work_menus": "指定日期伙食菜单",
 }
 ORIGINALS = {
+    "subsidy_materials": "补贴申报原件",
+    "subsidy_claims": "补贴申报签发清单",
     "legacy_bed_cards": "历史床位补卡凭证",
     "resident_medication_reports": "体检用药自报及历次更正",
     "medication_round_receipts": "逐人服药核对签认",
@@ -64,6 +67,7 @@ PROTECTED = {
     "channelReceipts": "渠道回执",
     "deposits": "预存余额",
     "depositEntries": "预存流水",
+    "dischargeSettlements": "退住结算与退款凭证",
     "expenses": "支出流水",
     "transactions": "库存流水",
     "reports": "报送记录",
@@ -144,6 +148,7 @@ def completed(rows):
 
 
 OPTIONAL_TABLES = {
+    "subsidy_policy", "subsidy_materials", "subsidy_claims",
     "legacy_bed_cards",
     "resident_medication_reports",
     "medication_round_receipts",
@@ -199,6 +204,8 @@ def describe(db):
     # Renewal history is allocated on the first renewal. An absent ledger is empty.
     source.setdefault("contractRenewals", [])
     live.setdefault("contractRenewals", [])
+    source.setdefault("dischargeSettlements", [])
+    live.setdefault("dischargeSettlements", [])
     changes = []
     blockers = []
     expired_ids = {r[0] for r in db.execute("SELECT resident FROM archive_expirations")}

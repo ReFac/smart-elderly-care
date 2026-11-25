@@ -12,4 +12,4 @@ python3 -m pip install -r requirements-storage.txt
 python3 server.py
 ```
 
-[打开本地工作台](http://localhost:8765/?workspace=1) · [常见问题](http://localhost:8765/faq) · [项目日志](LOG.md) · [客户端说明](docs/clients.md) · [机构版商用设计](docs/commercial-design.md)
+[打开本地工作台](http://localhost:8765/?workspace=1) · [左栏业务目录](docs/desktop-navigation.md) · [常见问题](http://localhost:8765/faq) · [项目日志](LOG.md) · [客户端说明](docs/clients.md) · [机构版商用设计](docs/commercial-design.md)

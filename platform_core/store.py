@@ -8,8 +8,9 @@ from pathlib import Path
 from threading import BoundedSemaphore, Lock
 from zoneinfo import ZoneInfo
 
+from .system_monitor import Presence
 from .room_context import room_context, validate_proposal
-from .operations import expense_import
+from .operations import expense_import, subsidies
 from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, staff_employment, storage_assets
 from . import lead_contacts, lead_intake, medical_visits, people_labels, visit_schedule
@@ -89,6 +90,7 @@ class Store:
         self._daily_maintenance_lock = Lock()
         self._trials_checked = None
         self._archive_checked = None
+        self.presence = Presence()
         self.network_probes = BoundedSemaphore(4)
         self.public_submissions = lead_intake.PublicSubmissions()
         self.code_senders = dict(code_senders or {})
@@ -105,6 +107,7 @@ class Store:
             )
             storage_assets.init(db)
             expense_import.init(db)
+            subsidies.init(db)
             protected_docs.init(db)
             activity.init(db)
             if not db.execute("SELECT 1 FROM workspace WHERE id=1").fetchone():
@@ -203,6 +206,7 @@ class Store:
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
             user = self.actor(db, token)
+            self.presence.touch(access._token_hash(token))
             return {
                 "userId": user["id"],
                 "actorStamp": actor_stamp(user),
@@ -230,6 +234,7 @@ class Store:
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
             user = self.actor(db, token)
+            self.presence.touch(access._token_hash(token))
             stamp = actor_stamp(user)
             row = db.execute(
                 "SELECT revision,data FROM workspace WHERE id=1"
@@ -365,6 +370,7 @@ class Store:
                     for e in data.get("longCareEvents", ())
                 ]
             dossier.project(db, data, user, today)
+            dossier.project_roster(db, data, user)
             medical_visits.project(db, data, user)
             rounds_family.project(db, data, user)
             beds = campus_access.allowed_beds(db, user, include_rooms=True)
@@ -666,7 +672,9 @@ class Store:
             if resource == "floor":
                 return facility.floor(db, state, user, key)
             if resource == "room":
-                return facility.room(db, state, user, key)
+                room = facility.room(db, state, user, key)
+                room.update(care_areas.room_areas(db, [room["id"]]).get(room["id"], {}))
+                return room
             if resource == "rooms":
                 return facility.rooms(db, state, user, **filters)
             if resource == "search":
@@ -963,6 +971,12 @@ class Store:
                     summary = lead_contacts.command(db, data, user, action, payload, now)
                 elif action in care_areas.ACTIONS:
                     summary = care_areas.command(db, data, user, action, payload, now)
+                elif action in subsidies.ACTIONS:
+                    summary = subsidies.command(db, data, user, action, payload, now)
+                elif action == "ops.dischargeSettlement":
+                    from .operations.discharge_settlement import settle
+
+                    summary = settle(data, payload, user, today)
                 elif action == "ops.mergeStockItem":
                     from . import inventory_dedupe
 
@@ -1046,7 +1060,9 @@ class Store:
                         fields["matchAreaStaff"] = care_areas.responsible_staff(db, resident["bedId"]) if resident and resident.get("bedId") else ()
                     actor_fields = {
                         "care.assess": "operator",
+                        "care.revisePlan": "operator",
                         "care.addMedication": "operator",
+                        "care.receiveMedication": "operator",
                         "care.screen": "operator",
                         "care.scheduleFollowup": "operator",
                         "care.finishFollowup": "operator",
@@ -1071,12 +1087,19 @@ class Store:
                         fields["operatorId"] = user["id"]
                     if action in ("care.giveMedication", "care.addMedication"):
                         fields["nowLocal"] = now.strftime("%Y-%m-%dT%H:%M")
+                    if action == "care.receiveMedication":
+                        fields["nowLocal"] = now.isoformat(timespec="seconds")
+                        fields["operatorId"] = user["id"]
                     module = care if domain == "care" else operations
                     if action == "care.addTask":
                         from .operations.dispatch import source_reference
 
                         source = source_reference(data, fields, user)
                     summary = module.apply(data, action, fields, today)
+                    if action == "care.approvePlan":
+                        care.plan_items.sync_rules(db, data, fields["planId"], user, now)
+                    elif action in ("care.discharge", "care.endTrial"):
+                        care.plan_items.disable_rules(db, fields["residentId"], user, now)
                     if action == "care.addTask":
                         data["tasks"][-1].update(source)
                 elif action == "ltci.record":

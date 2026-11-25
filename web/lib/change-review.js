@@ -32,6 +32,7 @@ const titles = {
   'care.leave': '登记请假',
   'ltci.record': '登记长护险办理',
   'care.assess': '保存能力评估',
+  'care.revisePlan': '提交照护计划调整',
   'care.approvePlan': '审核照护计划',
   'care.addTask': '新建照护工单',
   'care.saveSchedule': '保存定时工单',

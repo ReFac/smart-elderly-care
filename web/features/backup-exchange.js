@@ -1,4 +1,5 @@
-import { node, btn } from './shared.js';
+import { badge, btn, facts, link, named, node, table } from './shared.js';
+import { auditActorLabel } from './people-labels.js';
 
 export async function request(path, payload) {
   const response = await fetch(
@@ -19,10 +20,76 @@ export async function request(path, payload) {
 function textSize(value) {
   return (value / 1048576).toFixed(2) + ' MiB';
 }
-function facts(items) {
-  const list = node('dl', 'backup-facts');
-  for (const [name, value] of items) list.append(node('dt', '', name), node('dd', '', value));
-  return list;
+export function maintenanceHeader(ctx, title, values, controls) {
+  return node('section', 'fx-panel recovery-banner', [
+    node('header','fx-toolbar',[node('h2','',title),node('div','fx-actions',controls)]),
+    facts(values),
+  ]);
+}
+
+export function maintenanceViews(ctx, choices, active, select) {
+  const tabs = node('nav','recovery-views');
+  tabs.setAttribute('aria-label','管理内容');
+  for (const [key,title] of choices) {
+    const button = btn(ctx,title,()=>select(key),'ghost');
+    button.setAttribute('aria-pressed', String(active === key));
+    tabs.append(button);
+  }
+  return tabs;
+}
+
+const operations = {
+  'backup.create':'创建快照','backup.link':'连接异地位置','backup.unlink':'停止异地配送',
+  'backup.policy':'修改备份设置','backup.verify':'校验快照','backup.retry':'重试备份',
+  'backup.export':'导出快照','backup.import':'导入快照','backup.apply':'应用恢复',
+  'backup.fetch':'从异地取回','update.settings':'修改更新设置',
+};
+
+export function maintenanceLog(ctx, area) {
+  const host = node('section','recovery-log');
+  const records = new Map();
+  let next = null;
+  async function load(older) {
+    if (older && !next) return;
+    const query = new URLSearchParams({limit:'100'});
+    if (older) query.set('before',next);
+    const previous = [...host.querySelectorAll('button')];
+    previous.forEach(button=>{button.disabled=true;});
+    try {
+      const data = await ctx.get('/api/activity?' + query);
+      if (!host.isConnected) return;
+      for (const row of data.rows) {
+        if (row.action.startsWith(area + '.')) records.set(row.revision,row);
+      }
+      next = data.nextBefore;
+      const rows = [...records.values()];
+      host.replaceChildren(table(ctx,{
+        title: area === 'backup' ? '备份操作记录' : '更新设置操作记录',
+        rows, search:{placeholder:'搜索经办人、版本或操作内容',
+          value:r=>[auditActorLabel(ctx,r),r.summary,'v'+r.revision,operations[r.action]].join(' ')},
+        filter:{label:'操作类型',value:r=>operations[r.action] || r.action},
+        action:next ? btn(ctx,'加载更早的机构日志',()=>load(true)) : null,
+        cols:[{label:'操作时间',view:r=>named(r.at.slice(0,10),r.at.slice(11,19))},
+          {label:'操作类型',view:r=>operations[r.action] || r.action},
+          {label:'经办人员',view:r=>auditActorLabel(ctx,r)},
+          {label:'操作内容',view:r=>r.summary},
+          {label:'修订',view:r=>'v'+r.revision},
+          {label:'详情',view:r=>link(ctx,'查看记录',()=>ctx.detail('操作记录',facts([
+            ['时间',r.at.replace('T',' ').slice(0,19)],['经办人员',auditActorLabel(ctx,r)],['操作',operations[r.action] || r.action],
+            ['业务修订','v'+r.revision],['操作内容',r.summary],
+          ])))}],
+        empty:next ? '已载入的机构日志没有此类记录，可继续查询更早的日志。' : '没有此类操作记录',
+      }));
+    } catch (error) {
+      if (host.isConnected) {
+        const message=node('p','form-error',error.message);
+        host.replaceChildren(message, btn(ctx,'重试读取日志',()=>load(older)));
+      }
+    }
+  }
+  host.append(node('p','fx-muted','正在读取机构日志…'));
+  queueMicrotask(()=>load(false));
+  return host;
 }
 
 function differences(view) {
@@ -97,33 +164,27 @@ export function settings(panel, data, labels) {
   );
   wrapper.append(
     facts([
-      ['自动备份', '北京时间 00:00'],
+      ['自动备份', '每 ' + data.intervalHours + ' 小时'],
       ['变更回溯', '60 天'],
     ]),
     field('本机完整快照保留期', keep),
     node('p', 'fx-muted', '到期后的本机副本仅在已校验异地副本、且有更新的恢复点时释放。'),
     field('网页单次导入上限', limit),
-    node('h3', '', '异地副本位置'),
   );
-  const targets = node('div', 'backup-targets');
+  const items = [];
   for (const target of data.locations) {
     const current = target.state === 'linked';
-    const parts = [
-      node('div', '', [node('strong', '', target.label), node('small', '', labels[target.state])]),
-    ];
-    if (current || target.available || target.state === 'changed') {
-      const controls = node('div', 'backup-controls');
-      if (!current && target.available)
-        controls.append(btn(ctx, '连接', () => updateLocation(target, '/locations', '连接')));
-      if (current || target.state === 'changed')
-        controls.append(
-          btn(ctx, '停止配送', () => updateLocation(target, '/locations/unlink', '停止配送')),
-        );
-      parts.push(controls);
-    }
-    targets.append(node('div', 'backup-target', parts));
+    const controls = node('div','fx-actions');
+    if (!current && target.available) controls.append(btn(ctx,'连接',()=>updateLocation(target,'/locations','连接')));
+    if (current || target.state === 'changed') controls.append(btn(ctx,'停止配送',()=>updateLocation(target,'/locations/unlink','停止配送')));
+    items.push({target,controls});
   }
-  wrapper.append(targets);
+  wrapper.append(table(ctx,{
+    title:'异地副本配送', rows:items,
+    cols:[{label:'位置',view:r=>r.target.label},{label:'授权状态',view:r=>badge(ctx,labels[r.target.state])},
+      {label:'管理',view:r=>r.controls.childElementCount ? r.controls : '待部署授权'}],
+    empty:'尚未配置配送位置',
+  }));
   if (data.configError) wrapper.append(node('p', 'fx-attention', data.configError));
   const save = btn(
     ctx,
@@ -276,6 +337,7 @@ export async function exportPoint(panel, id) {
 export async function managePoint(panel, id) {
   const ctx = panel.ctx;
   const view = await request('/points/' + id + '/preview', {});
+  if (!panel.isConnected) return;
   const wrapper = differences(view);
   wrapper.append(
     node('p', 'fx-muted', '应用时将保留当前账号授权、审计和套餐，系统先保存完整回退点。'),

@@ -1,9 +1,11 @@
 import { careAreas } from './care-areas.js';
+import { residentRoster } from './resident-roster.js';
+import { medicationReceivingLink } from './medication-receiving.js';
 import { openMedicationRound } from './med-rounds.js';
 import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import {
-  allocate, billingSchedule, bindContractFields, contractFields, historicInquiries,
-  isTrial, labelBedStay, register, registry, statusLabel,
+  allocate, admissionRowActions, billingSchedule, bindContractFields, contractFields, historicInquiries,
+  isTrial, labelBedStay, register, statusLabel,
 } from './admission.js';
 import { goToRoom, roomsPage } from './rooms.js';
 import { roomTypeLabel } from './room-vector.js';
@@ -18,9 +20,9 @@ import {
   table,
   tabs,
   currentTab,
-  selectTab,
   kpis,
   field,
+  select,
   memo,
   bedName,
   active,
@@ -72,11 +74,11 @@ function discharge(ctx, row) {
   runForm(ctx, {
     title: '办理退住',
     action: 'care.discharge',
-    description: '确认后将释放 ' + residentLabel(ctx, row) + ' 的床位，转为只读归档，保管 365 天。',
-    fields: [memo('note', '退住小结', true)],
+    description: (row ? residentLabel(ctx, row) + ' · ' : '') + '确认后释放当前床位，退住档案保留 365 天。',
+    fields: [...(row ? [] : [stayPicker(ctx, person => !isTrial(person))]), memo('note', '退住小结', true)],
     map: (v) => ({
       ...v,
-      residentId: row.id
+      residentId: row?.id || v.residentId
     }),
     submitLabel: '确认退住'
   });
@@ -110,6 +112,7 @@ function leave(ctx, row) {
     title: '登记请假',
     action: 'care.leave',
     fields: [
+      ...(row ? [] : [stayPicker(ctx)]),
       field('startDate', '开始日期', {
         type: 'date',
         value: today(ctx)
@@ -122,9 +125,60 @@ function leave(ctx, row) {
     ],
     map: (v) => ({
       ...v,
-      residentId: row.id
+      residentId: row?.id || v.residentId
     })
   });
+}
+
+function stayPicker(ctx, include = () => true) {
+  return select('residentId', '在住长辈', active(ctx).filter(include).map(person => ({
+    value: person.id, label: residentLabel(ctx, person),
+  })));
+}
+
+function leaveDirectory(ctx) {
+  if (!hasGrant(ctx, 'intake', 'finance')) return ctx.ui.empty('当前岗位没有请假台账的查看权限。');
+  const people = new Map(ctx.state.residents.map(row => [row.id, row]));
+  const day = today(ctx);
+  const stage = row => row.endDate < day ? '已结束' : row.startDate > day ? '待开始' : '请假中';
+  const rows = (ctx.state.leaves || []).filter(row => people.has(row.residentId))
+    .sort((a,b) => b.startDate.localeCompare(a.startDate) || b.id.localeCompare(a.id));
+  return page(ctx, '请假管理', '', canAct(ctx, 'care.leave') ? btn(ctx, '登记请假', () => leave(ctx), 'primary') : null,
+    table(ctx, { title:'请假台账', rows, empty:'尚无请假记录。',
+      search:{placeholder:'搜索姓名、房号或请假事由', value:row => [residentLabel(ctx,people.get(row.residentId)),row.reason].join(' ')},
+      filter:{label:'请假状态', value:stage, options:['待开始','请假中','已结束']},
+      cols:[
+        {label:'长辈',view:row => residentAnchor(ctx,people.get(row.residentId))},
+        {label:'开始日期',view:row => row.startDate}, {label:'结束日期',view:row => row.endDate},
+        {label:'状态',view:row => badge(ctx,stage(row))},
+        ...(hasGrant(ctx,'intake') ? [{label:'请假事由',view:row => row.reason || '未填写'}] : []),
+        {label:'登记日期',view:row => row.date},
+      ],
+    }));
+}
+
+function dischargeDirectory(ctx) {
+  if (!hasGrant(ctx, 'residents','care','intake','finance','clinical'))
+    return ctx.ui.empty('当前岗位没有退住记录的查看权限。');
+  const priorBeds = new Map();
+  for (const move of ctx.state.bedMoves || []) {
+    if (move.kind === '退住' && move.beforeBedId) priorBeds.set(move.residentId, move.beforeBedId);
+  }
+  const rows = ctx.state.residents.filter(row => row.status === '已退住')
+    .sort((a,b) => (b.dischargedAt || '').localeCompare(a.dischargedAt || ''));
+  return page(ctx, '退住记录', '', canAct(ctx, 'care.discharge') ? btn(ctx, '办理退住', () => discharge(ctx), 'primary') : null,
+    table(ctx, {title:'退住归档名册', rows, empty:'尚无保管期内的退住档案。',
+      search:{placeholder:'搜索姓名、档案号或原床位', value:row => [row.name,row.id,bedName(ctx,priorBeds.get(row.id))].join(' ')},
+      cols:[
+        {label:'长辈',view:row => residentAnchor(ctx,row)},
+        {label:'原床位',view:row => bedName(ctx,priorBeds.get(row.id))},
+        {label:'入住日期',view:row => row.admittedAt || '—'},
+        {label:'退住日期',view:row => row.dischargedAt || '待核实'},
+        {label:'保管至',view:row => row.archiveUntil || '待核实'},
+        ...(hasGrant(ctx,'intake') ? [{label:'退住小结',view:row => row.dischargeNote || '未登记'}] : []),
+        {label:'操作',view:row => link(ctx,'查看详细档案',() => openDossier(ctx,row))},
+      ],
+    }));
 }
 
 function renew(ctx, row) {
@@ -166,7 +220,10 @@ export function profile(ctx, row, lifeEvent) {
   const open = btn(ctx, '打开详细档案', () => {
     const live = ctx.current?.() || ctx;
     const resident = live.state.residents.find(person => person.id === row.id);
-    if (resident) openDossier(live, resident);
+    if (resident) {
+      if (live.openWorkspaceTab) dialog.close();
+      openDossier(live, resident);
+    }
     else ctx.toast('该长辈档案未开放或已失效');
   }, 'primary');
   open.classList.add('resident-brief-open');
@@ -257,6 +314,7 @@ export function residencyDetails(ctx, row) {
       actions.append(btn(ctx, '服务记录预览', () => familyPreview(ctx, row)));
     if (canAct(ctx, 'care.confirmMedRound'))
       actions.append(btn(ctx, '服药核对', () => openMedicationRound(ctx, {residentId: row.id})));
+    add(actions, medicationReceivingLink(ctx, row));
     if (canAct(ctx, 'care.archive')) actions.append(btn(ctx, '复核摘要', () => archive(ctx, row)));
     if (canAct(ctx, 'care.leave')) actions.append(btn(ctx, '登记请假', () => leave(ctx, row)));
     if (!isTrial(row) && row.endDate && canAct(ctx, 'care.renew')) actions.append(btn(ctx, '续住', () => renew(ctx, row)));
@@ -293,6 +351,9 @@ export function residencyDetails(ctx, row) {
     ),
     block('用药记录', 'medications', ['clinical'], (m) =>
       named(m.name + ' · ' + m.status, m.instruction)
+    ),
+    block('药品交接记录', 'medicationReceipts', ['clinical'], (m) =>
+      named(m.name + ' · ' + m.quantity + m.unit, m.receivedAt.slice(0,16).replace('T',' ') + ' · ' + staffLabel(ctx,m.operator,m.operatorId))
     ),
     block('健康体征', 'vitals', ['clinical'], (v) =>
       named(v.metric + ' ' + v.value + ' ' + (v.unit || ''), v.date + ' · ' + v.status)
@@ -341,31 +402,24 @@ function renewalSection(ctx, open) {
 
 export function residents(ctx) {
   const view = currentTab('residents');
+  if (view === 'leaves') return leaveDirectory(ctx);
+  if (view === 'discharged') return dischargeDirectory(ctx);
   const rows = ctx.state.trialFollowups || [];
   const showFollowups = view === 'followups' || view === 'trials';
   const followups = rows.length || showFollowups
     ? disclosure('试住回访', trialFollowups(ctx), rows.filter(r => r.status === '待回访').length) : null;
   if (followups) followups.open = showFollowups;
   const renewal = renewalSection(ctx, view === 'renew');
-  const actions = canAct(ctx, 'care.register') ? btn(ctx, '新建长辈档案', () => register(ctx), 'primary') : null;
-  const list = registry(ctx, {
-    workbenchStatus: view || 'pending',
-    onStatusChange: status => selectTab('residents', status),
+  if (view === 'renew' || view === 'followups')
+    return page(ctx, view === 'renew' ? '到期续住' : '试住回访', '', null, view === 'renew' ? renewal : followups);
+  const roster = residentRoster(ctx, {
+    mode:'admission', initialStatus:view, create:canAct(ctx, 'care.register') ? () => register(ctx) : null,
+    admit:canAct(ctx, 'care.admit') ? () => admit(ctx) : null,
+    rowActions:person => admissionRowActions(ctx, person),
+    detail:person => openDossier(ctx, person),
   });
-  return page(
-    ctx,
-    '入住管理',
-    '',
-    actions,
-    node('div', 'fx-profile', [
-      view === 'renew' ? renewal : null,
-      view === 'followups' ? followups : null,
-      list,
-      view !== 'followups' ? followups : null,
-      view !== 'renew' ? renewal : null,
-      historicInquiries(ctx),
-    ]),
-  );
+  roster.append(node('div', 'roster-secondary', [followups, renewal, historicInquiries(ctx)]));
+  return roster;
 }
 
 const bedViewSorts = [
@@ -375,25 +429,22 @@ const bedViewSorts = [
   ['plan', '平面图位置'],
 ];
 const bedNumbers = new Intl.Collator('zh-CN', {numeric: true, sensitivity: 'base'});
-let bedViewPreference;
+let bedSearchRevision = 0;
 
 export function reopenBedFilter() {
-  if (bedViewPreference) bedViewPreference.request = '';
+  bedSearchRevision++;
 }
 
 function allBeds(ctx) {
   const personFor = new Map(active(ctx).map(person => [person.bedId, person]));
-  if (bedViewPreference?.userId !== ctx.state.user.id)
-    bedViewPreference = {
-      userId: ctx.state.user.id, building: '', area: '', status: '', query: '', order: 'floor',
-      capacity: '', limit: 0, request: '',
-    };
-  const view = bedViewPreference;
+  const memory = ctx.workspaceState || {};
+  const view = memory.bedList ||= {building:'', floor:'', area:'', status:'', query:'', order:'floor',
+    capacity:'', limit:0, request:'', display:'ledger'};
   const params = new URLSearchParams(location.hash.split('?')[1]);
-  const requested = ['capacity', 'limit', 'campus', 'building', 'floor', 'room', 'status'].map(key => params.get(key));
-  const key = JSON.stringify(requested);
+  const requested = ['capacity', 'limit', 'campus', 'building', 'floor', 'room', 'status','area'].map(key => params.get(key));
+  const key = JSON.stringify([bedSearchRevision,...requested]);
   if (requested.some(Boolean) && view.request !== key) {
-    const [capacity, limit, campus, building, floor, room, status] = requested;
+    const [capacity, limit, campus, building, floor, room, status,area] = requested;
     view.request = key;
     view.capacity = /^[1-9]$|^1[0-2]$/.test(capacity || '') ? capacity : '';
     view.limit = /^[1-9]$|^[12][0-9]$|^30$/.test(limit || '') ? Number(limit) : 0;
@@ -401,7 +452,8 @@ function allBeds(ctx) {
     view.floor = floor || '';
     view.room = room || '';
     view.building = building || '';
-    view.area = view.query = '';
+    view.area = area ? 'area:'+area : '';
+    view.query = '';
     view.status = { vacant: '空闲', occupied: '已入住' }[status] || '';
   } else if (!requested.some(Boolean) && view.request) {
     view.request = '';
@@ -448,6 +500,7 @@ function allBeds(ctx) {
   search.setAttribute('aria-label', search.placeholder);
   search.value = view.query;
   const building = node('select', 'fx-input');
+  const floor = node('select', 'fx-input');
   const area = node('select', 'fx-input');
   const capacity = node('select', 'fx-input');
   capacity.add(new Option('全部房型', ''));
@@ -459,7 +512,7 @@ function allBeds(ctx) {
   order.value = view.order;
   const controls = node('section', 'fx-panel bed-list-controls', [
     node('div', 'bed-list-fields', [
-      label('搜索床位', search), label('楼栋', building),
+      label('搜索床位', search), label('楼栋', building), label('楼层',floor),
       label('区域或病区', area), label('房间类型', capacity), label('排序方式', order),
     ]),
   ]);
@@ -470,12 +523,20 @@ function allBeds(ctx) {
   count.setAttribute('role', 'status');
   const clearScope = link(ctx, '清除快速筛选范围', () => {
     view.limit = 0;
-    view.campus = view.floor = view.room = view.building = '';
+    view.campus = view.floor = view.room = view.building = view.area = '';
     fillBuildings();
+    fillFloors();
     fillAreas();
     draw();
   });
-  controls.append(node('div', 'bed-list-status', [statusBar, count, clearScope]));
+  const modes = choose();
+  modes.classList.add('desk-view-switch');
+  for (const [id,title] of [['ledger','床位台账'],['board','房间看板']]) {
+    const button=btn(ctx,title,()=>{view.display=id;draw();},'ghost');
+    button.dataset.layout = id;
+    modes.append(button);
+  }
+  controls.append(node('div', 'bed-list-status', [statusBar, count, clearScope,modes]));
   const cards = node('div', 'fx-wards bed-list-grid');
   const metrics = node('div', 'bed-list-metrics');
 
@@ -519,6 +580,16 @@ function allBeds(ctx) {
     view.building = choices(building, list, '全部楼栋', view.building);
   }
   const areaKey = room => room.areaId || scopeText(room.buildingId, room.areaPath || '未分区');
+  function fillFloors() {
+    const options = new Map();
+    for (const room of [...places.values()].sort(sortFloor)) {
+      if (view.building && view.building !== room.buildingId || view.campus && view.campus !== room.campusId) continue;
+      const text=scopeText(view.building ? '' : room.buildingName,room.floorLabel);
+      if (room.floorId && text) options.set(room.floorId,text);
+    }
+    if (view.floor && !options.has(view.floor)) options.set(view.floor,'指定楼层暂不可见');
+    view.floor=choices(floor,[...options],'全部楼层',view.floor);
+  }
   function roomsInBuilding() {
     return [...places.values()].filter(r =>
       (!view.building || r.buildingId === view.building) &&
@@ -541,6 +612,8 @@ function allBeds(ctx) {
         if (bed.ward) entries.set('ward:' + bed.ward, '病区 · ' + bed.ward);
       }
     }
+    if (view.area && view.area === 'area:'+params.get('area') && !entries.has(view.area))
+      entries.set(view.area,'指定区域（暂无可见床位）');
     const list = [...entries].sort((a, b) => sortText(a[1], b[1]));
     view.area = choices(area, list, '全部区域与病区', view.area);
   }
@@ -570,7 +643,7 @@ function allBeds(ctx) {
     const canAdmit = available && canAct(ctx, 'care.admit');
     const button = node('button', 'fx-bed ' + (available ? 'available' : 'occupied'), [
       node('strong', '', labelBedStay(bed.label, person)),
-      node('span', '', person ? residentLabel(ctx, person) : available ? '空闲床位' : '已入住'),
+      node('span', '', person ? residentLabel(ctx, person) : available ? '空闲床位' : bed.status),
       node('small', '', person?.level || (canAdmit ? '可办理入住' : bed.status)),
     ]);
     button.type = 'button';
@@ -598,7 +671,7 @@ function allBeds(ctx) {
   function renderGroup(group) {
     const occupancy = node('progress', 'fx-occupancy');
     occupancy.max = group.total;
-    occupancy.value = group.total - group.vacant;
+    occupancy.value = group.occupied;
     occupancy.setAttribute('aria-label', group.title + '入住率');
     return node('section', 'fx-panel', [
       node('div', 'fx-toolbar', [
@@ -616,10 +689,12 @@ function allBeds(ctx) {
     const terms = findText(view.query).trim().split(/\s+/).filter(Boolean);
     const groups = new Map();
     let total = 0;
+    let occupied = 0;
     let vacant = 0;
     let shown = 0;
     let shownRooms = 0;
     let matchedRooms = 0;
+    const ledger = [];
     for (const room of roomsInBuilding().sort(compare)) {
       if (view.capacity && Number(view.capacity) !== room.beds.length) continue;
       const matched = room.beds.filter(bed => inArea(room, bed) && matches(bed, room, terms));
@@ -628,32 +703,54 @@ function allBeds(ctx) {
       if (selectedRooms && view.limit && !selectedRooms.has(room.id)) continue;
       if (view.limit && shownRooms >= view.limit) continue;
       const free = matched.filter(bed => bed.status === '空闲').length;
+      const used = matched.filter(bed => Boolean(personFor.get(bed.id) || bed.residentId || bed.status==='已入住')).length;
+      occupied += used;
       total += matched.length;
       vacant += free;
       if (!matched.length) continue;
       const [key, title] = groupFor(room);
-      if (!groups.has(key)) groups.set(key, {title, rooms: [], total: 0, vacant: 0});
+      if (!groups.has(key)) groups.set(key, {title, rooms: [], total: 0, vacant: 0, occupied:0});
       const group = groups.get(key);
       group.total += matched.length;
       group.vacant += free;
+      group.occupied += used;
       if (visible.length) {
-        group.rooms.push(renderRoom(room, visible));
+        if (view.display==='board') group.rooms.push(renderRoom(room, visible));
+        else ledger.push(...[...visible].sort((a,b)=>sortText(a.label,b.label)).map(bed=>({id:bed.id,bed,room})));
         shownRooms++;
       }
       shown += visible.length;
     }
     for (const button of statusBar.children)
       button.setAttribute('aria-pressed', String(button.dataset.value === view.status));
-    metrics.replaceChildren(kpis([['床位总数', total], ['已入住', total - vacant], ['空闲床位', vacant]]));
+    for (const button of modes.children) button.setAttribute('aria-pressed',String(button.dataset.layout===view.display));
+    metrics.replaceChildren(kpis([['床位总数', total], ['已入住', occupied], ['空闲床位', vacant],['其他状态',total-occupied-vacant]]));
     count.textContent = '显示 ' + shownRooms + ' 间，' + shown + ' 张床位' +
       (shownRooms < matchedRooms ? '（共 ' + matchedRooms + ' 间符合条件）' : '');
-    clearScope.hidden = !(view.limit || view.campus || view.floor || view.room);
+    clearScope.hidden = !(view.limit || view.campus || view.building || view.floor || view.room || view.area);
+    if (view.display==='ledger') {
+      cards.replaceChildren(table(ctx,{title:'床位台账',rows:ledger,empty:'没有符合条件的床位。',
+        cols:[
+          {label:'床号 / 房型',view:({bed,room})=>named(labelBedStay(bed.label,personFor.get(bed.id)),roomTypeLabel(room.beds.length))},
+          {label:'分院 / 楼层',view:({room})=>scopeText(room.campusName,room.buildingName,room.floorLabel) || '待登记'},
+          {label:'区域',view:({room})=>room.areaPath || '未分区'},
+          {label:'床位状态',view:({bed})=>badge(ctx,bed.status,bed.status==='空闲'?'green':'neutral')},
+          {label:'在住长辈',view:({bed})=>personFor.has(bed.id) ? residentAnchor(ctx,personFor.get(bed.id)) : '—'},
+          {label:'操作',view:({bed,room})=>choose(
+            room.id ? link(ctx,'平面图定位',()=>goToRoom(ctx,room.id)) : null,
+            personFor.has(bed.id) ? link(ctx,'查看档案',()=>profile(ctx,personFor.get(bed.id))) :
+              bed.status==='空闲' && canAct(ctx,'care.admit') ? link(ctx,'办理入住',()=>admit(ctx,{bedId:bed.id})) : null,
+          )},
+        ]}));
+      return;
+    }
     const visibleGroups = [...groups.values()].filter(group => group.rooms.length);
     cards.replaceChildren(...(visibleGroups.length ? visibleGroups.map(renderGroup)
       : [node('div', 'fx-empty fx-panel', '没有符合条件的床位')]));
   }
 
-  for (const [value, title] of [['', '全部床位'], ['已入住', '已入住'], ['空闲', '空闲']]) {
+  const statuses = new Set(['已入住','空闲',...ctx.state.beds.map(b=>b.status).filter(Boolean)]);
+  for (const [value, title] of [['', '全部床位'], ...[...statuses].map(status=>[status,status])]) {
     const button = node('button', '', title);
     button.type = 'button';
     button.dataset.value = value;
@@ -662,11 +759,13 @@ function allBeds(ctx) {
   }
   building.addEventListener('change', () => {
     view.building = building.value;
-    view.campus = view.floor = view.room = '';
+    view.campus = view.floor = view.room = view.area = '';
     view.limit = 0;
+    fillFloors();
     fillAreas();
     draw();
   });
+  floor.addEventListener('change',()=>{view.floor=floor.value;view.room='';view.limit=0;fillAreas();draw();});
   area.addEventListener('change', () => { view.area = area.value; draw(); });
   capacity.addEventListener('change', () => { view.capacity = capacity.value; view.limit = 0; draw(); });
   order.addEventListener('change', () => { view.order = order.value; draw(); });
@@ -675,13 +774,13 @@ function allBeds(ctx) {
   });
   search.addEventListener('compositionend', () => { view.query = search.value; draw(); });
   fillBuildings();
+  fillFloors();
   fillAreas();
   draw();
   const panel = node('div', 'fx-profile bed-list', [metrics, controls, cards]);
 
   // Include empty buildings in the selector without making the bed cards wait for a second response.
   ctx.get('/api/facility').then(result => {
-    if (!panel.isConnected) return;
     checkedBuildings = true;
     for (const item of result.buildings) directory.set(item.id, scopeText(item.campusName, item.name));
     fillBuildings();
@@ -694,7 +793,7 @@ function allBeds(ctx) {
       bedCount: view.capacity, campusId: view.campus, buildingId: view.building, floorId: view.floor, roomId: view.room,
     })) if (value) query.set(name, value);
     ctx.get('/api/facility/rooms?' + query).then(result => {
-      if (!panel.isConnected || !view.limit) return;
+      if (!view.limit) return;
       selectedRooms = new Set(result.rooms.map(room => room.id));
       draw();
     }).catch(() => {});

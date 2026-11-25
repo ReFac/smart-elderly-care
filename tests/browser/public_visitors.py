@@ -51,7 +51,8 @@ class Browser:
                 if path.startswith("/api/"):
                     self.api.append((req["method"], path))
             elif event.get("method") == "Runtime.exceptionThrown":
-                self.errors.append(event["params"]["exceptionDetails"]["text"])
+                detail = event["params"]["exceptionDetails"]
+                self.errors.append(detail.get("exception", {}).get("description", detail["text"]))
             if event.get("id") == self.sequence:
                 if "error" in event:
                     raise RuntimeError(event["error"])
@@ -71,7 +72,13 @@ class Browser:
             return until(lambda: self.evaluate(expression))
         except AssertionError as error:
             state = self.evaluate("[location.pathname, location.hash, document.querySelector('[role=alert]')?.textContent]")
-            raise AssertionError(f"{expression} timed out at {state}") from error
+            raise AssertionError(f"{expression} timed out at {state}, browser errors: {self.errors}") from error
+
+
+def check_width(browser):
+    assert browser.evaluate(
+        "document.documentElement.scrollWidth <= window.innerWidth + 1"
+    ), "The page overflows the viewport"
 
 
 def smoke(browser, port):
@@ -79,11 +86,13 @@ def smoke(browser, port):
     origin = f"http://127.0.0.1:{port}"
     b.call("Page.navigate", url=origin + "/visit")
     b.wait_for("document.querySelector('#visit-form select')?.disabled === false")
+    check_width(b)
     assert not b.evaluate("Boolean(document.querySelector('dialog[open]'))")
     assert b.evaluate("Array.from(document.querySelectorAll('input[type=tel]')).every(i => !i.getClientRects().length)")
     assert b.evaluate("document.querySelector('.account-actions a[href=\"/visitor-register.html\"]').innerText.includes('免手机号')")
     b.click(".hero a[href='/roomtour']")
     b.wait_for("document.querySelectorAll('.tour-stop').length === 4")
+    check_width(b)
     b.call("Page.bringToFront")
     b.click(".tour-stop:nth-child(2)")
     b.wait_for("new URLSearchParams(location.search).has('scene')")
@@ -100,6 +109,10 @@ def smoke(browser, port):
     assert ("POST", "/api/public/leads") not in b.api
     b.evaluate("""{const f=document.querySelector('#visit-form'); f.elements.consent.click(); f.requestSubmit();}""")
     b.wait_for("!document.querySelector('#visit-receipt').hidden")
+    b.click("#visit-request [data-again]")
+    assert b.evaluate("""!document.getElementById('visit-form').hidden &&
+        !document.getElementById('visit-form').elements.consent.checked &&
+        document.getElementById('visit-form').elements.phone.value === ''""")
     b.click("#visit-request [data-close]")
     b.click("#open-callback")
     b.evaluate("""{const f=document.querySelector('#callback-form'); f.elements.phone.value='13900002222';
@@ -108,8 +121,20 @@ def smoke(browser, port):
     b.click("#callback [data-close]")
     assert b.api.count(("POST", "/api/public/leads")) == 2
 
+    b.click(".site-nav a[href='/faq']")
+    b.wait_for("document.querySelectorAll('.faq-entry').length > 0")
+    check_width(b)
+    b.click(".faq-filter:nth-child(2)")
+    b.click(".faq-question")
+    assert b.evaluate("!!document.querySelector('.faq-entry[open] .faq-answer')?.textContent")
+    b.evaluate("""{const t=document.querySelector('[data-color-mode-control]');t.value='dark';
+        t.dispatchEvent(new Event('change'));}""")
+    assert b.evaluate("document.documentElement.dataset.colorMode === 'dark'")
+    b.click(".site-brand")
+    b.wait_for("!!document.querySelector('.hero')")
     b.click(".account-actions a[href='/visitor-register.html']")
     b.wait_for("document.querySelector('#visitor-register button')?.disabled === false")
+    check_width(b)
     assert b.evaluate("Array.from(document.querySelectorAll('input'), e => e.name)") == ["username", "password"]
     b.evaluate("""{const f=document.querySelector('#visitor-register'); f.elements.username.value='visit-e2e';
         f.elements.password.value='short'; f.requestSubmit();}""")
@@ -128,13 +153,13 @@ def smoke(browser, port):
         assert sum(row["source"] == source and row["phone"].endswith(suffix) for row in contacts) == 1
 
 
-def main():
+def run_browser(check, seed=lambda store: None, *, server_factory=server):
     browser = os.environ.get("BROWSER_BIN") or which("chromium") or which("microsoft-edge") or which("google-chrome")
     if not browser:
         raise SystemExit("Set BROWSER_BIN to a Chromium executable")
     with TemporaryDirectory(prefix="visitor-browser-") as temp, ExitStack() as stack:
         root = Path(temp)
-        _, port = stack.enter_context(server(root, lambda store: None))
+        _, port = stack.enter_context(server_factory(root, seed))
         profile = root / "browser"
         process = subprocess.Popen([browser, "--headless", "--disable-gpu", "--disable-extensions",
             "--disable-background-networking", "--no-first-run", "--remote-debugging-port=0",
@@ -148,8 +173,23 @@ def main():
         with urlopen(f"http://127.0.0.1:{debug_port}/json/list", timeout=5) as response:
             url = next(page["webSocketDebuggerUrl"] for page in json.load(response) if page["type"] == "page")
         with closing(create_connection(url, timeout=15, suppress_origin=True)) as ws:
-            smoke(Browser(ws), port)
-    print("Public visitor browser checks passed")
+            check(Browser(ws), port)
+
+
+def run_at_viewport(width, height, mobile):
+    def check(session, port):
+        session.call("Emulation.setDeviceMetricsOverride", width=width, height=height,
+                     deviceScaleFactor=1, mobile=mobile)
+        if mobile:
+            session.call("Emulation.setTouchEmulationEnabled", enabled=True)
+        smoke(session, port)
+    run_browser(check)
+
+
+def main():
+    for width, height, mobile in ((1440, 900, False), (390, 844, True)):
+        run_at_viewport(width, height, mobile)
+    print("Public visitor browser checks passed at desktop and touch-phone sizes")
 
 
 if __name__ == "__main__":

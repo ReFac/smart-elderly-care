@@ -1,5 +1,6 @@
 import { btn, choose, field, money, node, options, residentField, residentName, select, today } from './shared.js';
 import { showCheckout } from './payment-qr.js';
+import { financeContext } from './finance-dialogs.js';
 
 const rateChannels = ['微信支付', '支付宝', '银联刷卡', '银行转账'];
 const methods = [
@@ -35,6 +36,7 @@ export function feeSettings(ctx) {
 }
 
 export function recordCash(ctx, { bill, residentId } = {}) {
+  ctx = financeContext(ctx);
   const ref = paymentRef();
   const target = bill?.residentId || residentId;
   const preview = node('p', 'fx-muted');
@@ -95,6 +97,7 @@ export function recordCash(ctx, { bill, residentId } = {}) {
 }
 
 export async function collectCode(ctx, bill) {
+  ctx = financeContext(ctx);
   let channels;
   try {
     channels = (await ctx.get('/api/payments/checkout/channels')).channels;

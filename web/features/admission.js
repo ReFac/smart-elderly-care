@@ -1,4 +1,5 @@
-import { residentLabel, residentAnchor } from './people-labels.js';
+import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
+import { printResidentSheet } from './resident-print.js';
 import {
   node,
   btn,
@@ -13,9 +14,12 @@ import {
   table,
   today,
   canAct,
+  hasGrant,
+  bedName,
 } from './shared.js';
 import { admissionPayment } from './billing.js';
 import { profile } from './residency.js';
+import { medicationReceivingLink } from './medication-receiving.js';
 import { trialLength, trialLastDay, trialTermFields } from './trial-terms.js';
 import { confirmStay, endTrial } from './trial-stays.js';
 import { admissionFinance, admissionFinanceFields } from './admission-fees.js';
@@ -295,16 +299,6 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
   }
 }
 
-const registryFilters = [
-  ['pending', '待办理', r => r.status === '未入住' || isTrial(r)],
-  ['notAdmitted', '待入住', r => r.status === '未入住'],
-  ['trials', '试住', isTrial],
-  ['trial-expired', '试住期满待确认', r => isTrial(r) && !r.bedId],
-  ['in-house', '正式在住', r => r.status === '在住' && !isTrial(r)],
-  ['archived', '归档老人', r => ['已退住', '归档到期'].includes(r.status)],
-  ['all-statuses', '全部状态', () => true],
-];
-
 function stayArrangement(ctx, row) {
   const bed = row.bedId ? bedLabel(ctx, row.bedId) : '未分配床位';
   if (isTrial(row)) {
@@ -338,7 +332,7 @@ function showTrial(ctx, row) {
   ]));
 }
 
-function registryActions(ctx, row, { bed, stayType, workbench }) {
+export function admissionRowActions(ctx, row, { bed = null, stayType = 'formal', workbench = true } = {}) {
   const trial = isTrial(row);
   const pending = row.status === '未入住' && !row.bedId;
   const canAdmit = pending && canAct(ctx, 'care.admit');
@@ -355,91 +349,69 @@ function registryActions(ctx, row, { bed, stayType, workbench }) {
       ? btn(ctx, '转床', () => allocate(ctx, row, bed), 'ghost') : null,
     !bed && !trial && row.status === '在住' && row.admissionStatus && canAct(ctx, 'ops.pay')
       ? btn(ctx, '入住交费', () => admissionPayment(ctx, row.id), 'ghost') : null,
+    workbench && row.admittedAt ? medicationReceivingLink(ctx, row) : null,
     btn(ctx, '查看档案', () => profile(ctx, row), 'ghost'),
+    workbench && row.admittedAt && hasGrant(ctx,'intake') ? btn(ctx,'打印入住单',()=>printAdmission(ctx,row.id),'ghost') : null,
   );
 }
 
-export function registry(ctx, { bed = null, stayType = 'formal', workbenchStatus, onStatusChange } = {}) {
-  const workbench = workbenchStatus !== undefined;
+function printAdmission(ctx, id) {
+  const live = ctx.current?.() || ctx;
+  const row = live.state.residents.find(person => person.id === id);
+  if (!row?.admittedAt || !hasGrant(live,'intake')) return live.toast('当前没有可以打印的入住登记。');
+  const move = [...(live.state.bedMoves || [])].reverse().find(m => m.residentId === id && m.kind === '入住');
+  const sheet = node('article','',[
+    node('h1','','入住登记单'),
+    node('p','',live.state.uiSettings?.institutionName || ''),
+    facts([
+      ['入住单号',move?.id], ['档案编号',id], ['长辈姓名',row.name], ['入住日期',row.admittedAt],
+      ['入住时床位',move?.bedId ? bedName(live,move.bedId) : '未登记'],
+      ['入住时护理等级',move?.initialCareLevel || '未登记'],
+      ['入住时类型',move?.stayType === 'trial' ? '试住' : move?.stayType === 'formal' ? '正式入住' : '未登记'],
+      ['当前状态',statusLabel(row)], ['转为正式入住',row.formalizedAt], ['退住日期',row.dischargedAt],
+    ]),
+    node('footer','', '打印于 ' + today(live) + ' · ' + staffLabel(live,live.state.user)),
+  ]);
+  printResidentSheet(live,'入住登记单',sheet,
+    'h1{font-size:22px}dl div{display:grid;grid-template-columns:9em 1fr;padding:3mm 0;border-bottom:1px solid #ccc}dd{margin:0}footer{margin-top:6mm;font-size:12px}');
+}
+
+export function registry(ctx, { bed = null, stayType = 'formal' } = {}) {
   const panel = node('div', 'admission-registry');
   const search = node('input', 'fx-input');
   search.type = 'search';
-  search.placeholder = '搜索所有档案的姓名、姓氏或档案号';
+  search.placeholder = '搜索所有档案的姓名、房号或档案号';
   search.setAttribute('aria-label', search.placeholder);
-  const body = node('div'),
-    scope = node('small', 'fx-muted'),
-    toggle = node('button', 'btn btn-ghost admission-all');
+  const body = node('div');
+  const scope = node('small','fx-muted');
+  const toggle = node('button', 'btn btn-ghost admission-all');
   toggle.type = 'button';
-  const status = node('select', 'fx-input');
-  status.setAttribute('aria-label', '入住状态');
-  for (const [value, label] of registryFilters) status.add(new Option(label, value));
-  status.value = registryFilters.some(([key]) => key === workbenchStatus) ? workbenchStatus : 'pending';
   let all = false;
   function draw() {
     const term = search.value.trim().normalize('NFKC').toLocaleLowerCase();
-    const selected = registryFilters.find(([key]) => key === status.value) || registryFilters[0];
-    const people = [...ctx.state.residents]
-      .reverse()
-      .filter((r) =>
-        term
-          ? (residentLabel(ctx, r) + ' ' + r.id).normalize('NFKC').toLocaleLowerCase().includes(term)
-          : workbench ? selected[2](r) : all || r.status === '未入住' || isTrial(r)
-      );
-    if (!term && workbench && ['trials', 'trial-expired'].includes(selected[0]))
-      people.sort((a, b) => (a.trialEndsAt || '').localeCompare(b.trialEndsAt || ''));
-    status.disabled = Boolean(term);
-    scope.textContent = term ? '搜索范围 · 全部档案' : workbench
-      ? selected[0] === 'pending' ? '含待入住与试住档案' : ''
-      : all ? '全部档案' : '待入住 · 含试住待确认档案';
-    toggle.hidden = !!term;
-    toggle.textContent = all ? '仅查看待入住档案' : '查看全部档案（含在住及归档老人）';
-    body.replaceChildren(
-      table(ctx, {
-        title: term ? '搜索结果' : workbench ? '入住登记' : all ? '全部档案' : '待入住档案',
-        rows: people,
-        empty: term
-          ? '没有找到匹配档案，可尝试姓名中的一个字。'
-          : workbench ? '当前没有该状态的入住档案。'
-          : all
-            ? '暂无长辈档案。'
-            : '暂无待入住档案，可新建档案或查看下方全部档案。',
-        cols: [
-          {
-            label: '长辈',
-            view: (r) =>
-              node('div', 'fx-named', [node('strong', '', residentAnchor(ctx, r)), node('small', '', r.id)]),
-          },
-          { label: '状态', view: (r) => choose(
-            badge(ctx, workbench && isTrial(r) && !r.bedId ? '期满待确认' : statusLabel(r),
-              workbench && isTrial(r) && !r.bedId ? 'amber' : undefined),
-            !isTrial(r) && r.admissionStatus === '欠费临时入住' ? badge(ctx, r.admissionStatus, 'amber') : null,
-          ) },
-          {
-            label: workbench ? '床位与入住安排' : '床位 / 归档日期',
-            view: (r) => workbench ? stayArrangement(ctx, r) : (r.bedId ? bedLabel(ctx, r.bedId) : r.dischargedAt || '—'),
-          },
-          {
-            label: '操作',
-            align: 'end',
-            view: (r) => registryActions(ctx, r, { bed, stayType, workbench }),
-          },
-        ],
-      })
-    );
+    const people = [...ctx.state.residents].reverse().filter(r => {
+      if (!term) return all || r.status === '未入住' || isTrial(r);
+      return [residentLabel(ctx,r),r.id,r.bedId && bedName(ctx,r.bedId)]
+        .filter(Boolean).join(' ').normalize('NFKC').toLocaleLowerCase().includes(term);
+    });
+    scope.textContent = term ? '搜索范围 · 全部档案' : all ? '全部档案' : '待入住 · 含试住待确认档案';
+    toggle.hidden = Boolean(term);
+    toggle.textContent = all ? '仅查看待入住档案' : '查看全部档案（含在住及退住归档）';
+    body.replaceChildren(table(ctx, {
+      title:term ? '搜索结果' : all ? '全部档案' : '待入住档案', rows:people,
+      empty:term ? '没有匹配的档案，可尝试姓名中的一个字。' : '暂无符合条件的长辈档案。',
+      cols:[
+        {label:'长辈',view:r => named(residentAnchor(ctx,r),r.id)},
+        {label:'状态',view:r => choose(badge(ctx,statusLabel(r)),
+          r.admissionStatus === '欠费临时入住' ? badge(ctx,r.admissionStatus,'amber') : null)},
+        {label:'床位与入住安排',view:r => stayArrangement(ctx,r)},
+        {label:'操作',align:'end',view:r => admissionRowActions(ctx,r,{bed,stayType,workbench:false})},
+      ],
+    }));
   }
   search.oninput = draw;
-  status.onchange = () => {
-    onStatusChange?.(status.value);
-    draw();
-  };
-  toggle.onclick = () => {
-    all = !all;
-    draw();
-  };
-  const entryFilter = workbench
-    ? node('label', 'admission-state-filter', [node('span', '', '入住状态'), status]) : null;
-  panel.append(node('div', 'admission-search', [search, entryFilter, scope]), body);
-  if (!workbench) panel.append(toggle);
+  toggle.onclick = () => { all = !all; draw(); };
+  panel.append(node('div','admission-search',[search,scope]),body,toggle);
   draw();
   return panel;
 }

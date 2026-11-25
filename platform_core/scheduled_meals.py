@@ -579,6 +579,7 @@ def confirm(db, state, user, payload, now):
     # differing campuses, time slots or menus have separate receipts.
     batches = {}
     for row, omissions in chosen:
+        access_policy.require_task_role(user, tasks[row["taskId"]])
         batches.setdefault(
             (row["campusId"], row["day"], row["kind"], row["time"], tuple(row["menu"])),
             [],

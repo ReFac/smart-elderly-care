@@ -136,6 +136,14 @@ class ResidentHealthTests(TestCase):
         signed = self.view()["chronicHistory"]
         self.assertEqual(len(signed), 1)
         self.assertEqual(signed[0]["items"], fields["items"])
+        def roster(token):
+            return {r["id"]: r for r in self.store.snapshot(token)["data"]["residents"]}
+        authorized = roster(reviewer)
+        self.assertEqual(authorized["r001"]["chronicRegistration"], {
+            "status": "confirmed", "names": ["高血压", "慢性肾脏病"]
+        })
+        self.assertNotIn("chronicRegistration", authorized["r002"])
+        self.assertNotIn("chronicRegistration", roster(aide)["r001"])
         self.assertEqual(self.view(aide)["chronic"]["items"], [{"name": "高血压"}, {"name": "慢性肾脏病"}])
         self.assertEqual(self.view(aide)["chronicHistory"], [])
         self.assertFalse(self.view(aide)["canRecordChronic"])

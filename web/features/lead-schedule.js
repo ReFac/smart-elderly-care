@@ -1,10 +1,9 @@
-import { badge, btn, canAct, choose, field, link, memo, node, select, today } from './shared.js';
+import { badge, btn, canAct, choose, field, link, memo, named, node, select, table, today } from './shared.js';
 
 const kinds = { visit: '参观接待', callback: '电话回访' };
 const clock = new Intl.DateTimeFormat('sv-SE', {
   timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
 });
-const displayed = new Map();
 const campuses = ctx => ctx.state.leadCampuses || [];
 const bookings = ctx => ctx.state.visitBookings || [];
 const people = ctx => ctx.state.leadContacts || [];
@@ -217,7 +216,8 @@ function shiftDay(date, delta) {
 export function schedulePage(ctx, incomingList, openPerson) {
   const branches = campuses(ctx);
   if (!branches.length) return ctx.ui.empty('当前账号没有可查看的分院接待时间表。');
-  const saved = displayed.get(ctx.state.user.id) || {};
+  const memory=ctx.workspaceState || {};
+  const saved = memory.receptionDay ||= {layout:'grid'};
   const date = node('input', 'fx-input');
   date.type = 'date';
   date.setAttribute('aria-label', '排班日期');
@@ -232,11 +232,18 @@ export function schedulePage(ctx, incomingList, openPerson) {
   const info = node('div', 'lead-day-info');
   const sheet = node('div');
   const calls = node('div');
+  const modes = choose(); modes.classList.add('desk-view-switch');
+  for(const [id,title] of [['grid','按席位排班'],['ledger','预约台账']]){
+    const button=btn(ctx,title,()=>{saved.layout=id;draw();},'ghost');button.dataset.layout=id;modes.append(button);
+  }
+  const book = canAct(ctx,'leads.book') ? btn(ctx,'电话确认排期',()=>bookingForm(ctx,null,{campusId:branch.value,date:date.value}),'primary') : null;
   const panel = node('section', 'fx-panel lead-day', [
     node('header', 'fx-toolbar', [
-      node('h2', '', '分院接待排班'),
-      choose(branch, btn(ctx, '前一天', () => move(-1)), date, btn(ctx, '后一天', () => move(1)), btn(ctx, '今天', () => { date.value = today(ctx); load(); })),
+      node('h2', '', '分院接待排班'),choose(book,modes),
     ]),
+    node('div','agenda-filter',[node('label','agenda-field',['接待分院',branch]),
+      node('label','agenda-field',['接待日期',date]),choose(btn(ctx,'前一天',()=>move(-1)),btn(ctx,'后一天',()=>move(1)),
+      btn(ctx,'今天',()=>{date.value=today(ctx);load();}))]),
     info, sheet,
   ]);
   const wrap = node('div', 'lead-schedule', [panel, calls]);
@@ -246,15 +253,28 @@ export function schedulePage(ctx, incomingList, openPerson) {
     load();
   }
   function draw() {
-    displayed.set(ctx.state.user.id, { date: date.value, campusId: branch.value, fullDay: all.checked });
+    Object.assign(saved,{date:date.value,campusId:branch.value,fullDay:all.checked});
     if (!data) return;
     const live = data.bookings.filter(b => b.status === 'confirmed').length;
     info.replaceChildren(
       node('span', '', data.capacity + ' 个并行席位 · 当天 ' + live + ' 项已确认安排'),
-      link(ctx, '查看当日来电', () => calls.scrollIntoView({ block: 'start' })), allHours,
+      link(ctx, '查看当日来电', () => calls.scrollIntoView({ block: 'start' })), ...(saved.layout==='grid'?[allHours]:[]),
     );
     if (canAct(ctx, 'leads.capacity')) info.append(link(ctx, '设置并行席位', () => configure(ctx, data)));
-    sheet.replaceChildren(dayGrid(ctx, data, all.checked, openPerson));
+    for(const button of modes.children)button.setAttribute('aria-pressed',String(button.dataset.layout===saved.layout));
+    if (saved.layout !== 'ledger') {sheet.replaceChildren(dayGrid(ctx, data, all.checked, openPerson));return;}
+    const byId=new Map(people(ctx).map(r=>[r.id,r]));
+    const rows=[...data.bookings].sort((a,b)=>a.start.localeCompare(b.start)||a.seat-b.seat);
+    const statuses={confirmed:'已电话确认',completed:'已完成',cancelled:'已取消',rescheduled:'已改期'};
+    sheet.replaceChildren(table(ctx,{title:'当日预约台账',rows,empty:'本日尚无预约记录。',
+      cols:[
+        {label:'预约时段',view:r=>r.start+'–'+r.end},{label:'接待席位',view:r=>'席位 '+r.seat},
+        {label:'客户',view:r=>{const person=byId.get(r.leadId);return person?named(person.name||'未留姓名',person.phone):'资料归档';}},
+        {label:'事项',view:r=>kinds[r.kind]}, {label:'状态',view:r=>badge(ctx,statuses[r.status] || r.status)},
+        {label:'操作',view:r=>{const p=byId.get(r.leadId);return p?choose(link(ctx,'联系记录',()=>openPerson(p)),
+          r.status==='confirmed' && canAct(ctx,'leads.book') ? link(ctx,'改期',()=>bookingForm(ctx,p,{...r,existing:true})) : null,
+          r.status==='confirmed' && canAct(ctx,'leads.cancel') ? link(ctx,'取消预约',()=>cancelBooking(ctx,p,r)) : null):'—';}},
+      ]}));
   }
   async function load() {
     const version = ++request;

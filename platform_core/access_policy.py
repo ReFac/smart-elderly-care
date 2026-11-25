@@ -122,6 +122,7 @@ ACTION_GRANTS = {
     "care.leave": "intake",
     "care.assess": "care",
     "care.approvePlan": "care",
+    "care.revisePlan": "care",
     "care.addTask": "care",
     "care.timelineSettings": "care",
     "care.completeTask": "care",
@@ -145,6 +146,7 @@ ACTION_GRANTS = {
     "care.acceptHandover": "care",
     "care.withdrawHandover": "care",
     "care.addMedication": "clinical",
+    "care.receiveMedication": "clinical",
     "care.giveMedication": "clinical",
     "care.reviewMedication": "clinical",
     "care.vital": "clinical",
@@ -176,6 +178,10 @@ ACTION_GRANTS = {
     "ops.residentBillingPolicy": "finance",
     "ops.expense": "finance",
     "ops.importExpenses": "finance",
+    "ops.subsidyRules": "finance",
+    "ops.subsidyMaterial": "finance",
+    "ops.subsidyList": "finance",
+    "ops.dischargeSettlement": "finance",
     "ops.submitReport": "reports",
     "ops.reportReceipt": "reports",
     "ops.report": "reports",
@@ -205,6 +211,7 @@ COLLECTION_GRANTS = {
     "qualityChecks": "care",
     "handovers": "care",
     "medications": "clinical",
+    "medicationReceipts": "clinical",
     "followups": "clinical",
     "referrals": "clinical",
     "drugRules": "clinical",
@@ -219,6 +226,7 @@ COLLECTION_GRANTS = {
     "payments": "finance",
     "paymentOrders": "finance",
     "billingNotices": "finance",
+    "dischargeSettlements": "finance",
     "paymentFeeSettings": "finance",
     "channelReceipts": "finance",
     "expenses": "finance",
@@ -310,6 +318,16 @@ def resolve_routes(user):
 VISIT_DOCUMENT_ACTIONS = ("dossier.document", "dossier.linkVisitDocument")
 
 
+def require_task_role(user, task):
+    allowed = task.get("allowedRoles")
+    if not allowed or user["kind"] == "owner":
+        return
+    role = user.get("role")
+    assignments = user.get("staffDuties", ()) if role == "自定义" else (role,)
+    if not any(item in allowed for item in assignments):
+        raise PermissionError("当前岗位或职责不在此照护项目的可执行范围内")
+
+
 def authorize(user, action, payload, state):
     """Fail closed. Permissions for proposals/reviews include the affected business area."""
     if not user:
@@ -394,6 +412,10 @@ def authorize(user, action, payload, state):
     if not permission:
         raise ValueError("未登记的业务操作")
     require(user, permission)
+    if action == "care.completeTask":
+        task = next((row for row in state.get("tasks", ()) if row["id"] == payload.get("taskId")), None)
+        if task:
+            require_task_role(user, task)
     if action == "leads.capacity":
         require(user, "staff.manage")
     if action == "care.assess" and "scale" in payload and not can_record_scale(user):
@@ -501,7 +523,7 @@ def can_view_audit(user, action, *, agent_initiator=None, agent_grants=()):
         return True
     if action in ("leads.public", "trial.expire"):
         return has(user, "intake")
-    if action == "ops.billingLifecycle":
+    if action in ("ops.billingLifecycle", "ops.readSubsidyMaterial"):
         return has(user, "finance")
     if action == "family.consent":
         return has(user, "relatives") and has(user, "family.share")
@@ -563,6 +585,9 @@ def visible_data(state, user):
     for key, grant in COLLECTION_GRANTS.items():
         if has(user, grant):
             data[key] = state.get(key, [])
+    if data["medicationReceipts"]:
+        current_ids = {row["id"] for row in state["residents"] if row["status"] != "归档到期"}
+        data["medicationReceipts"] = [r for r in data["medicationReceipts"] if r["residentId"] in current_ids]
 
     if data["assessments"] and not can_record_scale(user):
         # General care needs the scores and final level. Diagnoses and source paperwork
@@ -622,6 +647,8 @@ def visible_data(state, user):
             )
         if any_grant("intake", "relatives"):
             basic.append("contact")
+        if has(user, "intake"):
+            basic.append("dischargeNote")
         if any_grant("intake", "finance"):
             basic.extend(["admittedAt", "dischargedAt", "billingDay", "stayType", "formalizedAt", "trialEndsAt", "trialPrice", "trialDays"])
         if has(user, "finance"):

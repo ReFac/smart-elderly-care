@@ -36,14 +36,15 @@ class HttpCapacityTests(unittest.TestCase):
         self.assertEqual(self.handler.write_resource.call_count, 2)
 
     def test_connection_overload_does_not_start_worker_and_closes_socket(self):
-        server = http_capacity.CapacityServer.__new__(http_capacity.CapacityServer)
-        server.connections = BoundedSemaphore(1)
+        with patch.object(http_capacity.ThreadingHTTPServer, "__init__", return_value=None):
+            server = http_capacity.CapacityServer(("localhost", 0), Mock(), workers=1, heavy_workers=1)
         server.shutdown_request = Mock()
         request = Mock()
         with server.connections:
             server.process_request(request, ("127.0.0.1", 1234))
         self.assertIn(b"503 Service Unavailable", request.sendall.call_args.args[0])
         server.shutdown_request.assert_called_once_with(request)
+        self.assertEqual(server.usage()["rejected"], 1)
 
     def test_heavy_limit_must_leave_connection_capacity(self):
         with patch.dict("os.environ", {"NH_HTTP_WORKERS": "8", "NH_HTTP_HEAVY_WORKERS": "7"}):
