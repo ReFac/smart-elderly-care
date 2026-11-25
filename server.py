@@ -45,11 +45,14 @@ class Handler(BaseHTTPRequestHandler):
         # Do not include staff names or room filters from the query string in access logs.
         self.log_message("%s %s %s", self.command, self.path.partition("?")[0], code)
 
-    def respond(self, status, content, mime, cookie=None, *, attachment=None, retry_after=None):
+    def respond(self, status, content, mime, cookie=None, *, attachment=None, retry_after=None, etag=None):
         self.send_response(status)
         self.send_header("Content-Type", mime)
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-store")
+        if status != 304:
+            self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "private, no-cache" if etag else "no-store")
+        if etag:
+            self.send_header("ETag", etag)
         self.send_header("X-Content-Type-Options", "nosniff")
         if retry_after is not None:
             self.send_header("Retry-After", str(retry_after))
@@ -549,11 +552,18 @@ class Handler(BaseHTTPRequestHandler):
             or not target.is_file()
         ):
             raise FileNotFoundError("找不到此资源")
-        self.respond(
-            200,
-            target.read_bytes(),
-            mimetypes.guess_type(str(target))[0] or "application/octet-stream",
-        )
+        mime = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+        with target.open("rb") as source:
+            etag = None
+            if target.suffix in {".js", ".css"}:
+                stat = os.fstat(source.fileno())
+                # Match the open file even when an upgrade replaces the path.
+                tag = f'"{stat.st_ino:x}-{stat.st_size:x}-{stat.st_mtime_ns:x}-{stat.st_ctime_ns:x}"'
+                etag = "W/" + tag
+                candidates = self.headers.get("If-None-Match", "").split(",")
+                if any(value.strip().removeprefix("W/") in {"*", tag} for value in candidates):
+                    return self.respond(304, b"", mime, etag=etag)
+            self.respond(200, source.read(), mime, etag=etag)
 
     def tour_image(self, token, path):
         image, mime = self.store.tour_media(token, path)

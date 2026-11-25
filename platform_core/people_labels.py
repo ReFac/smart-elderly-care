@@ -16,6 +16,7 @@ STAFF_FIELDS = (
     ("", "requester"),
     ("", "publisherName"),
 )
+STAFF_REFERENCE_FIELDS = frozenset(field for pair in STAFF_FIELDS for field in pair)
 
 
 def recipient_positions(db, result):
@@ -57,7 +58,7 @@ def project(db, state, data, user, logs):
     # Consult only names and identifiers already present in this actor's business projection.
     for rows in (logs, *(v for v in data.values() if isinstance(v, list))):
         for row in rows:
-            if not isinstance(row, dict):
+            if not isinstance(row, dict) or STAFF_REFERENCE_FIELDS.isdisjoint(row):
                 continue
             for key, label in STAFF_FIELDS:
                 if isinstance(row.get(key), str) and row[key]:

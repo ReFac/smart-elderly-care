@@ -194,6 +194,7 @@ ACTION_GRANTS = {
     "gw.confirm": "voice.confirm",
     "gw.dismiss": "voice.confirm",
 }
+ACTION_PERMISSIONS = frozenset(ACTION_GRANTS.values())
 SUGGESTION_GRANTS = {"日常照护": "care", "物资管控": "inventory", "运营分析": "finance"}
 COLLECTION_GRANTS = {
     "inquiries": "intake",
@@ -243,19 +244,17 @@ DEFAULT_UI = {
 
 
 def has(user, permission):
-    from . import campus_access
+    if not user:
+        return False
+    if user["kind"] == "owner":
+        return True
+    if permission not in user.get("permissions", ()) or is_customer(user):
+        return False
+    if user.get("facilityScope"):
+        from . import campus_access
 
-    if user and is_customer(user):
-        return False
-    if (
-        user
-        and campus_access.bound(user)
-        and permission in campus_access.INSTITUTION_GRANTS
-    ):
-        return False
-    return bool(user) and (
-        user["kind"] == "owner" or permission in user.get("permissions", ())
-    )
+        return not (campus_access.bound(user) and permission in campus_access.INSTITUTION_GRANTS)
+    return True
 
 
 def require(user, permission):
@@ -422,8 +421,10 @@ def authorize(user, action, payload, state):
 def allowed_actions(user):
     if is_customer(user):
         return ["account.changePassword"]
+    # Several commands share each grant. Check its effective scope once for this account.
+    grants = {grant for grant in ACTION_PERMISSIONS if has(user, grant)}
     actions = [
-        action for action, permission in ACTION_GRANTS.items() if has(user, permission)
+        action for action, permission in ACTION_GRANTS.items() if permission in grants
     ]
     from .operations.dispatch import unrestricted
     from . import permission_requests

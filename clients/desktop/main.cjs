@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, session, shell } = require('electron');
 const path = require('node:path');
 const { registerLeadCalls } = require('./lead-calls.cjs');
+const { configureMicrophone } = require('./microphone.cjs');
 const { registerPaymentLinks } = require('./payment-links.cjs');
 const { registerSourceLinks } = require('./public-source.cjs');
 
@@ -24,6 +25,7 @@ const webPreferences = {
   nodeIntegration: false,
   webviewTag: false,
 };
+const workspaceWindows = new WeakSet();
 
 async function showWorkspace(target) {
   const win = new BrowserWindow({
@@ -36,6 +38,7 @@ async function showWorkspace(target) {
     autoHideMenuBar: true,
     webPreferences: { ...webPreferences, preload: path.join(__dirname, 'source-preload.cjs') },
   });
+  workspaceWindows.add(win.webContents);
   registerPaymentLinks(win.webContents, target.origin, url => shell.openExternal(url));
   registerLeadCalls(win.webContents, target.origin, url => shell.openExternal(url));
   registerSourceLinks(win.webContents, target.origin, url => shell.openExternal(url));
@@ -58,9 +61,14 @@ app
         return false;
       }
     };
-    session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
-      callback(false)
-    );
+    configureMicrophone(session.defaultSession, target, workspaceWindows, async contents => {
+      const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(contents), {
+        type: 'question', message: '允许此工作台窗口使用麦克风吗？',
+        detail: '用于按住说话和语音转写。', buttons: ['允许使用', '取消'],
+        defaultId: 1, cancelId: 1,
+      });
+      return response === 0;
+    });
     app.on('web-contents-created', (_event, contents) => {
       const guard = (event, url) => {
         if (url !== 'about:blank' && !sameOrigin(url)) event.preventDefault();

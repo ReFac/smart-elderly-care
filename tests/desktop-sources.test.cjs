@@ -1,11 +1,61 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { registerSourceLinks } = require('../clients/desktop/public-source.cjs');
+const { configureMicrophone } = require('../clients/desktop/microphone.cjs');
 const { readFileSync } = require('node:fs');
 const { runInNewContext } = require('node:vm');
 
 const origin = 'http://127.0.0.1:8765';
 const publicHost = 'https://example.org/document';
+
+test('only consented workbench audio is granted, including after repeat and concurrent requests', async () => {
+  const session = {
+    setPermissionCheckHandler(fn) { this.check = fn; },
+    setPermissionRequestHandler(fn) { this.request = fn; },
+  };
+  const target = new URL(origin);
+  let current = target.href, accepted = false, prompts = 0;
+  const contents = { getURL: () => current, isDestroyed: () => false, mainFrame: {} };
+  const windows = new WeakSet([contents]);
+  configureMicrophone(session, target, windows, () => { prompts++; return accepted; });
+  const details = { isMainFrame: true, requestingUrl: current, mediaTypes: ['audio'], mediaType: 'audio' };
+  const request = (overrides = {}, permission = 'media', source = contents) =>
+    new Promise(resolve => session.request(source, permission, resolve, { ...details, ...overrides }));
+  assert.equal(session.check(contents, 'media', origin, details), false);
+  assert.equal(await request(), false);
+  accepted = true;
+  assert.deepEqual(await Promise.all([request(), request()]), [true, true]);
+  assert.equal(await request(), true);
+  assert.equal(prompts, 2);
+  assert.equal(session.check(contents, 'media', origin, details), true);
+  assert.equal(session.check(contents, 'media', origin, { ...details, mediaType: 'video' }), false);
+  assert.equal(session.check(contents, 'media', 'https://example.org', details), false);
+  for (const types of [[], ['video'], ['audio', 'video']]) {
+    assert.equal(await request({ mediaTypes: types }), false);
+  }
+  assert.equal(await request({ isMainFrame: false }), false);
+  assert.equal(await request({ requestingUrl: publicHost }), false);
+  assert.equal(await request({}, 'display-capture'), false);
+  assert.equal(await request({}, 'media', { ...contents }), false);
+  current = origin + '/api/documents/doc1/image';
+  assert.equal(await request(), false);
+  assert.equal(prompts, 2);
+});
+
+test('microphone prompt cannot authorize a window that navigated while waiting', async () => {
+  let request, finish;
+  const page = new URL(origin);
+  const contents = { getURL: () => page.href, isDestroyed: () => false, mainFrame: {} };
+  const prompt = new Promise(resolve => { finish = resolve; });
+  configureMicrophone({ setPermissionCheckHandler() {}, setPermissionRequestHandler(fn) { request = fn; } },
+    page, new WeakSet([contents]), () => prompt);
+  const result = new Promise(resolve => request(contents, 'media', resolve, {
+    isMainFrame: true, requestingUrl: page.href, mediaTypes: ['audio'],
+  }));
+  contents.mainFrame = {};
+  finish(true);
+  assert.equal(await result, false);
+});
 function workspace(addresses, afterLookup) {
   const mainFrame = { origin, url: origin + '/#inventory' };
   const opened = [];
