@@ -47,3 +47,14 @@ npm --prefix clients/desktop test
 python3 tests/perf_workspace.py --clients 6 --samples 100
 python3 tests/perf_beds.py
 ```
+
+### 复跑 200 床持续负载
+
+在分配了 2 核、2 GiB 内存且关闭交换空间的 Linux 虚拟机中，提供一个尚不存在的私有结果目录。从受测版本的源码根目录运行以下命令，`--source-revision` 填该版本的完整 Git 提交号。
+
+```bash
+python3 tests/soak_200_beds.py /var/tmp/eldercare-200-bed-run --source-revision "$(git rev-parse HEAD)"
+python3 tests/soak_report.py /var/tmp/eldercare-200-bed-run /var/tmp/eldercare-200-bed-report.md
+```
+
+默认实跑 86,400 秒，覆盖 200 床、180 位合成在住长辈。测试按分钟采集服务内存，每 4 秒并发读取三个工作台接口，每 3 分钟登记一笔可逐条核对的体征。预设三餐和早晚巡查覆盖全院，另设每小时一批两人巡查。持续负载结束后，服务额外保留 60 秒供最后一个调度周期完成，再核对所有到期回执、加密备份和独立恢复结果。正式结果可分享生成的 Markdown 和同名数值 CSV；私有结果目录包含合成业务库及其测试密钥。
