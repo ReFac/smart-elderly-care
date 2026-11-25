@@ -10,6 +10,7 @@ import time
 from unicodedata import category, normalize
 from uuid import uuid4
 
+from . import international_profile
 from . import account_directory, campus_access, identity, portal, staff_scope
 from .secure_storage import INTEGRITY_ERRORS
 
@@ -107,6 +108,10 @@ def init(db, initial_owner_password=None):
       role TEXT NOT NULL, permissions TEXT NOT NULL DEFAULT '[]', resident_id TEXT NOT NULL DEFAULT '',
       enabled INTEGER NOT NULL DEFAULT 1, salt BLOB NOT NULL, password_hash BLOB NOT NULL,
       family_services INTEGER NOT NULL DEFAULT 0 CHECK(family_services IN (0,1)))""")
+    account_columns = {r[1] for r in db.execute("PRAGMA table_info(accounts)")}
+    for column in ("name_parts", "postal_address"):
+        if column not in account_columns:
+            db.execute(f"ALTER TABLE accounts ADD COLUMN {column} TEXT NOT NULL DEFAULT '{{}}'")
     identity.init(db)
     from . import staff_employment
 
@@ -212,6 +217,8 @@ def _public(row):
         if row["kind"] == "owner"
         else json.loads(row["permissions"]),
     }
+    if row["name_parts"] != "{}":
+        user["nameParts"] = json.loads(row["name_parts"])
     if row["kind"] == "staff":
         user["staffDuties"] = json.loads(row["staff_duties"])
     if row["kind"] == "staff" and row["campus_id"]:
@@ -499,13 +506,23 @@ def preview(db, user, payload, facility_policy=None):
     }
 
 
+def _profile_identity(p, fallback=""):
+    if "nameParts" in p:
+        display, parts = international_profile.name_parts(p["nameParts"])
+        if "displayName" in p and display != _required(p["displayName"], "姓名"):
+            raise ValueError("Display name must match its name fields.")
+        return display, parts
+    return _required(p.get("displayName", fallback), "姓名"), {}
+
+
 def _create(db, state, p, user, area_check):
     kind, role, grants = _account_definition(user, p)
     campus = _campus(db, user, p, kind)
     family_services = _family_services(p, kind)
     scopes = portal.scopes(p, kind, portal_self=portal.is_self_role(role))
     username = account_username(p.get("username"))
-    display = _required(p.get("displayName"), "姓名")
+    display, parts = _profile_identity(p)
+    postal = international_profile.address(p.get("internationalAddress", {}))[1]
     invitation = p.get("invitation")
     if invitation is not None:
         if (
@@ -551,8 +568,8 @@ def _create(db, state, p, user, area_check):
                 ),
             )
             db.execute(
-                "UPDATE accounts SET staff_duties=? WHERE id=?",
-                (json.dumps(duties), account_id),
+                "UPDATE accounts SET staff_duties=?,name_parts=?,postal_address=? WHERE id=?",
+                (json.dumps(duties), json.dumps(parts, ensure_ascii=False), json.dumps(postal, ensure_ascii=False), account_id),
             )
             if invitation:
                 db.execute(
@@ -575,6 +592,8 @@ def _update(db, p, target, user):
     if target["kind"] == "owner" or set(p) - {
         "id",
         "displayName",
+        "nameParts",
+        "internationalAddress",
         "role",
         "permissions",
         "enabled",
@@ -585,12 +604,17 @@ def _update(db, p, target, user):
         "campusId",
     }:
         raise ValueError("只可修改员工或亲属的姓名、启用状态及员工岗位权限")
-    if portal.is_customer(target) and set(p) - {"id", "displayName", "enabled"}:
+    if portal.is_customer(target) and set(p) - {"id", "displayName", "nameParts", "enabled"}:
         raise ValueError("注册顾客仅可修改姓名和启用状态")
     enabled = p.get("enabled", target["enabled"])
     if type(enabled) is not bool:
         raise ValueError("启用状态无效")
-    display = _required(p.get("displayName", target["displayName"]), "姓名")
+    display, parts = _profile_identity(p, target["displayName"])
+    if "nameParts" in p or display != target["displayName"]:
+        db.execute("UPDATE accounts SET name_parts=? WHERE id=?", (json.dumps(parts, ensure_ascii=False), target["id"]))
+    if "internationalAddress" in p:
+        postal = international_profile.address(p["internationalAddress"])[1]
+        db.execute("UPDATE accounts SET postal_address=? WHERE id=?", (json.dumps(postal, ensure_ascii=False), target["id"]))
     if target["kind"] == "family" and ("role" in p or "permissions" in p):
         raise ValueError("亲属账号不能授予员工权限")
     _, role, grants = _account_definition(user, p, target)
@@ -794,7 +818,9 @@ def project(db, state, user, facility_policy=None):
         owner = user["kind"] == "owner"
         query = "SELECT * FROM accounts" if owner else "SELECT * FROM accounts WHERE kind='staff'"
         accounts = (
-            _public(row) for row in db.execute(query + " ORDER BY kind DESC,username")
+            {**_public(row), **({"internationalAddress": json.loads(row["postal_address"])}
+                                if row["postal_address"] != "{}" else {})}
+            for row in db.execute(query + " ORDER BY kind DESC,username")
         )
         paydays = dict(db.execute("SELECT account_id,payday FROM staff_paydays"))
         residents = {r["id"]: r for r in filtered["residents"]} if owner else {}

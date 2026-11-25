@@ -6,13 +6,14 @@
     "orientation": "default",
     "platforms": ["android", "ios"],
     "userInterfaceStyle": "light",
-    "android": { "package": "cn.yihe.care", "permissions": ["CAMERA"] },
+    "android": { "package": "cn.yihe.care", "permissions": ["CAMERA", "RECORD_AUDIO"] },
     "ios": {
       "bundleIdentifier": "cn.yihe.care",
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "用于拍摄并留存长辈医疗文书原件。",
-        "NSPhotoLibraryUsageDescription": "用于选择经授权归档的医疗文书照片。"
+        "NSPhotoLibraryUsageDescription": "用于选择经授权归档的医疗文书照片。",
+        "NSMicrophoneUsageDescription": "按住说话时录制语音，由健康助理转写。"
       }
     }
   }

@@ -37,6 +37,7 @@ export const groups = [
       ['integrations', '设备与接口', 'layers'],
       ['access', '账号与权限', 'shield'],
       ['settings', '机构设置', 'building'],
+      ['deployment', '部署控制台', 'monitor'],
     ],
   ],
   [

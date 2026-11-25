@@ -1,3 +1,4 @@
+import {internationalDeployment, nameEditor, postalEditor} from '../lib/international-profile.js';
 import { residentLabel, staffLabel } from './people-labels.js';
 import { clearFileSelection, fileControl } from '../lib/file-control.js';
 import { residentInsights } from './resident-insights.js';
@@ -97,25 +98,32 @@ function displayed(schema, profile) {
 
 async function relativeForm(ctx, resident, accountId, profile) {
   let catalog;
-  try { catalog = await loadProfileChoices(); } catch(e) {ctx.toast(e.message);return;}
-  const location = regionPicker(catalog.regions,'联系地址',profile.addressRegion,profile.address);
-  const inputs = fields(relativeFields.filter(([key])=>key!=='address'), profile);
+  try { catalog = await loadProfileChoices({needsRegions:!internationalDeployment()}); } catch(e) {ctx.toast(e.message);return;}
+  const international = internationalDeployment();
+  const display = node('input');
+  display.value = profile.name || '';
+  const splitName = international && nameEditor(display, profile.nameParts);
+  const location = international ? postalEditor(profile.internationalAddress,profile.address) :
+    regionPicker(catalog.regions,'联系地址',profile.addressRegion,profile.address);
+  const inputs = fields(relativeFields.filter(([key])=>key!=='address' && !(international && key==='name')),profile);
   const relation = inputs.find(f=>f.name==='relationship');
   relation.type='select';
   relation.options=['',...new Set([...catalog.choices.relationship,...(profile.relationship?[profile.relationship]:[])])];
   inputs.find((f) => f.name === 'idNumber').maxLength = 18;
   ctx.dialog({
     title: '完善亲属资料',
-    content:location.element,
+    content:node('div','dossier-form',[splitName?.element, location.element]),
     description: '请核对姓名、与长辈的关系和联系方式。身份证号、住址与微信可稍后补充。',
     fields: inputs,
-    onSubmit: (values) =>
-      ctx.command('dossier.relative', {
-        ...values,
-        ...(location.read()===undefined?{}:{addressRegion:location.read()}),
-        residentId: resident.id,
-        accountId
-      })
+    onSubmit: (values) => {
+      const selected = location.read();
+      const text = location.text?.();
+      const payload = Object.fromEntries(inputs.map(f=>[f.name,values[f.name]]));
+      if (splitName) Object.assign(payload,{name:display.value,nameParts:splitName.read()});
+      if (selected !== undefined) payload[international ? 'internationalAddress' : 'addressRegion'] = selected;
+      if (text !== undefined) payload.address = text;
+      return ctx.command('dossier.relative',{...payload,residentId:resident.id,accountId});
+    }
   });
 }
 

@@ -10,7 +10,7 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from platform_core import provider, resident_credentials, staff_resume
-from platform_core.agents import document_intake
+from platform_core.agents import chat_document_help, document_intake
 from platform_core.provider import media
 from platform_core.store import Store, TIMEZONE
 from test_medical_visits import png
@@ -118,6 +118,44 @@ class AssistantDocuments(TestCase):
         self.assertIn("birthDate", resident_credentials.suggestions(sample["lines"])["ambiguous"])
         back = resident_credentials.suggestions([{"text": v, "page":1} for v in ("签发机关 测试公安局","有效期限 2020.01.01-长期")])
         self.assertEqual(back["fields"], {"authority":"测试公安局","validity":"2020.01.01-长期"})
+
+    def test_profile_request_follow_up_and_scoped_attachment(self):
+        question = "帮我填写一下这个老人的个人信息吧，并一张图片可以吗？"
+        self.assertTrue(chat_document_help.intent(question))
+        self.assertTrue(chat_document_help.intent("那我发两张照片可以吗", question))
+        self.assertFalse(chat_document_help.intent("能给员工上传简历吗？", question))
+        self.assertFalse(chat_document_help.intent("图片能当电脑桌面吗？"))
+        worker = {"id": "intake1", "kind":"staff", "permissions":["assistants", "intake"]}
+        self.assertEqual(chat_document_help.reply(worker, ["residents"])[1]["kind"], "uploadResidentProfile")
+        self.assertIsNone(chat_document_help.reply({**worker,"permissions":["assistants"]}, ["dossier"])[1])
+        self.assertIsNone(chat_document_help.reply(worker, [])[1])
+
+    def test_registration_draft_uses_only_complete_and_unambiguous_original_fields(self):
+        labels = ["长辈登记资料", "姓名", "李文秀", "性别：女", "出生日期：1950-05-12",
+                  "本人手机号：13900010001", "紧急联系人电话：13900010002", "常用语言：普通话",
+                  "学历：小学", "学历：大学", "出生地：河南省平顶山市汝州市", "现住址：河南省平顶山市汝州市样例路12号"]
+        sample = {"pageCount": 2, "pages":[{"page":1,"state":"complete"}, {"page":2,"state":"incomplete"}],
+                  "lines":[{"page":1,"line":i,"text":t} for i,t in enumerate(labels)] +
+                          [{"page":2,"line":1,"text":"姓名 另外一人"}]}
+        with patch.object(document_intake.document_ocr,"recognize",return_value=sample), \
+             patch.object(document_intake.generation,"generate",return_value={"category":"长辈登记资料"}) as classify:
+            out = self.preview()
+            fields = out["profile"]["fields"]
+            self.assertEqual((fields["name"],fields["gender"],fields["birthDate"],fields["phone"]),
+                             ("李文秀","女","1950-05-12","13900010001"))
+            self.assertEqual(fields["birthRegion"]["codes"], ["41","4104","410482"])
+            self.assertEqual(fields["addressRegion"]["detail"], "样例路12号")
+            self.assertNotIn("education", fields)
+            self.assertIn("education",out["profile"]["ambiguous"])
+            self.assertEqual(out["excerpt"], "")
+            self.assertNotIn("李文秀",repr(classify.call_args))
+            self.assertNotIn("13900010001",repr(classify.call_args))
+            with patch.object(self.store,"actor",return_value={"kind":"staff","id":"staff2","permissions":["assistants"]}):
+                self.assertNotIn("profile",self.preview())
+        sample["lines"].append({"page":1,"line":40,"text":"姓名 另一位"})
+        material = resident_credentials.suggestions(sample["lines"])
+        self.assertNotIn("name", material["fields"])
+        self.assertIn("name", material["ambiguous"])
 
     def test_pdf_preview_renders_requested_local_page_and_checks_access(self):
         handler = Handler.__new__(Handler)

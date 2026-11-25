@@ -79,6 +79,7 @@ def exercise(b, port, username):
         assert b.evaluate("document.querySelector('.sidebar').getBoundingClientRect().left >= -1")
     data = b.evaluate("fetch('/api/state').then(r=>r.json()).then(s=>s.data)")
     routes = data["user"]["routes"]
+    assert b.evaluate("!!document.querySelector('.desk-new-resident')") == (username in ("owner", "qa-reception"))
     items = b.evaluate("Array.from(document.querySelectorAll('.sidebar a.nav-item'), a=>[a.hash,a.title])")
     assert items and all(target[1:].split("?")[0] in routes for target, _ in items)
     if is_family:

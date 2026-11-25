@@ -50,13 +50,14 @@ ELDERCARE_PRACTICE = re.compile(
 INSTITUTION = re.compile(
     r"院务|院区|院内|院里|院门|我院|本院|分院|院方|护工|护理员|病房|床位|房型|楼层平面图|"
     r"退住|试住|续住|排班|班次|交班|探访|来访登记|入住办理|办理入住|巡查|体检|"
-    r"配餐|餐单|餐费|行政简报|工单|医疗档案|长[辈者]档案|病历|物资|仓库|仓储|供应商|经销员|"
+    r"配餐|餐单|餐费|行政简报|工单|医疗档案|长[辈者]档案|病历|物资|库存|仓库|仓储|供应商|经销员|"
     r"欠款|账单|营收|收款|缴费|流水|财务|机构设置|系统设置|工作区备份|机构的?数据备份|全员通知|"
     r"家属服务|员工|重复用药|医疗|疾病|用药|服药|喂药|给药|吃药|医嘱|台账|运营总览|环境导览|"
     r"看我上次聊天|新对话|历史对话|复盘对话|对话记忆|这个界面|本页|工作台|本平台|医养平台|"
+    r"填(?:一下|好|写|报)|登记表|上传(?:文件|资料|图片|照片)|这(?:份|张)(?:材料|资料|表|文件|照片)|"
     r"平台(?:备份|恢复|更新|权限|登录|巡查|用量|帮助|联网)|健康助理|"
-    r"\b(?:inventory|handover|staffing|care plan|care work|ward|admission|"
-    r"bed management|patient care)\b",
+    r"\b(?:inventory|handover|staffing|care plan|care work|ward|admission|resident|receipts?|bills?|staff|visits?|bed occupancy|"
+    r"bed management|deployment console|deployment settings|scheduled care tasks|recurring care tasks|stock ledger|patient care)\b",
     re.I,
 )
 SHORT_WORKSPACE = re.compile(

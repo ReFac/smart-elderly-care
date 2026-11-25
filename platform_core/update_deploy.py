@@ -193,7 +193,7 @@ class Launcher:
             env.setdefault("NH_BACKUP_LOCATIONS_FILE", str(locations))
         if (rclone := local / "backup-tools" / "rclone").is_file():
             env.setdefault("NH_RCLONE_BIN", str(rclone))
-        runtime = [str(local / name) for name in ("storage-runtime", "payment-runtime") if (local / name).is_dir()]
+        runtime = [str(local / name) for name in ("harness-runtime", "a2a-runtime", "storage-runtime", "payment-runtime", "passkey-runtime") if (local / name).is_dir()]
         if env.get("PYTHONPATH"):
             runtime.append(env["PYTHONPATH"])
         if runtime:

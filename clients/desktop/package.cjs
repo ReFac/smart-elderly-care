@@ -20,14 +20,14 @@ async function packageApplication() {
       : path.join(output, 'resources');
   const appPath = path.join(resources, 'app');
   await fs.mkdir(appPath);
-  for (const file of ['main.cjs', 'source-preload.cjs', 'public-source.cjs', 'lead-calls.cjs', 'payment-links.cjs', 'microphone.cjs'])
+  for (const file of ['main.cjs', 'native-text.cjs', 'source-preload.cjs', 'public-source.cjs', 'lead-calls.cjs', 'payment-links.cjs', 'microphone.cjs'])
     await fs.copyFile(path.join(__dirname, file), path.join(appPath, file));
   await fs.writeFile(
     path.join(appPath, 'package.json'),
     JSON.stringify(
       {
         name: 'yihe-care-desktop',
-        productName: '医养管理平台',
+        productName: require('./native-text.cjs').app,
         version,
         main: 'main.cjs',
       },

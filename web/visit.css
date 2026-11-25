@@ -191,3 +191,11 @@ form .consent {display:flex;gap:9px;align-items:start;font-size:.93rem;color:var
   html {scroll-behavior:auto}
   *,*::before,*::after {transition:none!important}
 }
+
+.visitor-site .international-profile {min-width:0;margin:0;padding:0;border:0}
+.visitor-site .international-profile legend {font-weight:600;margin-bottom:.5rem}
+.visitor-site .international-profile .dossier-form-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem 1rem}
+.visitor-site .international-profile [hidden] {display:none}
+@media(max-width:540px) {
+  .visitor-site .international-profile .dossier-form-grid {grid-template-columns:minmax(0,1fr)}
+}

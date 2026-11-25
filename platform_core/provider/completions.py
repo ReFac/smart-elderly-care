@@ -28,7 +28,18 @@ ANTHROPIC_FINISH = {
 GEMINI_REASONING_MODELS = re.compile(r"(?:models/)?gemini-(?:2\.5|[3-9]\d*)(?:[.-]|$)")
 
 
+deployed = {}  # Immutable for the lifetime of a configured server process.
+
+
+def chat_endpoint(kind):
+    if deployed.get("provider") == kind:
+        return deployed["endpoint"]
+    return deepseek.ENDPOINT if kind == "deepseek" else CHAT_ENDPOINTS.get(kind, "")
+
+
 def provider_name():
+    if deployed:
+        return deployed["provider"]
     return os.environ.get("NH_CHAT_PROVIDER", "deepseek").strip().lower()
 
 
@@ -36,7 +47,7 @@ def model_name(default):
     kind = provider_name()
     if kind == "deepseek":
         return default
-    model = os.environ.get("NH_CHAT_MODEL", "").strip()
+    model = deployed.get("model") or os.environ.get("NH_CHAT_MODEL", "").strip()
     if kind in CHAT_ENDPOINTS and re.fullmatch(
         r"[A-Za-z0-9][A-Za-z0-9./:_-]{0,179}", model
     ):
@@ -48,6 +59,8 @@ def read_key():
     kind = provider_name()
     if not model_name("") or kind not in KEY_NAMES:
         raise ValueError("平台模型配置无效")
+    if deployed.get("key"):
+        return deployed["key"]
     name = KEY_NAMES[kind]
     if kind == "google" and not os.environ.get(name, "").strip():
         name = "GOOGLE_API_KEY"
@@ -197,7 +210,7 @@ def _anthropic_response(raw):
 def _request(kind, key, body):
     if kind not in CHAT_ENDPOINTS:
         raise ValueError("平台模型配置无效")
-    url = CHAT_ENDPOINTS[kind]
+    url = chat_endpoint(kind)
     if kind == "anthropic":
         return (
             url,

@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 def credential_env(folder):
     return {
+        "NH_DEPLOYMENT_LANGUAGE": "zh-CN",
         "DEEPSEEK_API_KEY": "",
         "NH_DEEPSEEK_KEY_FILE": "",
         "NH_PLATFORM_VAULT": str(Path(folder) / "isolated-platform.sqlite3"),

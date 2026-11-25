@@ -10,6 +10,7 @@ from server import Handler
 class HttpCapacityTests(unittest.TestCase):
     def setUp(self):
         self.handler = Handler.__new__(Handler)
+        self.handler.client_address = ("127.0.0.1", 1234)
         self.slots = BoundedSemaphore(1)
         self.handler.server = SimpleNamespace(heavy_slots=self.slots)
         self.handler.public_origin = self.handler.update_gate = None

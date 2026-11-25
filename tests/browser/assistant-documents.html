@@ -3,11 +3,12 @@
 <output>运行中</output>
 <script type="module">
 import { openChat } from '../../web/features/assistant-chat.js';
+import { register } from '../../web/features/admission.js';
 import { detail, formDialog } from '../../web/lib/dialogs.js';
 import { button, icon } from '../../web/lib/ui.js';
 
 const output = document.querySelector('output');
-const state = {user: {id:'owner', kind:'owner'}, allowedActions:['access.create','dossier.confirmVisit','access.staffContract','dossier.credential','ops.subsidyMaterial'],
+const state = {user: {id:'owner', kind:'owner'}, revision:7, dossierProfiles:[{residentId:'r1',birthDate:'1950-01-01'}], allowedActions:['care.register','care.archive','dossier.profile','access.create','dossier.confirmVisit','access.staffContract','dossier.credential','ops.subsidyMaterial'],
   uiSettings: {institutionName:'测试机构', hiddenRoutes:[]}, rolePresets: {护工:[]},
   permissionOptions:{}, campusOptions:[], accessManagement:{staffDuties:[]}, accounts:[{id:'staff1',kind:'staff',displayName:'李护理',role:'护士',username:'nurse'}], today:'2026-11-25',
   residents:[{id:'r1',name:'测试长辈',status:'在住'}]};
@@ -22,13 +23,18 @@ async function waitFor(read) {
   for(let i=0;i<100;i++){const result=read();if(result)return result;await new Promise(r=>setTimeout(r,20));}
   throw Error('等待文件流程超时');
 }
+const nativeFetch = window.fetch.bind(window);
 window.fetch=async (url, opts={})=>{
+  if(url.startsWith('/assets/')) return nativeFetch('../../web' + url);
+
   if(url==='/api/assistant/chat')return Response.json({scopeKey:'docs',generation:'',messages:[]});
   if(url.startsWith('/api/assistant/documents/pages/')) return new Response(new Blob(['fixture']),{headers:{'X-Page-Count':'2','Content-Type':'image/png'}});
   if(url==='/api/assistant/documents/preview'){
     network.push(opts.body.name);
     if (opts.body.name === '身份证.png') return Response.json({category:'身份证正面', pageCount:1,
-      material:{fields:{name:'测试长辈', birthDate:'1949-12-31', idNumber:'11010519491231002X'}}});
+      profile:{fields:{name:'测试长辈',birthDate:'1949-12-31'},ambiguous:[]}, material:{fields:{name:'测试长辈', birthDate:'1949-12-31', idNumber:'11010519491231002X'}}});
+    if (opts.body.name === '登记表.png') return Response.json({category:'长辈登记资料',pageCount:1,
+      profile:{fields:{name:'新建样本',gender:'女',birthDate:'1958-05-01',language:'普通话'},ambiguous:[]}});
     if (opts.body.name === '国徽.png') return Response.json({category:'身份证反面', pageCount:1,
       material:{fields:{authority:'测试签发机关',validity:'长期'}}});
     return Response.json(opts.body.name==='a.png' ? {category:'员工简历',excerpt:'个人简历',pageCount:1,
@@ -137,6 +143,54 @@ try {
   front=originalRows()[0];
   check(front.textContent.includes('有同名长辈') && !front.querySelector('[role=combobox]').value &&
     findButton('打开长辈证件档案',front).disabled,'同名长辈必须手动区分和选择');
+  front.querySelector('[role=option]').click();
+  findButton('预填长辈登记资料',front).click();
+  form=await waitFor(()=>document.querySelector('dialog[aria-label="编辑长辈登记资料"][open]'));
+  check(form.textContent.includes('1950-01-01 → 1949-12-31') && writes.length===1,'资料修改前显示已有值和原件值');
+  check(form.querySelector('input[type=date]').value==='1949-12-31','出生日期必须带入可编辑控件');
+  form.querySelector('form').requestSubmit();
+  await waitFor(()=>writes.length===2);
+  check(writes[1][0]==='dossier.profile' && writes[1][1].residentId==='r1' && writes[1][1].birthDate==='1949-12-31' &&
+    writes[1][2].expectedRevision===7,'应向明确选择的现有档案提交已核对字段');
+  await waitFor(()=>!document.querySelector('dialog[open]'));
+  openChat(()=>ctx);
+  findButton('关闭本组',review).click();
+  const fresh=new DataTransfer();
+  fresh.items.add(new File(['fixture'],'登记表.png',{type:'image/png'}));
+  picker.files=fresh.files;picker.dispatchEvent(new Event('change'));
+  findButton('识别并分类',review).click();
+  await waitFor(()=>findButton('确认分类',review));findButton('确认分类',review).click();
+  findButton('用这份资料新建档案',review).click();
+  form=await waitFor(()=>document.querySelector('dialog[aria-label="新建长辈档案"][open]'));
+  check(writes.length===2 && form.querySelector('[name=name]').value==='新建样本' &&
+    form.textContent.includes('费用来源') && form.querySelectorAll('details:not([open])').length>=3,'新建档案应在同一表单提供预填值和可展开的详细登记资料');
+  const contactSection = [...form.querySelectorAll('details')].find(d=>d.querySelector('summary').textContent.includes('紧急联系人'));
+  contactSection.open=true;
+  findButton('添加家庭成员或联系人',contactSection).click();
+  const contact=await waitFor(()=>document.querySelector('dialog[aria-label="添加家庭成员"][open]'));
+  contact.querySelector('[name=name]').value='家属样本';
+  contact.querySelector('[name=phone]').value='13900015002';
+  contact.querySelector('form').requestSubmit();
+  await waitFor(()=>!contact.open);
+  check(contactSection.textContent.includes('家属样本') && writes.length===2,'家庭成员先加入未保存的登记草稿');
+  const healthSection=[...form.querySelectorAll('details')].find(d=>d.querySelector('summary').textContent.includes('健康摘要'));
+  healthSection.open=true;
+  healthSection.querySelector('textarea').value='人工核对既往资料';
+  const phone=form.querySelector('input[type=tel]');phone.value='13900015001';
+  form.querySelector('form').requestSubmit();
+  await waitFor(()=>writes.length===3);
+  const [action,record]=writes[2];
+  check(action==='care.register' && record.name==='新建样本' && record.kind==='new' && record.gender==='女' &&
+    record.profile.birthDate==='1958-05-01' && record.profile.phone==='13900015001' &&
+    record.profile.language==='普通话' && record.profile.familyContacts[0].name==='家属样本' &&
+    record.profile.initialHealth.summary==='人工核对既往资料' && !record.bedId,'新建表单须一次提交核对后的全部登记资料');
+  await waitFor(()=>!document.querySelector('dialog[open]'));
+  state.user={id:'staff',kind:'staff',permissions:['intake']};
+  state.allowedActions=['care.register','dossier.profile'];
+  form=await register(ctx);
+  check(form && !form.textContent.includes('养老金') && !form.textContent.includes('家庭成员或联系人') && !form.textContent.includes('人工核对健康摘要'),
+    '普通接待员不应获得家庭经济资料填写权限');
+  form.close();
   output.textContent='PASS';
 } catch(error) {output.textContent='FAIL '+error.stack;}
 </script></html>

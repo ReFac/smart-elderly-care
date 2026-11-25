@@ -1,3 +1,4 @@
+import { displayLocale } from '../lib/locale.js';
 import { badge, btn, choose, field, link, node } from './shared.js';
 import { residentAnchor } from './people-labels.js';
 import { materialForm, materialLabels as labels } from './credential-form.js';
@@ -23,7 +24,7 @@ function documentLink(item) {
 
 function printRows(ctx, month, list) {
   if (!list.length) return ctx.toast('请先勾选要打印的长辈');
-  const stamp = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+  const stamp = new Date().toLocaleString(displayLocale, { timeZone: 'Asia/Shanghai' });
   const sheet = node('section', 'subsidy-print-sheet', [
     node('h1', '', month + ' 民政补贴申报材料清单'),
     node('p', '', [

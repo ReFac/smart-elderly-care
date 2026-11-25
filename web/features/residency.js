@@ -74,7 +74,7 @@ function discharge(ctx, row) {
   runForm(ctx, {
     title: '办理退住',
     action: 'care.discharge',
-    description: (row ? residentLabel(ctx, row) + ' · ' : '') + '确认后释放当前床位，退住档案保留 365 天。',
+    description: (row ? residentLabel(ctx, row) + ' · ' : '') + (ctx.state.retainServiceRecords ? '确认后释放床位，档案转为只读，由档案负责人核定保管期限。' : '确认后释放当前床位，退住档案保留 365 天。'),
     fields: [...(row ? [] : [stayPicker(ctx, person => !isTrial(person))]), memo('note', '退住小结', true)],
     map: (v) => ({
       ...v,
@@ -174,7 +174,7 @@ function dischargeDirectory(ctx) {
         {label:'原床位',view:row => bedName(ctx,priorBeds.get(row.id))},
         {label:'入住日期',view:row => row.admittedAt || '—'},
         {label:'退住日期',view:row => row.dischargedAt || '待核实'},
-        {label:'保管至',view:row => row.archiveUntil || '待核实'},
+        {label:'保管至',view:row => ctx.state.retainServiceRecords ? '档案保全' : row.archiveUntil || '待核实'},
         ...(hasGrant(ctx,'intake') ? [{label:'退住小结',view:row => row.dischargeNote || '未登记'}] : []),
         {label:'操作',view:row => link(ctx,'查看详细档案',() => openDossier(ctx,row))},
       ],
@@ -240,7 +240,7 @@ export function residencyDetails(ctx, row) {
         runForm(ctx, {
           title: '封存历史档案',
           action: 'care.fileArchive',
-          description: residentLabel(ctx, row) + ' · 此后该档案只读，日常资料从原退住日起保管 365 天。',
+          description: residentLabel(ctx, row) + (ctx.state.retainServiceRecords ? ' · 归档后只读，保留法定档案及身份关联。' : ' · 此后该档案只读，日常资料从原退住日起保管 365 天。'),
           fields: [
             field('archiveDate', '原退住或归档日期', {
               type: 'date',
@@ -265,7 +265,7 @@ export function residencyDetails(ctx, row) {
         'p',
         'rounds-warning',
         dated
-          ? '只读归档 · ' + row.dischargedAt + ' 退住 · 日常档案保管 365 天'
+          ? '只读归档 · ' + row.dischargedAt + (ctx.state.retainServiceRecords ? ' 退住 · 档案保全' : ' 退住 · 日常档案保管 365 天')
           : '原退住日期待核实，保管期限尚未起算。'
       )
     );
@@ -276,7 +276,7 @@ export function residencyDetails(ctx, row) {
             title: '按原凭证补登退住日期',
             action: 'care.dateArchive',
             description:
-              '以原凭证日期计算 365 天。确认已满保管期的日期后，将立即清理日常资料并保留原件与账务凭证。',
+              ctx.state.retainServiceRecords ? '按原凭证登记退住日期，机构档案保持只读保全。' : '以原凭证日期计算 365 天。确认已满保管期的日期后，将立即清理日常资料并保留原件与账务凭证。',
             fields: [field('archiveDate', '原凭证上的退住日期', { type: 'date', max: today(ctx) })],
             map: (v) => ({ ...v, residentId: row.id })
           })

@@ -203,7 +203,7 @@ def receive(db, state, payload, now):
     """Return whether a change occurred. The public handler always acknowledges alike."""
     _fields(
         payload,
-        {"source", "campusId", "phone", "consent", "name", "note", "preferredAt"},
+        {"source", "campusId", "phone", "consent", "name", "nameParts", "note", "preferredAt"},
     )
     source = payload.get("source")
     if not isinstance(source, str) or source not in PUBLIC_EVENTS or payload.get("consent") is not True:
@@ -220,10 +220,17 @@ def receive(db, state, payload, now):
     if not phone:
         raise ValueError("请填写有效的联系电话，固定电话请含区号")
     if source != "visit" and any(
-        payload.get(k) for k in ("name", "note", "preferredAt")
+        payload.get(k) for k in ("name", "nameParts", "note", "preferredAt")
     ):
         raise ValueError("参观偏好请从申请参观入口登记")
-    name = text_field(payload.get("name"), "称呼", required=source == "visit", limit=60)
+    name = text_field(payload.get("name"), "称呼", required=source == "visit" and "nameParts" not in payload, limit=60)
+    parts = None
+    if "nameParts" in payload:
+        from .international_profile import name_parts
+        display, parts = name_parts(payload["nameParts"])
+        if name and name != display:
+            raise ValueError("Display name must match its name fields.")
+        name = display
     note = text_field(payload.get("note"), "意向说明", limit=500)
     preferred = (
         _time(payload["preferredAt"], now, future=True)
@@ -257,7 +264,7 @@ def receive(db, state, payload, now):
             ),
             None,
         )
-        if previous and (
+        if previous and (parts is None or parts == lead.get("nameParts")) and (
             previous.get("name"),
             previous["feedback"],
             previous["preferredAt"],
@@ -272,6 +279,10 @@ def receive(db, state, payload, now):
         elif not lead["callbackStopped"] and lead["status"] == "跟进中":
             lead["status"] = "待回访"
     if source == "visit":
+        if parts:
+            lead["nameParts"] = parts
+        elif lead.get("name") != name:
+            lead.pop("nameParts", None)
         lead.update(
             name=name,
             note=note,
@@ -288,6 +299,7 @@ def receive(db, state, payload, now):
         now,
         PUBLIC_EVENTS[source],
         name=name,
+        **({"nameParts": parts} if parts else {}),
         feedback=note,
         consent=True,
         preferredAt=preferred,

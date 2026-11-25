@@ -11,7 +11,7 @@ import zlib
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from . import access, document_ocr, family_contacts, pdf_original, profile_fields
+from . import access, document_ocr, family_contacts, international_profile, pdf_original, profile_fields
 from .dossier_summary import sign_summary, summary_draft as summary_draft
 from .care.clinical import refresh_medication_warnings
 from .care.records import append_record, lookup
@@ -118,7 +118,7 @@ def years_old(birth, day):
     return day.year - birth.year - ((day.month, day.day) < (birth.month, birth.day))
 
 
-def edit_profile(db, state, p, user, today, *, temporary=False):
+def edit_profile(db, state, p, user, today, *, temporary=False, initial_contacts=()):
     if not temporary:
         access.require(user, "intake")
     resident = lookup(state, "residents", p.get("residentId"))
@@ -136,6 +136,14 @@ def edit_profile(db, state, p, user, today, *, temporary=False):
             and k not in ("language", "education", "maritalStatus", "occupation")
         }
     )
+    if "nameParts" in p:
+        display, parts = international_profile.name_parts(p["nameParts"])
+        if display != name:
+            raise ValueError("Display name must match its name fields.")
+        basic["nameParts"] = parts
+    elif resident["name"] != name:
+        basic.pop("nameParts", None)
+    international_profile.merge_address(basic, p)
     if "phone" in p and basic["phone"]:
         normalized = profile_fields.phone_number(basic["phone"], mobile=True)
         if not normalized:
@@ -151,9 +159,14 @@ def edit_profile(db, state, p, user, today, *, temporary=False):
             }
         )
     profile_fields.update_profile(basic, household, p, user)
-    if "familyContact" in p:
+    if "familyContact" in p or initial_contacts:
         access.require(user, "relatives")
-        family_contacts.update(household, p["familyContact"], today)
+        if "familyContact" in p:
+            family_contacts.update(household, p["familyContact"], today)
+        for member in initial_contacts:
+            if not isinstance(member, dict) or member.get("id") or member.get("remove"):
+                raise ValueError("新建档案只接受新增家庭成员")
+            family_contacts.update(household, member, today)
     age = p.get("age", resident.get("age"))
     if basic.get("birthDate"):
         age = years_old(
@@ -166,6 +179,10 @@ def edit_profile(db, state, p, user, today, *, temporary=False):
         age = int(age)
     else:
         age = None
+    if "gender" in p:
+        if p["gender"] not in ("女", "男", "未登记"):
+            raise ValueError("请选择性别")
+        resident["gender"] = p["gender"]
     resident.update(name=name, age=age)
     db.execute(
         """INSERT INTO dossier_profiles VALUES(?,?,?) ON CONFLICT(resident_id)
@@ -173,6 +190,34 @@ def edit_profile(db, state, p, user, today, *, temporary=False):
         (resident["id"], pack(basic), pack(household)),
     )
     return f"更新长辈档案 {resident['id']} 的登记资料"
+
+
+def initialize_registration(db, state, person, profile, user, today):
+    """Validate the registration form against the profile editor in the same transaction."""
+    if not isinstance(profile, dict) or profile.keys() - {
+        *BASIC, *HOUSEHOLD, "nameParts", "internationalAddress", "birthRegion", "nativeRegion", "addressRegion",
+        "fundingSources", "pensionBand", "pensionAmount", "familyContacts", "initialHealth",
+    }:
+        raise ValueError("新建档案中含有不属于登记资料的字段")
+    members = profile.get("familyContacts", [])
+    if not isinstance(members, list):
+        raise ValueError("请逐人登记有效家庭成员")
+    details = {k: v for k, v in profile.items() if k not in ("familyContacts", "initialHealth")}
+    base = {"residentId": person["id"], "name": person["name"]}
+    if details or members:
+        edit_profile(db, state, {**details, **base}, user, today, initial_contacts=members)
+    if "initialHealth" in profile:
+        from . import campus_access, care
+        from .care import archive_retention
+
+        health = profile["initialHealth"]
+        if not isinstance(health, dict) or health.keys() - {"summary", "allergies", "risk"}:
+            raise ValueError("请核对本次签认的健康摘要字段")
+        fields = {**health, "residentId": person["id"], "reviewer": user["displayName"]}
+        access.authorize(user, "care.archive", fields, state)
+        campus_access.authorize_command(db, user, "care.archive", fields, state)
+        archive_retention.writable(state, person["id"])
+        care.apply(state, "care.archive", fields, today)
 
 
 def masked(number):
@@ -229,11 +274,18 @@ def edit_relative(db, state, p, user, today):
             profile_fields.catalog("dossier-choices")["relationship"],
             values.get("relationship", ""),
         )
+    previous_name = values.get("name")
     values.update({k: text(p, k, n) for k, n in KIN.items() if k in p})
+    if "name" in values:
+        international_profile.merge_name(values, p, previous_name)
+    international_profile.merge_address(values, p)
     profile_fields.addresses(values, p, (("addressRegion", "address", False),))
     for key in ("name", "relationship", "phone"):
         text(values, key, KIN[key], True)
-    if (
+    normalized = profile_fields.phone_number(values["phone"])
+    if normalized:
+        values["phone"] = normalized
+    elif (
         not re.fullmatch(r"\+?[\d ()-]+", values["phone"])
         or not 5 <= sum(c.isdigit() for c in values["phone"]) <= 18
     ):

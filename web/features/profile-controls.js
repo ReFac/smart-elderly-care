@@ -1,6 +1,7 @@
+import { displayLocale } from '../lib/locale.js';
 import { node } from './shared.js';
 
-let catalogs;
+const catalogs = new Map();
 const villageRequests = new Map();
 function loadCityVillages(regions, city) {
   if (!villageRequests.has(city)) {
@@ -19,22 +20,24 @@ function loadCityVillages(regions, city) {
   }
   return villageRequests.get(city);
 }
-export function loadProfileChoices() {
-  if (!catalogs) {
-    catalogs = Promise.all(
-      ['dossier-choices', 'address-regions'].map(async (name) => {
-        const response = await fetch('/assets/' + name + '.json');
-        if (!response.ok) throw new Error('档案选项目录未能加载，请重试。');
-        return response.json();
-      }),
-    )
-      .then(([choices, regions]) => ({ choices, regions }))
-      .catch((e) => {
-        catalogs = null;
-        throw e;
-      });
+function loadCatalog(name) {
+  if (!catalogs.has(name)) {
+    catalogs.set(name,fetch('/assets/' + name + '.json').then(response => {
+      if (!response.ok) throw new Error('档案选项目录未能加载，请重试。');
+      return response.json();
+    }).catch(error => {
+      catalogs.delete(name);
+      throw error;
+    }));
   }
-  return catalogs;
+  return catalogs.get(name);
+}
+
+export async function loadProfileChoices({needsRegions=true}={}) {
+  const [choices, regions] = await Promise.all([
+    loadCatalog('dossier-choices'), needsRegions ? loadCatalog('address-regions') : {},
+  ]);
+  return {choices, regions};
 }
 
 export function picker(label, values, current = '', required = false) {
@@ -60,7 +63,7 @@ export const group = (title, fields) =>
     node('div', 'dossier-form-grid', fields),
   ]);
 
-export function regionPicker(regions, label, stored, legacy = '', birth = false) {
+export function regionPicker(regions, label, stored, legacy = '', birth = false, prefilled = false) {
   const previous = stored?.codes || [];
   const controls = [];
   const grid = node('div', 'dossier-form-grid');
@@ -90,7 +93,7 @@ export function regionPicker(regions, label, stored, legacy = '', birth = false)
     'text',
     { maxLength: 100 },
   );
-  let changed = false;
+  let changed = prefilled;
   async function moreVillages() {
     const city = controls[1].control.value;
     status.replaceChildren();
@@ -219,6 +222,6 @@ export function moneyChoice(choices, label, source, bandKey, amountKey) {
 }
 export function displayAmount(band, amount) {
   return band === '精确金额'
-    ? Number(amount).toLocaleString('zh-CN', { minimumFractionDigits: 2 }) + ' 元/月'
+    ? Number(amount).toLocaleString(displayLocale, { minimumFractionDigits: 2 }) + ' 元/月'
     : band || '未登记';
 }

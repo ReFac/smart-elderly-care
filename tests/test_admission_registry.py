@@ -82,6 +82,48 @@ class AdmissionRegistryTests(unittest.TestCase):
         self.assertNotIn(old, ids)
         self.assertNotIn(pid, ids)
 
+    def test_complete_registration_is_single_atomic_reviewed_change(self):
+        revision = self.store.version(self.token)["revision"]
+        name = "统一建档样本"
+        profile = {"birthDate":"1950-12-01", "language":"普通话", "phone":"13900008001",
+                   "addressRegion":{"codes":["41","4104","410482"],"detail":"测试街1号"},
+                   "initialHealth":{"summary":"登记时从病历核对","allergies":"已记录的过敏史"},
+                   "familyContacts":[{"kind":"子女","name":"联系样本","phone":"13900008002",
+                                      "roles":["紧急联系人"]}]}
+        with self.assertRaises(ValueError):
+            self.write("care.register", name=name, profile={**profile,"phone":"invalid"})
+        with self.assertRaises(ValueError):
+            self.write("care.register", name=name, profile={**profile, "residentId":"r001"})
+        self.assertEqual(revision,self.store.version(self.token)["revision"])
+        self.assertFalse(any(r["name"] == name for r in self.current()["residents"]))
+        p = {"name":name,"gender":"女","profile":profile}
+        result = self.store.execute("care.register",p,revision,self.token)
+        self.assertEqual(result["revision"], revision+1)
+        with self.assertRaises(Conflict):
+            self.store.execute("care.register",p,revision,self.token)
+        current = self.current()
+        residents = [r for r in current["residents"] if r["name"]==name]
+        self.assertEqual(len(residents),1)
+        person = residents[0]
+        self.assertEqual((person["status"],person["bedId"],person["age"]),("未入住","",75))
+        health = next(row for row in current["archives"] if row["residentId"] == person["id"])
+        self.assertEqual((health["reviewer"],health["summary"]), (current["user"]["displayName"],"登记时从病历核对"))
+        saved = next(row for row in current["dossierProfiles"] if row["residentId"]==person["id"])
+        self.assertEqual((saved["addressRegion"]["detail"],saved["familyMembers"][0]["roles"]),
+                         ("测试街1号",["紧急联系人"]))
+        self.assertIn("dossier_profiles",str(self.store.history_change(self.token,result["revision"])))
+
+    def test_intake_cannot_use_full_registration_to_set_restricted_fields(self):
+        self.write("access.create",kind="staff",role="自定义",permissions=["intake"],
+                   username="reg-test",displayName="接待测试",password="registration-only-test")
+        token = self.store.login("reg-test","registration-only-test")[0]
+        rev = self.store.version(token)["revision"]
+        for profile in ({"pensionBand":"待核实"}, {"initialHealth":{"summary":"不能代医护签认"}}, {"familyContacts":[{"kind":"配偶","name":"未授权"}]}):
+            with self.assertRaises(PermissionError):
+                self.store.execute("care.register",{"name":"拒绝样本","profile":profile},rev,token)
+        self.assertFalse(any(r["name"]=="拒绝样本" for r in self.current()["residents"]))
+        self.store.execute("care.register",{"name":"接待建档样本","profile":{"birthDate":"1950-01-01"}},rev,token)
+
     def test_365_day_boundary_and_evidence_preserved(self):
         pid = self.register()
         rev = self.write(

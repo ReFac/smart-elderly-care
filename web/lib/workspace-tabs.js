@@ -71,12 +71,15 @@ export class WorkspaceTabs {
     for (const [key, page] of this.pages) {
       const selected = key === this.active;
       const pair = el('div', 'desk-tab' + (selected ? ' selected' : ''));
+      pair.classList.toggle('pinned', Boolean(page.pinned));
       const tab = el('button', 'desk-tab-name', page.title);
+      if (page.pinned) tab.setAttribute('aria-label', page.title + '（已固定）');
+      if (page.home && page.pinned) tab.prepend(icon('pin', 12));
       tab.type = 'button';
       tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(selected));
       tab.setAttribute('aria-controls', 'content');
       tab.tabIndex = selected ? 0 : -1;
-      tab.title = page.title;
+      tab.title = page.title + (page.pinned ? '（已固定）' : '');
       tab.onclick = () => activate(key);
       tab.onkeydown = (event) => {
         const keys = [...this.pages.keys()], pos = keys.indexOf(key);

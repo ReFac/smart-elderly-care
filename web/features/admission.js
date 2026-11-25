@@ -87,88 +87,9 @@ export function bindAdmissionDate(dialog, eventName, { preserveBillingDay = fals
   sync();
 }
 
-export function register(ctx, inquiry) {
-  const notify = node('div', 'admission-match');
-  notify.setAttribute('aria-live', 'polite');
-  const day = today(ctx);
-  const oldest = new Date(day + 'T00:00:00Z');
-  oldest.setUTCDate(oldest.getUTCDate() - 364);
-  const dialog = ctx.dialog({
-    title: '新建长辈档案',
-    content: notify,
-    fields: [
-      field('name', '姓名', { value: inquiry?.name || '', maxLength: 60 }),
-      select('kind', '档案类别', [
-        { value: 'new', label: '新档案 · 等待入住' },
-        { value: 'archive', label: '归档老人 · 仅保管资料' },
-      ]),
-      ...(ctx.state.campusOptions?.length
-        ? [
-            select(
-              'campusId',
-              '建档分院',
-              ctx.state.campusOptions.map((c) => ({ value: c.id, label: c.name })),
-              { value: inquiry?.campusId }
-            ),
-          ]
-        : []),
-      select('gender', '性别', options(['未登记', '女', '男'])),
-      select(
-        'age',
-        '年龄',
-        [
-          { value: '', label: '未登记' },
-          ...Array.from({ length: 126 }, (_, i) => ({ value: String(i), label: i + ' 岁' })),
-        ],
-        { required: false }
-      ),
-      field('archiveDate', '原退住或归档日期', {
-        type: 'date',
-        value: day,
-        min: oldest.toISOString().slice(0, 10),
-        max: day,
-        required: false,
-      }),
-    ],
-    submitLabel: '建立档案',
-    onSubmit: (v) => {
-      const payload = { ...v, name: v.name.trim() };
-      if (!payload.age) delete payload.age;
-      if (v.kind !== 'archive') delete payload.archiveDate;
-      if (inquiry) payload.inquiryId = inquiry.id;
-      const same = matching(payload.name);
-      if (same.length) payload.acknowledgeArchive = true;
-      return ctx.command('care.register', payload, {
-        title: same.length ? '核实与归档老人的身份并建立独立档案' : '建立长辈档案',
-        target: payload.name,
-        fields: [
-          ['类别', v.kind === 'archive' ? '归档老人，保管 365 天' : '未入住，建档后可分床'],
-          ...(same.length ? [['同名归档', same.map((x) => residentLabel(ctx, x) + ' · ' + x.id).join('、')]] : []),
-          ...(v.kind === 'archive' ? [['归档日期', v.archiveDate || day]] : []),
-        ],
-      });
-    },
-  });
-  function matching(name) {
-    return ctx.state.residents.filter((r) => archived(r) && r.name === name.trim());
-  }
-  const controls = dialog.querySelector('form').elements;
-  const show = () => {
-    controls.archiveDate.closest('label').hidden = controls.kind.value !== 'archive';
-    controls.archiveDate.disabled = controls.kind.value !== 'archive';
-    const rows = matching(controls.name.value);
-    notify.replaceChildren();
-    if (rows.length) {
-      notify.append(
-        node('strong', '', '发现同名归档老人，请核对档案号。'),
-        ...rows.map(r => node('div', '', [residentAnchor(ctx, r), ' · ' + r.id + ' · ' + (r.dischargedAt || '历史归档')]))
-      );
-    }
-  };
-  controls.kind.onchange = show;
-  controls.name.oninput = show;
-  show();
-  controls.name.focus();
+export async function register(ctx, inquiry, draft) {
+  const {newResidentForm} = await import('./profile-editor.js');
+  return newResidentForm(ctx, inquiry, draft);
 }
 
 function bedLabel(ctx, id) {

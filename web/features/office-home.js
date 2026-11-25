@@ -2,6 +2,7 @@ import { el, icon, button } from '../lib/ui.js';
 import { table, named, badge, money, facts } from './shared.js';
 import { residentAnchor, staffLabel } from './people-labels.js';
 import { demoGuideButton } from './demo-guide.js';
+import { register } from './admission.js';
 
 function jump(ctx, label, glyph, destination, tab) {
   const link = el('a','desk-shortcut');
@@ -17,12 +18,14 @@ export function officeHome(ctx) {
   const identity = el('div');
   identity.append(el('h1','','机构运营总览'),el('p','',s.uiSettings.institutionName + '　' + s.today));
   heading.append(identity);
-  const launch = el('a','btn btn-primary');
+  const canRegister = ctx.available('residents') && s.allowedActions.includes('care.register');
+  const launch = el('a','btn ' + (canRegister ? 'btn-secondary' : 'btn-primary'));
   launch.href = '#overview?view=cockpit'; launch.append(icon('chart',16),'打开经营大屏');
   const actions = el('div','desk-home-actions');
   const guide = demoGuideButton(ctx);
   if (guide) actions.append(guide);
   actions.append(launch);
+  if (canRegister) actions.append(button('新建长辈档案', () => register(ctx), 'primary', 'plus'));
   heading.append(actions); home.append(heading);
   const metrics = el('div','desk-home-metrics');
   function metric(label,value,unit,detail,route,tab) {
@@ -64,7 +67,7 @@ export function officeHome(ctx) {
   const links = el('div');
   for (const [route,label,glyph,tab] of [
     ['leads','接待登记','intake'],['residents','入住管理','people'],['dossier','长辈档案','folder'],
-    ['beds','床位全景','bed'],['care','照护服务','care'],['inventory','库存台账','box'],
+    ['beds','床位管理','bed'],['care','照护服务','care'],['inventory','库存台账','box'],
     ['billing','费用管理','wallet'],['reports','统计报送','reports'],['family','家属服务','people'],
   ]) if (ctx.available(route)) links.append(jump(ctx,label,glyph,route,tab));
   if (links.childElementCount) { quick.append(links); grid.append(quick); }

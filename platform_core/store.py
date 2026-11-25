@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import BoundedSemaphore, Lock
 from zoneinfo import ZoneInfo
 
+from .agents import agent_protocol
 from .system_monitor import Presence
 from .room_context import room_context, validate_proposal
 from .operations import expense_import, subsidies
@@ -15,7 +16,7 @@ from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, staff_employment, storage_assets
 from . import lead_contacts, lead_intake, medical_visits, people_labels, visit_schedule
 from . import care_areas, daily_life, med_rounds, medication_reports, resident_health, scheduled_work
-from . import permission_requests, visitor_access, display_preferences
+from . import permission_requests, visitor_access, display_preferences, deployment_language
 from .bootstrap import empty_workspace
 from .care import trial_expiry, trial_followups
 from . import backups, history, rounds
@@ -108,6 +109,7 @@ class Store:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, data TEXT NOT NULL)"
             )
+            agent_protocol.init(db)
             storage_assets.init(db)
             expense_import.init(db)
             subsidies.init(db)
@@ -125,6 +127,8 @@ class Store:
                 db.execute("INSERT INTO workspace_installation(id,mode,sample_version) VALUES(1,?,?)",
                            (initial_data, 0 if prepare_sample else -1))
                 self.created_workspace = True
+            self.deployment_language = deployment_language.initialize(db, fresh=self.created_workspace)
+            self.deployment_edition = deployment_language.public(self.deployment_language)["edition"]
             access.init(db, initial_owner_password)
             display_preferences.init(db)
             permission_requests.init(db)
@@ -139,6 +143,11 @@ class Store:
             daily_life.init(db)
             scheduled_work.init(db)
             archive_retention.init(db)
+            self.clinical_archive_protection = archive_retention.init_profile(db)
+            self.retain_service_records = archive_retention.formal_institution(db)
+            if self.clinical_archive_protection:
+                from . import clinical_access
+                clinical_access.init(db)
             rounds_family.init(db)
             gateways.init(db)
             agents.init(db)
@@ -172,7 +181,7 @@ class Store:
         if (
             actor["kind"] == "family"
             and db.execute(
-                "SELECT 1 FROM archive_expirations WHERE resident=?",
+                "SELECT 1 FROM archive_expirations WHERE resident=?1 UNION ALL SELECT 1 FROM clinical_archive_reviews WHERE resident=?1 LIMIT 1",
                 (actor.get("residentId"),),
             ).fetchone()
         ):
@@ -256,6 +265,9 @@ class Store:
             ]
             lead_contacts.reconcile_callbacks(db, state, self.now())
             data = access.project(db, state, user, self.facility_policy)
+            if user["kind"] in ("owner", "staff"):
+                data["clinicalArchiveProtection"] = self.clinical_archive_protection
+                data["retainServiceRecords"] = self.retain_service_records
             from .operations import billing_lifecycle, contract_renewal
 
             billing_lifecycle.project(state, data, user, today)
@@ -1110,6 +1122,8 @@ class Store:
 
                         source = source_reference(data, fields, user)
                     summary = module.apply(data, action, fields, today)
+                    if action == "care.register" and "profile" in fields:
+                        dossier.initialize_registration(db, data, data["residents"][-1], fields["profile"], user, today)
                     if action == "care.approvePlan":
                         care.plan_items.sync_rules(db, data, fields["planId"], user, now)
                     elif action in ("care.discharge", "care.endTrial"):

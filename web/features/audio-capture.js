@@ -30,6 +30,9 @@ function pcmWave(samples, count, rate) {
 export async function capture(onReady, onStatus, stillOpen) {
   if (!navigator.mediaDevices?.getUserMedia)
     throw new Error('麦克风需要 HTTPS 或本机地址，可直接输入文字。');
+  const Context = window.AudioContext || window.webkitAudioContext;
+  if (!Context || !window.AudioWorkletNode || !('audioWorklet' in Context.prototype))
+    throw new Error('当前浏览器缺少录音能力，请直接输入文字，或用系统浏览器打开工作台。');
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1 },
     video: false,
@@ -45,7 +48,7 @@ export async function capture(onReady, onStatus, stillOpen) {
     if (ac && ac.state !== 'closed') ac.close().catch(() => {});
   };
   try {
-    ac = new AudioContext({ sampleRate: 16000 });
+    ac = new Context({ sampleRate: 16000 });
     await ac.audioWorklet.addModule(new URL('./pcm-recorder.js', import.meta.url));
     if (!stillOpen()) {
       close();

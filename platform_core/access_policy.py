@@ -317,7 +317,7 @@ def resolve_routes(user):
     if manages_accounts(user):
         routes.append("access")
     if user["kind"] == "owner":
-        routes.append("settings")
+        routes.extend(("settings", "deployment"))
     return [*routes, "account"]
 
 

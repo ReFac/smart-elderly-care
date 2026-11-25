@@ -1,0 +1,27 @@
+[Unit]
+Description=Integrated care institution workspace
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=care-workspace
+Group=care-workspace
+WorkingDirectory=/opt/care-workspace
+StateDirectory=care-workspace
+StateDirectoryMode=0700
+EnvironmentFile=/etc/care-workspace/service.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/opt/care-workspace/.venv/bin/python manage_deployment.py check --db /var/lib/care-workspace/institution.sqlite3 --profile ${NH_INSTITUTION_PROFILE} --public-origin ${NH_PUBLIC_ORIGIN}
+ExecStart=/opt/care-workspace/.venv/bin/python manage_updates.py run --initial-data empty --db /var/lib/care-workspace/institution.sqlite3 --port ${NH_PORT} --public-origin ${NH_PUBLIC_ORIGIN}
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/care-workspace
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

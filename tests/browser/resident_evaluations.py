@@ -63,6 +63,15 @@ def verify(browser, port, screenshots=None):
     b.evaluate("""{const r=[...document.querySelectorAll('.resident-evaluations tr')]
                         .find(r=>r.textContent.includes('床旁环境观察表'));r.querySelector('button').click()}""")
     b.wait_for("!!document.querySelector('dialog.risk-drawer[open] .risk-factor-list')")
+    initial_width, initial_height = b.evaluate("[innerWidth,innerHeight]")
+    for width, height in ((1440, 900), (390, 740), (initial_width, initial_height)):
+        b.call("Emulation.setDeviceMetricsOverride", width=width, height=height, deviceScaleFactor=1, mobile=False)
+        b.evaluate("Promise.all(document.getAnimations().map(a=>a.finished.catch(()=>{})))")
+        box = b.evaluate("""(()=>{const d=document.querySelector('dialog.risk-drawer[open]'),r=d.getBoundingClientRect();
+            return [r.left,document.documentElement.clientWidth-r.right,r.top,document.documentElement.clientHeight-r.bottom,d.matches(':modal')]})()""")
+        left, right, top, bottom, native_modal = box
+        assert native_modal and min(left, right, top, bottom) >= 10, (width, box)
+        assert abs(left - right) <= 2 and abs(top - bottom) <= 2, (width, box)
     assert b.evaluate("document.querySelector('.risk-score strong').textContent==='10' && document.querySelectorAll('.risk-steps li').length===3")
     if screenshots:
         assert b.evaluate("document.querySelector('.evaluation-identity').textContent.includes('周宁（护士）')")
@@ -99,7 +108,7 @@ def verify(browser, port, screenshots=None):
     click_text(".resident-evaluations tbody button", "查看报告")
     b.wait_for("!!document.querySelector('dialog[open] .risk-report')")
     assert not b.errors, b.errors
-    print("Personal medical evaluations passed for Owner and care-only staff, including scoped records and nested drawers.")
+    print("Personal medical evaluations passed for Owner and care-only staff, including scoped records and centered nested dialogs.")
 
 
 if __name__ == "__main__":

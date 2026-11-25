@@ -1,3 +1,4 @@
+import { displayLocale } from '../lib/locale.js';
 import {
   badge,
   btn,
@@ -31,7 +32,7 @@ function printReport(ctx, title, body) {
       ' · 经办人 ',
       ctx.state.user.displayName,
       ' · 打印时间 ',
-      new Date().toLocaleString('zh-CN'),
+      new Date().toLocaleString(displayLocale),
     ]),
     body,
   ]);

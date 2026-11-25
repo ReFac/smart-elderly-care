@@ -73,9 +73,9 @@ Agent 与人工入口复用同一组查询、房间与楼层编号。区域解�
 | 签认布局与导览 | 核对机构测绘资料，提交全层布局并点选每间房；发布入口、公共区和房间的获准照片，按路径浏览并撤下一项。 |
 | 约束 Agent | 用限层、限房及空授权分别查房，核对检索、详情与区域解析返回一致的人员编号；用亲属账号验证仅能调阅环境场景。 |
 
-在独立样本上运行 `python3 -m unittest discover -s tests -p test_facility.py -v`。[院区模块](../platform_core/facility.py) · [回归用例](../tests/test_facility.py)
+在独立样本上运行 `python3 tests/run.py -p test_facility.py -v`。[院区模块](../platform_core/facility.py) · [回归用例](../tests/test_facility.py)
 
-分院隔离回归可运行 `python3 -m unittest discover -s tests -p test_campuses.py -v`，涵盖旧库升级、重复房号、分院授权、医疗原件、预警和历史 Agent 任务。
+分院隔离回归可运行 `python3 tests/run.py -p test_campuses.py -v`，涵盖旧库升级、重复房号、分院授权、医疗原件、预警和历史 Agent 任务。
 
 ## 从档案分配床位
 

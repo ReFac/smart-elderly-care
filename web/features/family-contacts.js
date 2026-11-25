@@ -1,3 +1,4 @@
+import {internationalDeployment, nameEditor, postalEditor} from '../lib/international-profile.js';
 import { residentLabel } from './people-labels.js';
 import { node, choose, btn, badge, disclosure, facts, named, today, hasGrant } from './shared.js';
 
@@ -13,15 +14,20 @@ import {
 const roles = ['推荐联系人', '常用联系人', '紧急联系人'];
 const kinds = ['配偶', '子女', '其他'];
 
-async function edit(ctx, resident, member = {}) {
+async function edit(ctx, resident, member = {}, stage) {
   let catalog;
   try {
-    catalog = await loadProfileChoices();
+    catalog = await loadProfileChoices({needsRegions:!internationalDeployment()});
   } catch (e) {
     ctx.toast(e.message);
     return;
   }
-  const address = regionPicker(
+  const international = internationalDeployment();
+  const display = node('input');
+  display.value = member.name || '';
+  display.name = 'name';
+  const splitName = international && nameEditor(display,member.nameParts);
+  const address = international ? postalEditor(member.internationalAddress,member.address) : regionPicker(
     catalog.regions,
     '成员联系地址',
     member.addressRegion,
@@ -99,14 +105,14 @@ async function edit(ctx, resident, member = {}) {
     title: member.id ? '编辑家庭成员' : '添加家庭成员',
     description: residentLabel(ctx, resident) + ' · 添加配偶、每一位子女或其他联系人。',
     content: node('div', 'dossier-form', [
-      kind.element,
+      splitName?.element, kind.element,
       relation.element,
       rolePicker,
       support,
       address.element,
     ]),
     fields: [
-      entry('name', '姓名', { required: true, maxLength: 60 }),
+      ...(!international ? [entry('name', '姓名', { required: true, maxLength: 60 })] : []),
       entry('phone', '联系电话（承担联系用途时必填）', {
         type: 'tel',
         maxLength: 40,
@@ -130,13 +136,17 @@ async function edit(ctx, resident, member = {}) {
       }),
       entry('note', '照护分工与联络备注', { type: 'textarea', maxLength: 300 }),
     ],
-    onSubmit: ({ verification, verifiedOn, ...values }) => {
+    onSubmit: ({ verification, verifiedOn, ...formValues }) => {
+      const values = Object.fromEntries(['name','phone','kind','relationship','note'].map(key => [key, formValues[key]]));
+      if (splitName) values.nameParts = splitName.read();
       if (values.kind === '子女') {
         values.supportStatus = status.control.value;
         if (!amount.element.hidden) Object.assign(values, amount.read());
       }
       const loc = address.read();
-      if (loc !== undefined) values.addressRegion = loc;
+      if (loc !== undefined) values[international ? 'internationalAddress' : 'addressRegion'] = loc;
+      const text = address.text?.();
+      if (text !== undefined) values.address = text;
       if (verification === 'verify' && !verifiedOn) throw new Error('请填写实际拨通电话的日期');
       if (verification !== 'verify' && verifiedOn)
         throw new Error('请在电话畅通情况中选择“已人工拨通”');
@@ -148,17 +158,14 @@ async function edit(ctx, resident, member = {}) {
           : verification === 'keep' && unchanged
             ? member.verifiedOn || ''
             : '';
+      const entry = {...values, id: member.id || '', roles: memberRoles, verifiedOn: checkedDate};
+      if (stage) return stage(entry);
       return ctx.command(
         'dossier.profile',
         {
           residentId: resident.id,
           name: resident.name,
-          familyContact: {
-            ...values,
-            id: member.id || '',
-            roles: memberRoles,
-            verifiedOn: checkedDate,
-          },
+          familyContact: entry,
         },
         {
           title: member.id ? '更新家庭成员资料' : '添加家庭成员',
@@ -172,7 +179,7 @@ async function edit(ctx, resident, member = {}) {
               '联系地址',
               loc
                 ? [address.label(), loc.detail].filter(Boolean).join(' · ') || '已清空'
-                : member.address || '未填写',
+                : text ?? (member.address || '未填写'),
             ],
             ...(values.kind === '子女'
               ? [
@@ -195,6 +202,29 @@ async function edit(ctx, resident, member = {}) {
       );
     },
   });
+}
+
+export function registrationContacts(ctx, name) {
+  const members = [];
+  const list = node('div', 'fx-profile');
+  function open(index) {
+    edit(ctx, {name:name.value || '新建档案'}, members[index], entry => {
+      if (entry.kind === '配偶' && members.some((m,i)=>i !== index && m.kind === entry.kind))
+        throw Error('已登记配偶，请编辑现有资料。');
+      if (index === members.length) members.push(entry);
+      else members[index] = entry;
+      draw();
+      return true;
+    });
+  }
+  function draw() {
+    list.replaceChildren(...members.map((entry,i) => node('div', 'family-contact-card', [
+      named(entry.name, [entry.kind, ...entry.roles].join(' · ')),
+      btn(ctx, '编辑', () => open(i)),
+      btn(ctx, '移除', () => {members.splice(i,1); draw();}),
+    ])));
+  }
+  return {members, element: node('div','fx-profile',[list, btn(ctx,'添加家庭成员或联系人',()=>open(members.length))])};
 }
 
 export function contactBook(ctx, resident, profile, readOnly = false) {

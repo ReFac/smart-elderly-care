@@ -14,7 +14,9 @@ class StaticAssetTests(unittest.TestCase):
         handler.headers = {"Host": "localhost", "If-None-Match": validator}
         handler.path = path
         handler.update_gate = handler.public_origin = None
-        handler.store = Mock()
+        handler.client_address = ("127.0.0.1", 1234)
+        handler.command = "GET"
+        handler.store = Mock(clinical_archive_protection=False, deployment_language="zh-CN")
         handler.store.rounds.matches.return_value = False
         handler.store.photo.return_value = (b"medical", "image/png")
         handler.send_response = Mock()

@@ -1,6 +1,7 @@
 import { add, btn, canAct, facts, node, today } from './shared.js';
 import { residentLabel, staffLabel } from './people-labels.js';
 import { hospitalOptions } from './medical-hospital-picker.js';
+import { hospitalMapLink } from './medical-hospital-map.js';
 
 const fieldGroups = [
   ['就诊信息', [['eventDate', '就诊日期'], ['facility', '就诊机构'], ['department', '科室']]],
@@ -162,6 +163,8 @@ function visitContent(ctx, record) {
     ['核对人员', staffLabel(ctx, {id: record.reviewerId, displayName: record.reviewer, role: record.reviewerRole})],
     ['存档时间', record.recordedAt?.replace('T', ' ').slice(0, 19)],
   ]));
+  const map = hospitalMapLink(fields.facility);
+  if (map) body.append(map);
   for (const [, group] of fieldGroups.slice(1)) {
     for (const [key, label] of group) {
       if (fields[key]) body.append(node('section', 'medical-visit-text', [

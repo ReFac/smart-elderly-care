@@ -31,6 +31,7 @@ export function residentHref(ctx, ref, lifeEvent) {
 export function residentAnchor(ctx, ref, lifeEvent) {
   const href = residentHref(ctx, ref, lifeEvent);
   const element = document.createElement(href ? 'a' : 'span');
+  element.translate = false;
   element.textContent = residentLabel(ctx, ref);
   if (href) {
     element.href = href;

@@ -61,6 +61,8 @@ def destination(channel, raw):
         ):
             return name + "@" + domain.lower()
     if channel == "sms":
+        from .profile_fields import phone_number
+        raw = phone_number(raw, mobile=True)
         if re.fullmatch(r"1[3-9][0-9]{9}", raw):
             raw = "+86" + raw
         if re.fullmatch(r"\+[1-9][0-9]{7,14}", raw):

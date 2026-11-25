@@ -1,15 +1,13 @@
-# 医养管理平台
+# 智能医养 Agent SaaS 系统 · CareOps Agent SaaS
 
-面向养老机构的电脑工作台，集照护运营与健康助理于一体。
+[English](README.en.md)
 
-- 管理分院、楼栋、床位、入住和长辈档案。
-- 处理照护工单、用药记录、排班与收费。
-- 用语音或文字询问健康助理，查常见问题、定位业务页和检索养老相关资料。
-- 按岗位授权，关键操作留痕，支持加密备份与恢复。
+面向养老及持证医养机构的 AI 工作台。员工可以直接问「今天院里怎么样」，也可以上传就诊资料或登记表，由健康助理查阅授权记录、整理草稿，再由经办人核对保存。
 
-```bash
-python3 -m pip install -r requirements-storage.txt
-python3 server.py
-```
+- **机构运营**覆盖入住、试住、床位、照护、用药、收费、物资和家属协同。
+- **健康助理**支持语音、图片、PDF、Excel、MCP 工具、社区技能和 A2A 对接。复杂简报可以在中断后恢复。
+- **机构部署**支持独立加密库、岗位和分院授权、审计、快照和签名升级。部署时选定语言，国际版业务规则可复用于其他语言。
 
-[打开本地工作台](http://localhost:8765/?workspace=1) · [左栏业务目录](docs/desktop-navigation.md) · [常见问题](http://localhost:8765/faq) · [项目日志](LOG.md) · [客户端说明](docs/clients.md) · [机构版商用设计](docs/commercial-design.md)
+项目验收只测试简体中文版及与语言无关的公共能力。[测试约定](AGENTS.md)
+
+[快速部署](docs/quick-deploy.md) · [员工与家属使用手册](docs/workspace-manual.md) · [Agent 操作与接入指南](docs/agent-handbook.md) · [Owner 部署控制台](docs/deployment-console.md) · [客户端适配](docs/client-compatibility.md) · [持证机构交付](docs/medical-commercial.md) · [项目日志](LOG.md)

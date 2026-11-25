@@ -42,6 +42,8 @@ def generate(
 
     now = store.now()
     model = model_name()
+    if getattr(store, "deployment_edition", "china") == "international" and validate is narrative:
+        instruction += "\nUse English for the user-facing narrative. Preserve names and units in the source."
     messages = [
         {"role": "system", "content": instruction},
         {

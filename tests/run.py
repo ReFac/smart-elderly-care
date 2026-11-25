@@ -1,4 +1,4 @@
-"""Run discovery using isolated credentials and simulated provider responses."""
+"""Discover Chinese and shared release tests with isolated credentials and simulated providers."""
 
 from pathlib import Path
 import sys
@@ -8,6 +8,7 @@ from unittest.mock import patch
 from urllib.parse import urlsplit
 
 from provider_fixture import credential_env
+from release_scope import ChineseReleaseLoader
 
 
 def deny_live_provider(event, args):
@@ -24,5 +25,6 @@ if __name__ == "__main__":
     with TemporaryDirectory() as temp, patch.dict("os.environ", credential_env(temp)):
         unittest.main(
             module=None,
+            testLoader=ChineseReleaseLoader(),
             argv=[sys.argv[0], "discover", "-s", str(root / "tests"), *sys.argv[1:]],
         )

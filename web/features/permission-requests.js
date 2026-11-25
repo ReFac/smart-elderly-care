@@ -1,3 +1,4 @@
+import { displayLocale } from '../lib/locale.js';
 import { residentLabel, staffLabel } from './people-labels.js';
 import { editResident } from './profile-editor.js';
 import { badge, btn, canAct, choose, facts, field, memo, node, select } from './shared.js';
@@ -12,7 +13,7 @@ const statusLabels = {
   used: ['已办理', 'green'],
 };
 const closedStatuses = new Set(['已退住', '归档', '已归档', '已出院', '归档到期']);
-const formatter = new Intl.DateTimeFormat('zh-CN', {
+const formatter = new Intl.DateTimeFormat(displayLocale, {
   timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 });

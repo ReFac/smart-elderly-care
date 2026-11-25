@@ -193,6 +193,8 @@ def backend_vault_enabled():
 
 
 def configured():
+    if completions.deployed.get("provider") == "deepseek" and completions.deployed.get("key"):
+        return True
     from .. import operational_secrets, secure_storage
 
     if os.environ.get("DEEPSEEK_API_KEY", "").strip():
@@ -214,6 +216,8 @@ def configured():
 
 
 def read_key():
+    if completions.deployed.get("provider") == "deepseek" and completions.deployed.get("key"):
+        return completions.deployed["key"]
     from .. import operational_secrets, secure_storage
 
     value = os.environ.get("DEEPSEEK_API_KEY", "").strip()

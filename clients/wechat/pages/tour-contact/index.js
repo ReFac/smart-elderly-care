@@ -1,4 +1,5 @@
 const { workspaceOrigin } = require('../../config');
+const { institutionOrigin } = require('../../entry');
 Page({
   data: { busy: false, done: false, manual: false, error: '', phone: '' },
   useManual() { this.setData({ manual: true }); },
@@ -19,13 +20,14 @@ Page({
   },
   submit(path, data) {
     if (this.data.busy || this.data.done) return;
-    if (!/^https:\/\/[a-z\d.-]+(?::\d+)?\/?$/i.test(workspaceOrigin)) {
+    const origin = institutionOrigin(workspaceOrigin);
+    if (!origin) {
       this.setData({ error: '院方暂未开通此入口，请返回导览网页填写。', manual: true });
       return;
     }
     this.setData({ busy: true, error: '' });
     wx.request({
-      url: workspaceOrigin.replace(/\/$/, '') + path, method: 'POST', data,
+      url: origin + path, method: 'POST', data,
       success: result => {
         if (result.statusCode === 202 && result.data && result.data.received) this.setData({ done: true, phone: '' });
         else this.setData({ manual: true, error: (result.data && result.data.error) || '提交未成功，请手动填写。' });

@@ -9,6 +9,8 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 
+from release_scope import international_only
+
 from platform_core import provider
 from platform_core.agents import chat
 from platform_core.agents.chat_progress import Progress, sentences
@@ -103,6 +105,159 @@ class ChatTests(unittest.TestCase):
             return speech.recognize_agent(
                 self.store, self.owner, picked, sample_wav(), True, conversation=True
             )["transcriptId"]
+
+    def test_observe_inventory_then_calculate_and_trace_without_arguments(self):
+        from platform_core.agents.chat_math import Arithmetic
+        def first(_key, body):
+            names = [row["function"]["name"] for row in body["tools"]]
+            self.assertIn("calculate_amount", names)
+            return {"usage":{"total_tokens":50},"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[
+                {"type":"function","function":{"name":"inventory_evidence","arguments":"{}"}}]}}]}
+        self.transport.side_effect = first
+        def decide(_store, _uid, _req, _system, facts, validate, **opts):
+            if opts["feature"] == "assistant.nextTool":
+                self.assertIn("inventory_evidence", facts["observation"])
+                return validate({"tool":"calculate_amount","arguments":{"expression":"3 * 2.55"}})
+            self.assertEqual(facts["最新工具观察"]["calculate_amount"]["value"], "7.65")
+            return validate({"text":"按所给单价合计 7.65 元。"})
+        with patch.object(chat.react.generation, "generate", side_effect=decide):
+            answer = self.ask("核对库存，然后计算三份每份 2.55 元的总价")["messages"][-1]
+        self.assertEqual([row["tool"] for row in answer["toolTrace"]], ["inventory_evidence","calculate_amount"])
+        self.assertNotIn("expression", str(answer["toolTrace"]))
+        for invalid in ("2**24", "1/0", "2 // 2", "sum(1,2)"):
+            with self.assertRaises(ValueError):
+                Arithmetic().execute({"expression":invalid})
+
+    @international_only
+    def test_english_institution_brief_form_and_draft(self):
+        self.store.deployment_language = "en"
+        self.store.deployment_edition = "international"
+        self.transport.return_value["choices"][0]["message"]["content"] = '{"first":1}'
+        answer = self.ask("How are things today?")["messages"][-1]
+        self.assertIn("residents",answer["content"])
+        self.assertNotIn("院",answer["content"])
+        self.transport.return_value["choices"][0]["message"]["content"] = "Check the draft."
+        self.assertEqual(self.ask("Create a resident profile","en-form")["messages"][-1]["action"]["form"],"residentAdd")
+        self.assertEqual(self.ask("Can I fill the resident profile from a photo?", "en-photo")["messages"][-1]["action"]["title"],"Upload resident documents")
+        self.assertIn("English",self.transport.call_args.args[1]["messages"][0]["content"])
+
+    @international_only
+    def test_localized_daily_brief_uses_registered_facts_and_institution_language(self):
+        self.store.deployment_edition = "international"
+        self.transport.return_value["choices"][0]["message"]["content"] = '{"first":1}'
+        for language, question, expected in (
+            ("fr", "Comment va la résidence aujourd’hui ?", "Résidents hébergés"),
+            ("es", "¿Cómo está hoy la residencia?", "Residentes alojados"),
+        ):
+            with self.subTest(language=language):
+                self.store.deployment_language = language
+                answer = self.ask(question, "daily-" + language)["messages"][-1]
+                self.assertIn(expected, answer["content"])
+                self.assertIn("CNY", answer["content"])
+                instructions = self.transport.call_args.args[1]["messages"][0]["content"]
+                self.assertIn("(" + language + ")", instructions)
+
+    @international_only
+    def test_international_navigation_buttons_are_scoped_and_survive_reload(self):
+        from platform_core.agents.chat_progress import Progress
+        from platform_core.agents import english, chat_navigation
+        pages = {p.title for p in chat_navigation.PAGES}
+        self.assertTrue(set(english.PAGE_NAMES) <= pages)
+        self.assertEqual(len(english.PAGE_ALIASES),sum(len(v) for v in english.PAGE_NAMES.values()))
+        revision = self.store.version(self.owner)["revision"]
+        self.store.deployment_edition = "international"
+        cases = (("en","Open bed management","beds","Bed management",{}),
+                 ("en","show inventory","inventory","Inventory",{}),
+                 ("fr","Please open the deployment console.","deployment","Deployment console",{}),
+                 ("es","open scheduled care tasks","care","Scheduled care tasks",{"tab":"scheduledWork"}),
+                 ("en","Take me to the operations dashboard","overview","Operations dashboard",{"params":{"view":"cockpit"}}),
+                 ("en","Could you please open the bed management page?","beds","Bed management",{}))
+        events = []
+        def answer(_,body):
+            self.assertEqual(events[0]["type"],"begin")
+            self.assertEqual(len(body["messages"]),2)
+            self.assertNotIn("可见资料",str(body))
+            return result()  # A provider reply cannot select a different destination.
+        self.transport.side_effect = answer
+        with patch("platform_core.agents.chat_web.collect") as search:
+            for i,(language,text,route,title,extra) in enumerate(cases):
+                with self.subTest(text=text):
+                    self.store.deployment_language = language
+                    events.clear()
+                    public = {"route":route, "title":title, **extra}
+                    reply = chat.reply(self.store,self.owner,{"text":text,"requestId":f"page-{i}","webSearch":True},
+                                       transport=self.transport,progress=Progress(self.store,events.append))["messages"][-1]
+                    self.assertEqual(events[0]["action"],{"kind":"navigate",**public})
+                    self.assertEqual(reply["pageLinks"],[public])
+                    self.assertEqual(reply["action"],events[0]["action"])
+                    self.assertIn(title,reply["content"])
+                    self.assertEqual(chat.read(self.store,self.owner)["messages"][-1]["pageLinks"],[public])
+        search.assert_not_called()
+        self.assertEqual(self.store.version(self.owner)["revision"],revision)
+
+    @international_only
+    def test_international_navigation_denies_hidden_pages_and_preserves_questions(self):
+        from platform_core.agents import english
+        self.store.deployment_edition = "international"
+        self.store.deployment_language = "en"
+        limited = self.staff(["assistants"])
+        for i,text in enumerate(("Open deployment console","Open scheduled care tasks")):
+            reply = self.ask(text,"denied-page-"+str(i),limited)["messages"][-1]
+            self.assertIsNone(reply["action"])
+            self.assertFalse(reply["pageLinks"])
+            self.assertIn("access",reply["content"])
+        self.command("access.settings",{"hiddenRoutes":["inventory"]})
+        reply = self.ask("Open inventory","hidden-page")["messages"][-1]
+        self.assertIsNone(reply["action"])
+        self.assertFalse(reply["pageLinks"])
+        self.transport.assert_not_called()
+        self.transport.return_value["choices"][0]["message"]["content"] = "These are inventory questions."
+        for i,text in enumerate(("How much inventory do we have?", "Can I open bed management?", "Do not open bed management",
+                                 "Show me inventory trends today", "Show inventory and delete it",
+                                 "What is the deployment console?", "If I open inventory, will it update stock?")):
+            self.assertIsNone(english.navigation_page(text))
+            reply = self.ask(text,"question-page-"+str(i))["messages"][-1]
+            self.assertIsNone(reply["action"])
+            self.assertFalse(reply["pageLinks"])
+        self.assertEqual(english.navigation_page("Go to the stock ledger tab, please"),"库存台账")
+
+    def test_photo_personal_details_with_followup_and_denied_role(self):
+        question = "帮我填写一下这个老人的个人信息吧，并一张图片可以吗？"
+        answer = self.ask(question, webSearch=True)["messages"][-1]
+        self.assertEqual(answer["action"]["kind"], "uploadResidentProfile")
+        self.assertEqual(answer["pageLinks"], [])
+        self.assertFalse(answer["webSearched"])
+        self.assertIn("办理说明", self.transport.call_args.args[1]["messages"][1]["content"])
+        self.assertEqual(self.ask("传一张照片可以吗？", "followup")["messages"][-1]["action"], answer["action"])
+        operator = self.staff(["assistants"])
+        self.transport.reset_mock()
+        denied = self.ask(question, "deny", operator)["messages"][-1]
+        self.assertIsNone(denied["action"])
+        self.assertIn("权限", denied["content"])
+        self.transport.assert_not_called()
+
+    def test_skill_arguments_and_permission_recheck(self):
+        from platform_core.agents import community_skills
+        from importlib.util import find_spec
+
+        if not find_spec("yaml"):
+            self.skipTest("requires requirements-harness.txt")
+        def choose(_key, body):
+            names = [row["function"]["name"] for row in body["tools"]]
+            self.assertIn("read_workflow_skill", names)
+            return {"usage":{"total_tokens":50}, "choices":[{"finish_reason":"tool_calls", "message":{
+                "tool_calls":[{"type":"function", "function":{"name":"read_workflow_skill","arguments":'{"name":"xlsx"}'}}]}}]}
+        self.transport.side_effect = choose
+        with patch.object(chat.react, "answer", return_value="请先核对表头。") as final:
+            self.ask("工作表请用 xlsx 技能整理一下")
+        self.assertEqual(final.call_args.args[5]["read_workflow_skill"]["name"], "xlsx")
+        first = community_skills.tools_for
+        # Simulate withdrawing this extension after the initial cloud request.
+        with patch.object(community_skills, "tools_for", side_effect=[first({"kind":"owner","permissions":[]}), ()]), \
+                patch.object(chat.react, "answer") as final:
+            with self.assertRaises(chat.Unavailable):
+                self.ask("工作表请用 xlsx 技能整理一下", "revoked")
+            final.assert_not_called()
 
     def test_short_sentence_is_authorized_before_complete_chat_turn(self):
         events, clips = [], []

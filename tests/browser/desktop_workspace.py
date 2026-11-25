@@ -49,6 +49,10 @@ def tab_capacity(b, port):
     visit("overview")
     b.call("Page.reload", ignoreCache=True)
     b.wait_for("document.querySelectorAll('.desk-tab').length===10")
+    assert b.evaluate("""(()=>{const held=document.querySelector('.desk-tab.pinned:not(.selected)');
+        const ordinary=document.querySelector('.desk-tab:not(.pinned):not(.selected)');
+        return held && ordinary && getComputedStyle(held).borderColor!==getComputedStyle(ordinary).borderColor
+            && held.querySelector('[role=tab]').getAttribute('aria-label').includes('已固定');})()""")
     before = open_keys()
     visit("activity")
     assert open_keys() == (before - {"#residents"}) | {"#activity"}, open_keys()
@@ -75,15 +79,32 @@ def tab_capacity(b, port):
     assert b.evaluate(field + ".value") == "保留未保存的草稿"
 
 
+def verify_register_shortcut(b, selector):
+    previous = b.evaluate("location.hash")
+    b.evaluate("document.querySelector(" + json.dumps(selector) + ").focus()")
+    for event in ("keyDown", "keyUp"):
+        b.call("Input.dispatchKeyEvent", type=event, key="Enter", code="Enter", windowsVirtualKeyCode=13,
+               text="\r" if event == "keyDown" else "")
+    try:
+        b.wait_for("!!document.querySelector('dialog[open] input[name=name]')")
+    except AssertionError as error:
+        raise AssertionError((selector, b.evaluate("document.querySelector('#announcer')?.textContent"))) from error
+    assert b.evaluate("location.hash") == previous
+    b.click("dialog[open] [aria-label='关闭对话框']")
+
+
 def verify(browser, port):
     b = browser
     b.call("Emulation.setDeviceMetricsOverride", width=1500, height=855, deviceScaleFactor=1, mobile=False)
+    b.call("Emulation.setFocusEmulationEnabled", enabled=True)
     b.call("Page.navigate", url=f"http://127.0.0.1:{port}/?workspace=1")
     b.wait_for("!!document.querySelector('.access-login-form')")
     b.evaluate("""{const form=document.querySelector('.access-login-form');
         form.elements.username.value='owner'; form.elements.password.value=""" + json.dumps(PASSWORD) + """;
         form.requestSubmit()}""")
     b.wait_for("!!document.querySelector('.desk-home')")
+    verify_register_shortcut(b, ".desk-new-resident")
+    verify_register_shortcut(b, ".desk-home-head button.btn-primary")
     b.click('.desk-assistant-float')
     b.wait_for("!!document.querySelector('#assistant-chat:not([hidden])')")
     assert b.evaluate("getComputedStyle(document.querySelector('.desk-assistant-float')).display === 'none'")
@@ -111,8 +132,9 @@ def verify(browser, port):
         [g.querySelector('button').title,Array.from(g.querySelectorAll('a'), a=>a.title)]))""")
     assert b.evaluate("""Array.from(document.querySelector('.nav-list').children,
         item=>(item.matches('a')?item:item.querySelector('button')).title)""") == [
-        "AI","首页","接待入住","老人档案","照护服务","仓库管理","费用管理","运营看板","系统管理","系统监控"]
-    assert tree["接待入住"] == ["接待管理","入住管理","退住记录","药品接收登记","请假管理","床位全景"], tree
+        "AI","首页","入住管理","床位管理","照护工单","接待入住","长辈档案","照护服务","仓库管理","费用管理","运营看板","部署控制台","系统管理","系统监控"]
+    assert tree["接待入住"] == ["接待管理","退住记录","药品接收登记","请假管理"], tree
+    assert b.evaluate("document.querySelector('.nav-list > a[title=照护工单]').hash") == "#care?tab=tasks"
     assert tree["费用管理"] == ["财务总览","待收费","月度账单确认","医疗费用","退住结算","收费记录","民政补贴申报材料","日结报表"], tree
     assert tree["系统监控"] == ["在线用户","定时任务","数据监控","服务监控","缓存监控","缓存列表"], tree
     click_through_refresh(b, port)
@@ -151,6 +173,7 @@ def verify(browser, port):
     assert b.evaluate("document.querySelectorAll('.desk-tab').length") > 5
     b.click('.menu-trigger')
     assert b.evaluate("document.querySelector('#app').classList.contains('desk-compact')")
+    verify_register_shortcut(b, ".desk-new-resident")
     b.click('.menu-trigger')
     # A history view can drop its async response after its DOM is detached.
     # Restoring the tab must load the ledger instead of retaining a permanent loading screen.

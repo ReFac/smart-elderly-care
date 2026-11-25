@@ -1,3 +1,4 @@
+process.env.NH_DEPLOYMENT_LANGUAGE = 'zh-CN';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { registerSourceLinks } = require('../clients/desktop/public-source.cjs');
@@ -56,13 +57,13 @@ test('microphone prompt cannot authorize a window that navigated while waiting',
   finish(true);
   assert.equal(await result, false);
 });
-function workspace(addresses, afterLookup) {
+function workspace(addresses, afterLookup, hosts = ['example.org']) {
   const mainFrame = { origin, url: origin + '/#inventory' };
   const opened = [];
   let invoke;
   const contents = { mainFrame, isDestroyed: () => false, ipc: { handle(_name, fn) { invoke = fn; } } };
   registerSourceLinks(contents, origin, url => opened.push(url), async host => {
-    assert.equal(host, 'example.org');
+    assert.ok(hosts.includes(host));
     if (afterLookup) afterLookup(contents);
     return addresses.map(address => ({ address }));
   });
@@ -260,4 +261,29 @@ test('checkout preload forwards a visible user-activated order number without tr
   await click(event(true)); inDialog = true;
   await click(event(true));
   assert.deepEqual(calls, [['payments:open-checkout', orderId]]);
+});
+
+test('hospital maps use the authenticated public-source handoff on explicit activation', async () => {
+  const app = workspace(['8.8.8.8'], null, ['uri.amap.com']);
+  let click;
+  runInNewContext(readFileSync(require.resolve('../clients/desktop/source-preload.cjs'), 'utf8'), {
+    require: () => ({ ipcRenderer: { invoke(name, url) {
+      assert.equal(name, 'assistant:open-public-source');
+      return app.invoke({senderFrame:app.mainFrame}, url);
+    } } }),
+    location:{origin}, URL, window:{addEventListener(_, handler) {click=handler;}},
+  });
+  const activate = (href, trusted=true, visible=true) => click({
+    isTrusted:trusted, button:0, defaultPrevented:false, preventDefault(){}, stopImmediatePropagation(){},
+    target:{closest:sel=>sel === 'dialog[open] a.hospital-map-link' ? {
+      href, origin:new URL(href).origin, isConnected:true, getClientRects:()=>visible ? [{}] : [],
+    }:null},
+  });
+  const amap = 'https://uri.amap.com/search?keyword=' + encodeURIComponent('测试医院') + '&view=map';
+  await activate(amap);
+  await activate(amap, false);
+  await activate(amap, true, false);
+  for (const url of [amap.replace('uri.amap.com','uri.amap.com.example.org'), amap + '&extra=1',
+      amap.replace('/search','/redirect'), amap.replace('https:', 'http:'), amap + '#unknown']) await activate(url);
+  assert.deepEqual(app.opened,[amap]);
 });

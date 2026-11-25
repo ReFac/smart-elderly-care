@@ -17,7 +17,7 @@ KINDS = {
 }
 LIMITS = {"name": 60, "authority": 80, "validity": 60}
 NUMBER = re.compile(r"(?<![0-9])(?:[0-9][ \t-]*){17}[0-9Xx](?![0-9])")
-ALL_LABELS = {label for aliases in LABELS.values() for label in aliases} | {"性别", "民族", "住址"}
+ALL_LABELS = {label for aliases in LABELS.values() for label in aliases} | {"性别", "民族", "住址", "出生地", "出生地点"}
 MARKER = re.compile("|".join(sorted(ALL_LABELS, key=len, reverse=True)))
 
 

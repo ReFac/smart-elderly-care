@@ -91,3 +91,13 @@
 .medical-visit-document-row + .medical-visit-document-row { border-top: 1px solid var(--line); }
 .medical-visit-document-row .fx-named { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
 .medical-visit-unlinked { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+.medical-map-directory { margin: 4px 0; font-size: .86rem; }
+.medical-map-directory summary { color: var(--accent); cursor: pointer; }
+.medical-map-directory > input { margin-top: 8px; width: 100%; }
+.medical-map-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 5px; }
+.medical-map-directory a { color: var(--accent); }
+.medical-map-status { margin-top: 5px; }
+.medical-map-attribution { box-sizing: content-box; height: 17px; width: auto; padding: 10px 10px 5px; background: #fff; }
+.medical-map-results { padding: 0; list-style: none; max-height: 14rem; overflow: auto; }
+.medical-map-results:empty { display: none; }
+.medical-map-results li { display: grid; gap: 3px; border-top: 1px solid var(--line); padding: 6px 0; }

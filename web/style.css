@@ -491,8 +491,11 @@ svg {
   min-height: 65vh;
 }
 .dialog {
+  --modal-gutter: clamp(12px, 3vw, 32px);
   width: min(580px, calc(100% - 32px));
-  max-height: 88dvh;
+  max-width: calc(100vw - 2 * var(--modal-gutter));
+  max-height: calc(100dvh - 2 * var(--modal-gutter));
+  inset: 0;
   margin: auto;
   padding: 0;
   overflow: auto;
@@ -502,6 +505,29 @@ svg {
   border-radius: 9px;
   background: #fff;
   box-shadow: 0 22px 85px #10244550;
+}
+@media screen {
+  .dialog[open] {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .dialog > .dialog-head, .dialog > .dialog-actions { flex: none; }
+  .dialog > .dialog-body, .dialog > .dialog-form {
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  .dialog-form > .dialog-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    background: var(--desk-surface, var(--surface, white));
+  }
+}
+@media screen and (prefers-reduced-motion: no-preference) {
+  .dialog[open] { animation: modal-appear 165ms cubic-bezier(.2,.8,.25,1); }
+  @keyframes modal-appear { from { opacity: .5; transform: translateY(6px) scale(.99); } }
 }
 .dialog:has(.fx-facts),
 .dialog:has(.fx-profile),

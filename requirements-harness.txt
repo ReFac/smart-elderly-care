@@ -1,0 +1,6 @@
+mcp==2.3.0
+mcp-server-time==2026.11.18
+PyYAML==6.0.3
+excel-mcp-server==2.3.6
+xlrd==2.0.2
+openpyxl==3.1.5

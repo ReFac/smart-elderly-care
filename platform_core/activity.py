@@ -24,6 +24,9 @@ def init(db):
             db.execute(f"ALTER TABLE audit ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
     db.execute("CREATE INDEX IF NOT EXISTS audit_actor ON audit(actorId,revision)")
     db.execute("CREATE INDEX IF NOT EXISTS audit_room ON audit(room,revision)")
+    for operation in ("UPDATE", "DELETE"):
+        db.execute(f"""CREATE TRIGGER IF NOT EXISTS audit_no_{operation} BEFORE {operation} ON audit
+                        BEGIN SELECT RAISE(ABORT, 'audit ledger is append-only'); END""")
     history.init(db)
 
 

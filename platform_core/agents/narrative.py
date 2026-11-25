@@ -3,10 +3,10 @@
 from contextlib import closing
 import json
 
-from . import preflight, react, runtime
+from . import brief_workflow, preflight, react, runtime
 from .. import access, campus_access
 from ..operations import assistants
-from ..provider import generation, model_name
+from ..provider import completions, generation, model_name
 
 
 class Events:
@@ -110,20 +110,37 @@ def prepare(store, token, payload, revision, *, suggestion=False):
                     raise PermissionError("授权区域已变化，请重新生成")
                 check = latest
         artifacts, log = collect(check, state, actor, day, provider_plan)
+    if not suggestion:
+        # The evidence snapshot is frozen before adding cloud prose or evaluation metadata.
+        source_artifacts = [dict(item) for item in artifacts]
     for artifact in artifacts:
         facts = measures(artifact)
-        explanation = generation.summarize(
-            store,
-            actor["id"],
-            ["specialist", req, artifact["agent"]],
-            artifact["category"],
-            facts,
-            feature="agent.specialist." + artifact["agent"],
-        )
-        # Evidence calculations and referenced field-level facts stay reproducible on the host.
+        request = ["specialist", req, artifact["agent"]]
+        if suggestion:
+            explanation = generation.summarize(
+                store, actor["id"], request, artifact["category"], facts, feature="agent.specialist." + artifact["agent"],
+            )
+        else:
+            # Recheck the account and evidence before every metered step, including a retry.
+            done = brief_workflow.checkpoint(store,token,check,revision,source_artifacts)
+            name = artifact["agent"]
+            if name in done:
+                reviewed = done[name]
+                log.append(name,"step.resumed","复用此来源版本上已核对的步骤","coordinator")
+            else:
+                reviewed = brief_workflow.reviewed_summary(store,actor["id"],request,artifact,facts,
+                    lambda: brief_workflow.checkpoint(store,token,check,revision,source_artifacts))
+                done = brief_workflow.checkpoint(store,token,check,revision,source_artifacts,(name,reviewed))
+                reviewed = done[name]
+            explanation = reviewed["text"]
+            artifact["reflection"] = reviewed["reflection"]
+            log.append(name,"reflection." + artifact["reflection"]["outcome"],
+                       "已核对数值依据与办理表述 · " + str(artifact["reflection"]["attempts"]) + " 次生成","coordinator")
         artifact["detail"] = explanation + "\n\n核对依据\n" + artifact["detail"]
-        artifact["model"] = model_name()
-        artifact["source"] = "deepseek"
+        artifact["model"] = model_name() if suggestion else reviewed["model"]
+        artifact["source"] = completions.provider_name() if suggestion else reviewed["source"]
+    if not suggestion:
+        log.append("coordinator", "approval.requested", "产出已保存，等待人工核对并发布")
     return {
         "mode": "deepseek",
         "model": model_name(),

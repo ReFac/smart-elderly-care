@@ -39,9 +39,10 @@
 
 ## 复跑
 
-安装项目的 [Python 依赖](../requirements-storage.txt) 和 Poppler，在允许监听本地回环端口的 Linux 环境中，从仓库根目录运行以下命令。性能工具会创建并回收临时机构库。
+安装项目的 [Python 依赖](../requirements-storage.txt) 和 Poppler，在允许监听本地回环端口的 Linux 环境中，从仓库根目录运行以下命令。后续复跑使用简体中文机构和语言无关的性能场景。性能工具会创建并回收临时机构库。[仓库测试约定](../AGENTS.md)
 
 ```bash
+export NH_DEPLOYMENT_LANGUAGE=zh-CN
 python3 -W error::ResourceWarning tests/run.py -v
 npm --prefix clients/desktop test
 python3 tests/perf_workspace.py --clients 6 --samples 100

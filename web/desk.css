@@ -30,7 +30,14 @@
 .desk-brand { display:flex; flex:none; height:var(--desk-header); align-items:center; padding:0 10px; gap:8px; color:#fff; overflow:hidden; }
 .desk-brand img {width:25px;height:28px;flex:none}
 .desk-brand strong { font-size:0.93333rem; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-#app.desk-shell .nav-list { padding:2px 0 28px; scrollbar-color:#424b62 transparent; scrollbar-width:thin; }
+.desk-new-resident {display:flex;flex:none;align-items:center;justify-content:center;gap:7px;min-height:36px;
+  margin:4px 10px 9px;padding:5px 7px;background:#2858a0;color:#fff;border:1px solid #4273ba;
+  border-radius:var(--desk-control-radius);font:inherit;font-weight:600;}
+.desk-new-resident:hover {background:#3268b6;}
+.desk-new-resident:focus-visible {outline:2px solid #c8e1ff;outline-offset:2px;}
+.desk-compact .desk-new-resident {width:36px;margin-inline:auto;padding-inline:0;}
+.desk-compact .desk-new-resident span {display:none;}
+#app.desk-shell .nav-list { flex:1;min-height:0;overflow:auto;padding:2px 0 28px; scrollbar-color:#424b62 transparent; scrollbar-width:thin; }
 #app.desk-shell :is(.nav-item,.desk-nav-group) { position:relative; display:flex; align-items:center; width:100%; gap:9px; min-height:39px;
   font:inherit; font-size:var(--desk-row-size); text-align:left; margin:0; padding:8px 14px; background:transparent; color:#cbd4e4; border:0; border-radius:0; }
 #app.desk-shell .desk-nav-group span, #app.desk-shell .nav-item span { min-width:0; text-overflow:ellipsis; white-space:nowrap; overflow:hidden; }
@@ -75,6 +82,13 @@
 .desk-tab-close svg {width:11px;height:11px;}
 .desk-tab-pin {display:inline-flex;align-items:center;align-self:stretch;background:transparent;color:var(--desk-muted);border:0;padding:0 4px;}
 .desk-tab-pin[aria-pressed=true] { color:var(--desk-blue); }
+.desk-tab.pinned:not(.selected) {
+  background:var(--desk-head); background:color-mix(in srgb,var(--desk-link) 16%,var(--desk-surface)); border-color:var(--desk-link);
+  box-shadow:inset 0 -2px var(--desk-link);
+}
+.desk-tab.pinned:not(.selected) button {color:var(--desk-link);font-weight:650;}
+.desk-tab.pinned.selected {box-shadow:inset 0 -2px #fff9;}
+.desk-tab.pinned .desk-tab-pin svg {fill:currentColor;}
 .desk-tab.selected {background:var(--desk-blue);border-color:var(--desk-blue);}
 .desk-tab.selected button {color:white;}
 .desk-tab.selected .desk-tab-name::before {content:'';width:6px;height:6px;flex:none;background:white;border-radius:50%;}
@@ -169,7 +183,7 @@ body:has(.desk-shell) :is(.field input,.field select,.field textarea,.access-for
   #app.desk-shell .app-main {margin:0;}
 }
 @media (min-width:761px) {
-  :root {--desk-rail:clamp(12rem,10.55vw,13.87rem); --desk-header:42px; --desk-tabs:30px}
+  :root {--desk-rail:clamp(12.5rem,14vw,14rem); --desk-header:42px; --desk-tabs:30px}
 }
 .reading-font-note {color:var(--desk-muted);font-size:var(--desk-small-size);}
 :root[data-theme=ocean] {--desk-link:#166987;--desk-blue:#16769b}
@@ -193,14 +207,7 @@ body:has(.desk-shell) :is(.field input,.field select,.field textarea,.access-for
 .desk-sign-in-links .access-visitor-link svg:last-child {display:none;}
 .desk-sign-in-links .access-visitor-link svg:first-child {width:14px;}
 .desk-sign-in-preference {display:flex;justify-content:center;padding:16px;}
-@media (min-width:761px) {
-  body:has(.desk-shell) dialog.desk-detail-drawer:not(.risk-drawer) {
-    position:fixed;inset:0 0 0 auto;margin:0;height:100dvh;max-height:100dvh;width:min(740px,78vw);
-    max-width:100vw;border:0;border-left:1px solid var(--desk-border);border-radius:0;
-  }
-  body:has(.desk-shell) .desk-detail-drawer > .dialog-head {position:sticky;top:0;z-index:2;}
-  body:has(.desk-shell) .desk-detail-drawer > .dialog-body {max-height:none;overflow:visible;}
-}
+.dialog:where(.desk-detail-drawer) {width:min(830px,calc(100% - 32px));}
 .desk-shell .access-appearance-preview {background:var(--desk-nav);border:0;border-radius:5px;}
 .desk-shell .access-settings-grid {gap:12px;}
 .desk-shell .access-settings {padding:16px;border-radius:7px;}
@@ -246,3 +253,8 @@ body:has(#assistant-chat:not([hidden]),dialog[open]) .desk-assistant-float,
   .desk-shell :is(.nav-item,.desk-nav-group,.desk-tab,.btn,.fx-table td) {transition:background-color 160ms var(--desk-ease),border-color 160ms var(--desk-ease);}
 }
 @media print {.desk-assistant-float {display:none!important;}}
+
+@media (min-width: 761px) {
+  :root:not(:lang(zh)) { --desk-rail: clamp(15rem, 18vw, 18rem); }
+  :root:not(:lang(zh)) .desk-brand strong { white-space: normal; line-height: 1.2; }
+}

@@ -9,6 +9,8 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
+from release_scope import international_only
+
 from platform_core import portal, reset_links, secure_storage, visitor_access, wechat_tour
 from platform_core.store import SignedOut, Store
 from server import Handler
@@ -135,6 +137,17 @@ class VisitorAccessTests(TestCase):
         self.assertEqual(sum(row["phone"] == phone["purePhoneNumber"] and row["source"] == "consent" for row in leads), 1)
         with patch.dict("os.environ", {**config, "NH_WECHAT_TOUR_LINK": "https://other.invalid/"}):
             self.assertEqual(wechat_tour.contact_link(), "")
+
+    @international_only
+    def test_international_visitors_use_the_h5_callback_page(self):
+        config = {"NH_WECHAT_TOUR_LINK":"https://wxaurl.cn/fixture", "NH_WECHAT_MINI_APP_ID":"fixture", "NH_WECHAT_MINI_APP_SECRET":"fixture"}
+        for locale in ("fr","es"):
+            with self.subTest(locale=locale), patch.dict("os.environ", {**config, "NH_DEPLOYMENT_LANGUAGE":locale}):
+                store = Store(self.store.path.with_name(locale + ".sqlite3"), initial_owner_password="visitor-test-only")
+                self.assertEqual(visitor_access.status(store, None, None)["wechatContactLink"], "")
+                with patch.object(wechat_tour, "_post") as send, self.assertRaises(PermissionError):
+                    wechat_tour.receive(store, {"code":"test", "consent":True}, "local")
+                send.assert_not_called()
 
     def test_public_branding_defaults_are_generic_and_preserve_configured_names(self):
         self.assertEqual(self.store.branding(), {

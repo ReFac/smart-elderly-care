@@ -1,4 +1,5 @@
 import { el, icon } from '../lib/ui.js';
+import { interfaceText } from '../lib/locale.js';
 
 let catalog;
 
@@ -67,7 +68,8 @@ function notes(parent, items, initial, field) {
     const query = field.value.trim().normalize('NFKC').toLowerCase();
     const words = query.split(/\s+/).filter(Boolean);
     const found = items.filter(item => {
-      const text = [item.question, item.answer, ...item.keywords].join(' ').normalize('NFKC').toLowerCase();
+      const fields = [item.question, item.answer, ...item.keywords];
+      const text = [...fields,...fields.map(interfaceText)].join(' ').normalize('NFKC').toLowerCase();
       return (!active || item.category === active) && words.every(word => text.includes(word));
     });
     for (const [category, button] of choices) button.setAttribute('aria-pressed', String(active === category));

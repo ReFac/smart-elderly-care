@@ -3,6 +3,7 @@
 from contextlib import closing
 from datetime import date, timedelta
 import json
+import os
 
 from .records import lookup
 
@@ -38,6 +39,33 @@ def init(db):
         resident TEXT PRIMARY KEY, expired_on TEXT NOT NULL)""")
 
 
+def init_profile(db):
+    setting = os.environ.get("NH_INSTITUTION_PROFILE", "residential")
+    if setting not in ("residential", "licensed-medical"):
+        raise ValueError("NH_INSTITUTION_PROFILE 应为 residential 或 licensed-medical")
+    db.execute("""CREATE TABLE IF NOT EXISTS clinical_archive_policy(
+        id INTEGER PRIMARY KEY CHECK(id=1), mode TEXT NOT NULL CHECK(mode='licensed-medical'))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS clinical_archive_reviews(
+        resident TEXT PRIMARY KEY, due_on TEXT NOT NULL)""")
+    if setting == "licensed-medical":
+        installation = db.execute("SELECT mode FROM workspace_installation WHERE id=1").fetchone()
+        if not installation or installation[0] != "empty":
+            raise ValueError("医疗机构部署须使用已核实的正式机构库，不能使用演示库")
+        db.execute("INSERT OR IGNORE INTO clinical_archive_policy VALUES(1,'licensed-medical')")
+    return db.execute("SELECT 1 FROM clinical_archive_policy WHERE id=1").fetchone() is not None
+
+
+def clinical_hold(db):
+    return bool(db.execute("SELECT 1 FROM clinical_archive_policy WHERE id=1").fetchone())
+
+
+def formal_institution(db):
+    row = db.execute("SELECT mode FROM workspace_installation WHERE id=1").fetchone()
+    # Historical installations may predate the mode marker. Only a verified demo
+    # may discard the mutable profile after a year.
+    return row is None or row[0] != "demo"
+
+
 def clear_due(db, state, day, resident_id=None):
     """Clear only mutable profile data. The caller commits its own audit and workspace version."""
     expired = [
@@ -47,6 +75,14 @@ def clear_due(db, state, day, resident_id=None):
         and (expires := expiry(r))
         and expires <= day
     ]
+    if expired and (formal_institution(db) or clinical_hold(db)):
+        # A discharge from the care home is not a clinical encounter/discharge date.
+        # Preserve the identity linkage until the records officer classifies the records.
+        for r in expired:
+            db.execute("INSERT OR IGNORE INTO clinical_archive_reviews VALUES (?,?)", (r["id"], expiry(r)))
+            db.execute("""UPDATE family_round_preferences SET allowed=0,subscribed=0,generation=generation+1
+                    WHERE resident_id=? AND (allowed=1 OR subscribed=1)""", (r["id"],))
+        return []
     for r in expired:
         rid = r["id"]
         db.execute(

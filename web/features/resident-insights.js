@@ -1,3 +1,4 @@
+import { displayLocale } from '../lib/locale.js';
 import { residentLabel } from './people-labels.js';
 import { node, choose, btn, badge, field, select, hasGrant, today } from './shared.js';
 
@@ -12,7 +13,7 @@ const evidenceTypes = {
 };
 export const localStamp = (value) =>
   value
-    ? new Intl.DateTimeFormat('zh-CN', {
+    ? new Intl.DateTimeFormat(displayLocale, {
         timeZone: 'Asia/Shanghai',
         month: '2-digit',
         day: '2-digit',
@@ -116,7 +117,7 @@ function observationForm(ctx, name, url, submit) {
 function dayHeading(ctx, date) {
   const current = today(ctx);
   const yesterday = new Date(Date.parse(current + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10);
-  const label = new Intl.DateTimeFormat('zh-CN', {
+  const label = new Intl.DateTimeFormat(displayLocale, {
     month: 'long', day: 'numeric', weekday: 'long', timeZone: 'Asia/Shanghai',
   }).format(new Date(date + 'T12:00:00+08:00'));
   const relative = date === current ? '今天' : date === yesterday ? '昨天' : '';

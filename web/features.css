@@ -1015,3 +1015,5 @@
 .resident-profile-link { color:var(--accent, #235fa9); text-decoration:underline; text-underline-offset:3px; }
 .resident-profile-link:hover { text-decoration-thickness:2px; }
 .search-results a.result { text-decoration:none; }
+
+@media (max-width: 600px) { .fx-table td[data-display-label]::before { content: attr(data-display-label); } }

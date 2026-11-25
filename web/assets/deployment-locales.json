@@ -1,0 +1,6 @@
+{
+  "zh-CN": {"name": "简体中文", "edition": "china"},
+  "en": {"name": "English", "edition": "international"},
+  "fr": {"name": "Français"},
+  "es": {"name": "Español"}
+}

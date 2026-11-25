@@ -227,7 +227,7 @@
           '待收费只显示未结账单',
         );
         find(app, '查看明细').click();
-        ok(document.querySelector('dialog[open]').classList.contains('finance-drawer'), '账单从抽屉打开');
+        ok(document.querySelector('dialog[open]').classList.contains('finance-drawer'), '在当前页面打开账单详情');
         document.querySelector('dialog[open]').close();
         bill('medicalFees');
         ok(

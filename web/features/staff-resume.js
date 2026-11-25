@@ -76,7 +76,10 @@ export function staffResumeFields(name, phone) {
       const apply = node('button', 'btn btn-primary', '填入所选字段');
       apply.type = 'button';
       apply.addEventListener('click', () => {
-        for (const { check, field, target } of checks) if (check.checked) target.value = field.value;
+        for (const { check, field, target } of checks) if (check.checked) {
+          target.value = field.value;
+          target.dispatchEvent(new Event('input', {bubbles:true}));
+        }
         review.replaceChildren();
         status.textContent = '请核对表单并确认创建账号。';
       });

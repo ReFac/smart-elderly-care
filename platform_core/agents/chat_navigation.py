@@ -28,6 +28,7 @@ class Page:
 # The model may name a page in prose. Only this application-owned directory supplies a route or tab.
 PAGES = (
     Page("assistants", "AI", ("AI 页", "健康助理对话页")),
+    Page("deployment","部署控制台",("部署设置","模型端点","服务器端口","设备网关连接")),
     Page("settings","在线用户",("在线账号","活跃会话"),"onlineUsers"),
     Page("settings","定时任务",("定时服务状态","后台调度状态"),"timers"),
     Page("settings","数据监控",("数据库监控","存储用量"),"dataMonitor"),

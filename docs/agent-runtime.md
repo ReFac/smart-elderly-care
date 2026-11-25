@@ -70,7 +70,7 @@
 
 Claude Agent SDK 的子代理文档描述了委派与工具限制，hooks 文档描述了在工具及生命周期事件处介入的方法。本项目以这两类机制作为设计参考，当前实现使用 Python 本地协调器和 SQLite 事件记录。[子代理](https://code.claude.com/docs/en/agent-sdk/subagents) · [Hooks](https://code.claude.com/docs/en/agent-sdk/hooks)
 
-MCP 规范描述应用连接上下文和工具的协议。A2A 规范定义服务间的任务、消息与产物交换。这里为二者各登记了独立适配器契约。网络互通和协议兼容性需要在后续接入阶段验证。[MCP 规范](https://modelcontextprotocol.io/specification) · [A2A 规范](https://a2a-protocol.org/latest/specification/)
+健康助理通过官方 MCP SDK 调用已登记的只读工具，支持 stdio 和 Streamable HTTP，另可加载社区技能。A2A 通过官方 SDK 提供可发现的机构只读服务，可查询当前授权范围内的空床和今日工单。[跨 Agent 协议](agent-protocol.md)。[聊天接入、工作表和技能配置](assistant-harness.md)。[MCP 规范](https://modelcontextprotocol.io/specification) · [A2A 规范](https://a2a-protocol.org/latest/specification/)
 
 ## 操作日志中的任务归属
 
@@ -83,7 +83,7 @@ MCP 规范描述应用连接上下文和工具的协议。A2A 规范定义服务
 在仓库根目录运行下列命令。测试使用临时 SQLite 文件和真实登录账号。HTTP 用例通过内存传输运行生产请求解析器及处理器。测试覆盖双域委派与证据回溯、专员输入隔离、重启后确认、撤权拒绝访问、取消与并发发布、无效规划拦截、工具中途失败回滚、产物身份与证据伪造拦截和预留接口响应。[回归用例](../tests/test_agent_runtime.py)
 
 ```bash
-python3 -m unittest discover -s tests -p 'test_agent_runtime.py' -v
+python3 tests/run.py -p 'test_agent_runtime.py' -v
 ```
 
 **AI 工程简历示例**
@@ -105,3 +105,11 @@ python3 -m unittest discover -s tests -p 'test_agent_runtime.py' -v
 `GET /api/agent/capabilities` 提供登录人的本地工具、业务命令和规划方式。通过 `GET /api/facility/search` 本地搜索姓名或房号。通过 `GET /api/agent/room-context?roomId=…&limit=12` 取得可操作工单的目标编号、字段与权限条件。提交 `POST /api/agent/room-proposals` 时提供 `revision` 以及仅含 `roomId, taskId, note, requestId` 的 `payload`，服务端在写事务内重新核对房间、当前入住和工单，随后进入现有人工确认队列。这些查询和草稿均零模型调用。每个客户使用独立机构数据库，后续可通过受信的服务端 `Store(..., facility_policy=...)` 接入细粒度区域授权。该扩展约束房间与 Agent 接口；原有临床、财务等管理模块继续执行其现有岗位权限。
 
 明确的页面、手填表单和单一床位筛选指令，经服务端核对权限后随流式回答的首帧发出入口。页面可以先打开，模型继续完成答复，开启朗读时声纹小窗会随之继续播放。打开入口前，工作台核对当前账号、权限和版本，有变化时才重读完整工作台。办理业务仍需在对应表单核对并确认。
+
+## 分步生成、证据复核与恢复
+
+发起跨岗位简报时，系统在同一来源版本上核对各步骤可以读取的资料，并按专员保存已核验的结果。使用原账号和原 `requestId` 重试，可继续尚未完成的步骤。每次恢复和修正前重新检查账号、业务权限、区域及来源版本。来源已变更时需要新请求。查询 `GET /api/agent/workflow-progress?requestId=…` 可看到当前版本、计划步骤和已完成步骤，完成后返回可在原流程核对的运行编号。
+
+生成的说明先与该步骤的证据值比对，检查数值、部分常用业务单位，以及宣称已经派发、扣款或修改档案等执行性表述。发现问题时，仍用同一授权证据最多修正一次；再次未通过时只呈现可核对的本地证据和人工复核提示。运行详情的 `reflection` 记录结果、尝试次数和触发的检查，事件中会标记复用的已完成步骤。该检查覆盖列出的规则，语义、医学结论及发布决定仍由有权限的人员核对。
+
+模型调用继续使用原有计量与请求回执。已完成步骤可从加密检查点恢复；结果不明的供应商调用须先完成用量对账。保存正式简报及清理中间检查点在同一事务内进行。工作人员确认发布前，系统不会向建议台账写入该简报。

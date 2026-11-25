@@ -84,7 +84,7 @@ Owner 可按绑定账号分别授予三项院内服务。已完成服务清单�
 在独立数据库上测试首次登录、撤销、角色投影、图片授权依赖、DeepSeek 数据隔离、登录限速和员工建议审计范围。
 
 ```bash
-python3 -m unittest discover -s tests -p test_access.py -v
+python3 tests/run.py -p test_access.py -v
 ```
 
 ## 本人激活、改密和找回

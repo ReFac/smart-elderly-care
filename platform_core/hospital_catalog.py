@@ -99,11 +99,30 @@ def lookup(query, limit=12):
     return result
 
 
-def search(store, token, query):
+def authorize(store, token):
     with closing(store.connect()) as db:
         actor = store.actor(db, token)
         if actor["kind"] not in ("owner", "staff"):
             raise PermissionError("仅档案经办人可使用医院名录")
         for permission in ("medical", "medical.write", "clinical"):
             access.require(actor, permission)
-    return {"options": lookup(query)}
+
+
+def search(store, token, query):
+    authorize(store, token)
+    if store.deployment_edition == "international":
+        return {"options": []}
+    try:
+        options = lookup(query)
+    except (OSError, EOFError):
+        options = []
+    return {"options": options}
+
+
+def online(store, token, request):
+    from . import hospital_maps
+
+    authorize(store, token)
+    if set(request) != {"q"}:
+        raise ValueError("Only a hospital name or city is accepted.")
+    return hospital_maps.search(store.deployment_edition, store.deployment_language, request["q"])

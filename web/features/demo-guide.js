@@ -15,7 +15,8 @@ const tours = [
 ];
 
 function visibleTours(ctx) {
-  const entries = menuFor(ctx).flatMap(group => group.children || []).map(([route,, tab]) => route + '/' + (tab || ''));
+  const entries = menuFor(ctx).flatMap(group => group.children || [[group.route, group.label, group.tab]])
+    .map(([route,, tab]) => route + '/' + (tab || ''));
   return tours.filter(([route, tab]) => entries.includes(route + '/' + tab));
 }
 

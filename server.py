@@ -4,6 +4,7 @@ import sys
 import os
 import argparse
 import logging
+from contextlib import closing
 from functools import partial
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler
@@ -18,7 +19,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from platform_core.agents import chat
 from platform_core.operations import expense_import
 from platform_core.backups import exchange
-from platform_core import access, facility, http_capacity, updates, visitor_access
+from platform_core import access, deployment_language, facility, http_capacity, updates, visitor_access
 from platform_core import daily_life, lead_intake, medical_visits, resident_health, scheduled_work
 from platform_core.provider import round_priorities
 from platform_core.store import Conflict, SignedOut, Store, encode
@@ -46,6 +47,12 @@ class Handler(BaseHTTPRequestHandler):
         self.log_message("%s %s %s", self.command, self.path.partition("?")[0], code)
 
     def respond(self, status, content, mime, cookie=None, *, attachment=None, retry_after=None, etag=None, page_count=None):
+        if (getattr(self.store, "clinical_archive_protection", False) and self.command == "GET"
+                and status in (200, 401, 403, 404)):
+            from platform_core.clinical_access import receipt
+            receipt(self.store, self.token(), unquote(urlsplit(self.path).path), status, str(self.client_address[0]))
+        if status == 200 and mime.startswith("text/html"):
+            content = deployment_language.page(content, self.store.deployment_language)
         self.send_response(status)
         self.send_header("Content-Type", mime)
         if status != 304:
@@ -133,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             host = self.headers.get("Host", "")
             parsed = urlsplit("//" + host)
-            local = parsed.hostname in ("127.0.0.1", "localhost", "::1")
+            local = parsed.hostname in ("127.0.0.1", "localhost", "::1") and self.client_address[0] in ("127.0.0.1", "::1")
             configured = (
                 self.public_origin and host == urlsplit(self.public_origin).netloc
             )
@@ -187,12 +194,18 @@ class Handler(BaseHTTPRequestHandler):
         return {key: values[0] for key, values in params.items()}
 
     def read_resource(self, path):
+        if path == "/.well-known/agent-card.json":
+            from platform_core.agents import agent_protocol
+            return agent_protocol.http(self, discovery=True)
         if path == "/api/account/display-preferences":
             from platform_core import display_preferences
             return self.send_json(200, display_preferences.settings(self.store, self.token()))
         if path == "/api/care/risk-report-example":
             from platform_core.care import risk_reports
             return self.send_json(200, risk_reports.example(self.store, self.token()))
+        if path == "/api/deployment":
+            from platform_core import deployment_console
+            return self.send_json(200, deployment_console.inspect(self.store, self.token(), self.server))
         if path == "/api/system/monitor":
             from platform_core import system_monitor
             params = self.query_fields({"view"})
@@ -290,6 +303,15 @@ class Handler(BaseHTTPRequestHandler):
         if expense_file:
             raw = expense_import.original(self.store, self.token(), expense_file[1])
             return self.respond(200, raw, "application/octet-stream")
+        if path == "/api/assistant/extensions":
+            from platform_core.agents import community_skills, mcp_plugins
+
+            with closing(self.store.connect()) as db:
+                actor = self.store.actor(db, self.token())
+                if actor["kind"] != "owner":
+                    raise PermissionError("仅 Owner 可查看机构扩展")
+                return self.send_json(200, {"tools": mcp_plugins.catalog(actor),
+                                            "skills": community_skills.catalog(actor)})
         if path == "/api/assistant/chat":
             values = parse_qs(urlsplit(self.path).query, max_num_fields=4)
             if set(values) - {"roomId", "floorId", "buildingId", "campusId"} or any(
@@ -457,6 +479,10 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path.startswith("/tour-media/"):
             return self.tour_image(token, path)
+        if path == "/deployment.js":
+            return self.respond(200, deployment_language.script(self.store.deployment_language), "text/javascript; charset=utf-8")
+        if path == "/api/public/deployment":
+            return self.send_json(200, deployment_language.public(self.store.deployment_language))
         if path == "/api/branding":
             return self.send_json(200, self.store.branding())
         if path == "/api/health":
@@ -511,6 +537,10 @@ class Handler(BaseHTTPRequestHandler):
                 {k: int(query[k][0]) for k in ("before", "limit") if k in query}
             )
             return self.send_json(200, self.store.activity(token, **filters))
+        if path == "/api/agent/workflow-progress":
+            from platform_core.agents import brief_workflow
+            params = self.query_fields({"requestId"})
+            return self.send_json(200, brief_workflow.progress(self.store, self.token(), params.get("requestId")))
         if path in ("/api/agent/capabilities", "/api/agent/runs"):
             return self.send_json(
                 200, self.store.agent_resource(token, path.rsplit("/", 1)[1])
@@ -638,6 +668,25 @@ class Handler(BaseHTTPRequestHandler):
             progress.close()
 
     def write_resource(self, path):
+        if path == "/api/accounts/by-phone":
+            from platform_core import account_directory
+            return self.send_json(200, account_directory.by_phone(self.store, self.token(), self.read_json(512)))
+        if path == "/api/catalog/hospitals/online":
+            from platform_core import hospital_catalog
+            return self.send_json(200, hospital_catalog.online(self.store, self.token(), self.read_json(1024)))
+        if path == "/api/a2a":
+            from platform_core.agents import agent_protocol
+            return agent_protocol.http(self)
+        if path in ("/api/deployment/settings", "/api/deployment/devices"):
+            from platform_core import deployment_console
+            operation = deployment_console.configure if path.endswith("/settings") else deployment_console.device_settings
+            return self.send_json(200, operation(self.store, self.token(), self.read_json(4096), self.server))
+        gateway = re.fullmatch(r"/api/deployment/gateways/([A-Za-z0-9_-]{1,48})/heartbeat", path)
+        if gateway:
+            from platform_core import deployment_console
+            if self.read_json(16) != {}:
+                raise ValueError("心跳报文应为空对象")
+            return self.send_json(200, deployment_console.heartbeat(self.store.path, gateway[1], self.headers.get("Authorization")))
         if path == "/api/account/display-preferences":
             from platform_core import display_preferences
             return self.send_json(200, display_preferences.settings(self.store, self.token(), self.read_json(1024)))
@@ -678,6 +727,18 @@ class Handler(BaseHTTPRequestHandler):
             page = pdf_original.render_page(raw, number)
             document_intake.check(self.store, token)
             return self.respond(200, page, "image/png", page_count=count)
+        if path in ("/api/assistant/workbooks/preview", "/api/assistant/workbooks/export"):
+            from platform_core.agents import resident_workbook as workbook
+
+            token = self.token()
+            workbook.authorize(self.store, token)
+            if path.endswith("/export"):
+                content = workbook.export(self.read_json(SMALL_BODY).get("fields", {}), international=self.store.deployment_edition == "international")
+                workbook.authorize(self.store, token)
+                return self.respond(200, content, workbook.MIME, attachment="resident-registration.xlsx")
+            result = workbook.preview(self.read_body(workbook.MAX_FILE), international=self.store.deployment_edition == "international")
+            workbook.authorize(self.store, token)
+            return self.send_json(200, result)
         if path == "/api/assistant/documents/preview":
             from platform_core.agents import document_intake
 
@@ -1163,7 +1224,7 @@ def dispatch_updates(service, stopped):
 
 def main():
     parser = argparse.ArgumentParser(description="医养管理平台 · 机构工作台")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, help="启动时覆盖部署设置中的监听端口")
     parser.add_argument(
         "--db", type=Path, default=ROOT / ".local" / "workspace.sqlite3"
     )
@@ -1180,6 +1241,10 @@ def main():
     )
     args = parser.parse_args()
     origin = (args.public_origin or "").rstrip("/") or None
+    if os.environ.get("NH_INSTITUTION_PROFILE") == "licensed-medical" and (
+        args.initial_data != "empty" or not origin or args.demo_public_tour
+    ):
+        parser.error("医疗机构部署须选择正式空库初始化、HTTPS 公共源并关闭演示导览")
     if origin and args.demo_public_tour:
         parser.error("对外访问时不能使用 Roomtour 演示验证码")
     if origin:
@@ -1217,7 +1282,7 @@ def main():
 
 
 def serve_institution(args, origin, initial_password):
-    from platform_core import sample, sms_delivery
+    from platform_core import deployment_console, sample, sms_delivery
     from platform_core.operations import checkout, merchant_refunds
 
     try:
@@ -1227,6 +1292,8 @@ def serve_institution(args, origin, initial_password):
         raise SystemExit(str(error)) from None
     store = Store(args.db, initial_data=args.initial_data, prepare_sample=True, initial_owner_password=initial_password,
                   code_senders=codes, reset_link_senders=links)
+    if store.clinical_archive_protection and (not origin or args.initial_data != "empty" or args.demo_public_tour):
+        raise SystemExit("本机构已启用医疗档案保全，请使用正式机构 HTTPS 启动配置")
     owner_password = initial_password or os.environ.get("NH_OWNER_PASSWORD")
     if store.created_workspace and args.initial_data == "demo" and owner_password:
         token, _ = store.login("owner", owner_password)
@@ -1241,8 +1308,12 @@ def serve_institution(args, origin, initial_password):
         Handler, store=store, public_origin=origin, demo_public_tour=args.demo_public_tour,
         update_service=update_service, update_gate=gate, update_boot=os.environ.get("NH_UPDATE_BOOT"),
     )
-    with http_capacity.CapacityServer(("127.0.0.1", args.port), handler,
+    host, port, config = deployment_console.start_options(args.db, args.port, origin)
+    with http_capacity.CapacityServer((host, port), handler,
                                       workers=workers, heavy_workers=heavy_workers) as server:
+        server.deployment_origin = origin
+        server.deployment_port_pinned = args.port is not None and os.environ.get("NH_DEPLOY_PORT_INHERITED") != "1"
+        deployment_console.activate(args.db, config, server.server_port)
         stopped = Event()
         worker = Thread(target=dispatch_scheduled_work, args=(store, stopped), name="scheduled-work", daemon=True)
         auto = Thread(target=dispatch_updates, args=(update_service, stopped), name="platform-updates", daemon=True)
@@ -1263,7 +1334,7 @@ def serve_institution(args, origin, initial_password):
 
         startup = Thread(target=start_services, name="institution-startup", daemon=True)
         startup.start()
-        print(f"医养管理平台已启动  http://127.0.0.1:{server.server_port}", flush=True)
+        print(f"医养管理平台已启动  http://{host}:{server.server_port}", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

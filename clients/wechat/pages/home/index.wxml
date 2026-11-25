@@ -1,6 +1,6 @@
 <web-view wx:if="{{url && !failed}}" src="{{url}}" binderror="onFailure"></web-view>
 <view wx:else class="state">
-  <text class="title">{{failed ? '机构工作台暂时无法访问' : '尚未配置机构业务域名'}}</text>
-  <text>{{failed ? '请核对网络和小程序后台的业务域名。' : '请由机构管理员配置经过校验的 HTTPS 工作台地址。'}}</text>
-  <button wx:if="{{failed}}" bindtap="reconnect">重新连接</button>
+  <text class="title">{{failed ? words.offline : words.missing}}</text>
+  <text>{{failed ? words.offlineHint : words.missingHint}}</text>
+  <button wx:if="{{failed}}" bindtap="reconnect">{{words.retry}}</button>
 </view>

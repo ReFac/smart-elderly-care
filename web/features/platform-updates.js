@@ -1,3 +1,4 @@
+import { displayLocale } from '../lib/locale.js';
 import { badge, btn, facts, link, node, table } from './shared.js';
 import { maintenanceHeader, maintenanceLog, maintenanceViews } from './backup-exchange.js';
 import { openBackupPoint } from './backups.js';
@@ -15,7 +16,7 @@ async function request(path = '', body) {
   return result;
 }
 
-const clock = new Intl.DateTimeFormat('zh-CN', {
+const clock = new Intl.DateTimeFormat(displayLocale, {
   timeZone:'Asia/Shanghai', dateStyle:'medium', timeStyle:'medium', hourCycle:'h23',
 });
 const timestamp = value => value ? clock.format(value * 1000) : '—';

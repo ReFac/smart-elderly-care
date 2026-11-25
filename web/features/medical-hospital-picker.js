@@ -1,6 +1,9 @@
 import { node } from './shared.js';
+import { mapDirectory } from './medical-hospital-map.js';
+import { internationalDeployment } from '../lib/international-profile.js';
 
 export function hospitalOptions(ctx, input) {
+  if (internationalDeployment()) return [mapDirectory()];
   const list = node('ul', 'medical-hospital-options');
   list.id = 'hospital-options-' + crypto.randomUUID();
   list.hidden = true;
@@ -92,5 +95,5 @@ export function hospitalOptions(ctx, input) {
       choose(choices[highlighted]);
     }
   });
-  return [list, status];
+  return [list, status, mapDirectory()];
 }

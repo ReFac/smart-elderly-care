@@ -1,3 +1,4 @@
+import { displayLocale } from '../lib/locale.js';
 import { node } from './shared.js';
 import { bounds, comparison, metricsSource, periods } from './business-metrics.js';
 
@@ -11,7 +12,7 @@ const metrics = [
   ['perCapita', '人均收入', '元', 'billing'],
 ];
 const colors = ['#5eb6ff', '#9472fa', '#ffc25c', '#4dd8b0', '#e873aa', '#5bd5f1', '#a7c7ea'];
-const number = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
+const number = new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 });
 const pct = (n, total) => (total ? number.format((100 * n) / total) + '%' : '—');
 const fmt = (n) => (n == null ? '—' : number.format(n));
 const compact = (n) => (n != null && Math.abs(n) >= 10000 ? [fmt(n / 10000), '万'] : [fmt(n), '']);
@@ -209,7 +210,7 @@ export function businessDashboard(ctx, openOperations) {
     mode = saved.mode || '较上一周期',
     start = saved.start || day.slice(0, 7) + '-01',
     end = saved.end || day;
-  const clock = new Intl.DateTimeFormat('zh-CN', {
+  const clock = new Intl.DateTimeFormat(displayLocale, {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',
@@ -250,13 +251,14 @@ export function businessDashboard(ctx, openOperations) {
     };
   }
   const group = node('div', 'biz-periods');
-  for (const name of ['今日', '本周', '本月', '本季度', '本年', '自定义'])
-    group.append(
-      action(name, () => {
-        period = name;
-        draw();
-      }),
-    );
+  for (const name of ['今日', '本周', '本月', '本季度', '本年', '自定义']) {
+    const button = action(name, () => {
+      period = name;
+      draw();
+    });
+    button.dataset.period = name;
+    group.append(button);
+  }
   const full = action('全屏', async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -290,7 +292,7 @@ export function businessDashboard(ctx, openOperations) {
   );
   root.append(top, body);
   function draw() {
-    for (const b of group.children) b.setAttribute('aria-pressed', String(b.textContent === period));
+    for (const b of group.children) b.setAttribute('aria-pressed', String(b.dataset.period === period));
     picker.hidden = period !== '自定义';
     err.textContent = '';
     let range;

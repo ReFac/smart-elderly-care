@@ -22,7 +22,9 @@ class ManualForm:
 
 FORMS = (
     ManualForm("staffAdd", "access", "", "新增员工", "access.create", ("添加员工", "新建员工账号", "创建员工账号", "新建员工", "新员工建档", "添加新员工", "添加护理人员")),
-    ManualForm("residentAdd", "residents", "notAdmitted", "新建长辈档案", "care.register", ("长辈建档", "登记新长辈", "新增长辈档案", "创建长辈档案", "建立长辈档案")),
+    ManualForm("residentAdd", "residents", "notAdmitted", "新建长辈档案", "care.register",
+               ("长辈建档", "登记新长辈", "新增长辈档案", "创建长辈档案", "建立长辈档案",
+                "新建老人档案", "创建老人档案", "建立老人档案")),
     ManualForm("admission", "residents", "notAdmitted", "办理入住", "care.admit", ("办理长辈入住", "办理老人入住", "登记正式入住", "办理正式入住")),
     ManualForm("trial", "residents", "notAdmitted", "办理试住", "care.admit", ("开始试住", "登记试住")),
     ManualForm("shiftAdd", "shifts", "", "安排班次", "ops.shift", ("新增排班", "新建排班", "安排排班", "登记排班")),

@@ -37,6 +37,8 @@ def _post(path, payload):
 
 
 def receive(store, payload, peer):
+    if store.deployment_edition != "china":
+        raise PermissionError("Use the institution’s visitor page to request a callback.")
     if set(payload) != {"code", "consent"} or payload.get("consent") is not True:
         raise ValueError("请先授权机构使用此手机号联系您")
     code = payload["code"]

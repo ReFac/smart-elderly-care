@@ -2,7 +2,7 @@
 
 import re
 from uuid import uuid4
-from . import profile_fields
+from . import international_profile, profile_fields
 
 KINDS = {"配偶", "子女", "其他"}
 ROLES = ("推荐联系人", "常用联系人", "紧急联系人")
@@ -36,7 +36,10 @@ def update(household, change, today):
     ):
         raise ValueError("已登记配偶，请编辑现有资料")
     phone = text(change, "phone", 40, required=bool(roles))
-    if phone and (
+    normalized = profile_fields.phone_number(phone)
+    if normalized:
+        phone = normalized
+    elif phone and (
         not re.fullmatch(r"\+?[0-9 ()-]+", phone)
         or not 5 <= sum(c.isdigit() for c in phone) <= 18
     ):
@@ -65,8 +68,9 @@ def update(household, change, today):
         "roles": [r for r in ROLES if r in roles],
         "verifiedOn": verified,
     }
-    if "addressRegion" in previous:
-        member["addressRegion"] = previous["addressRegion"]
+    member.update({k: previous[k] for k in ("nameParts", "internationalAddress", "addressRegion") if k in previous})
+    international_profile.merge_name(member, change, previous.get("name"))
+    international_profile.merge_address(member, change)
     profile_fields.addresses(member, change, (("addressRegion", "address", False),))
     if kind == "子女":
         support = {

@@ -1,3 +1,4 @@
+import { displayLocale } from '../lib/locale.js';
 import { node, table, kpis, choose, btn, named, badge } from './shared.js';
 
 export const monitors = [
@@ -5,7 +6,7 @@ export const monitors = [
   ['serviceMonitor','服务监控'], ['cacheMonitor','缓存监控'], ['cacheList','缓存列表'],
 ];
 
-const localTime = value => new Intl.DateTimeFormat('zh-CN',{
+const localTime = value => new Intl.DateTimeFormat(displayLocale,{
   dateStyle:'short',timeStyle:'medium',timeZone:'Asia/Shanghai',hour12:false,
 }).format(new Date(value));
 

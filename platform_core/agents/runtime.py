@@ -297,5 +297,4 @@ def execute(
         trace.append(key, "tool.observed", "已核对资料引用范围", "coordinator")
         artifacts.append(artifact)
         trace.append(key, "artifact.created", artifact["title"], "coordinator")
-    trace.append("coordinator", "approval.requested", "产出已保存，等待人工核对并发布")
     return artifacts

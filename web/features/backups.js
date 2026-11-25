@@ -1,7 +1,8 @@
+import { displayLocale } from '../lib/locale.js';
 import { badge, btn, facts, link, node, table } from './shared.js';
 import { request, settings, importDialog, exportPoint, managePoint, maintenanceHeader, maintenanceLog, maintenanceViews } from './backup-exchange.js';
 
-const dateFormat = new Intl.DateTimeFormat('zh-CN', {
+const dateFormat = new Intl.DateTimeFormat(displayLocale, {
   timeZone: 'Asia/Shanghai',
   year: 'numeric',
   month: '2-digit',

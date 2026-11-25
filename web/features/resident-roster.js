@@ -1,3 +1,4 @@
+import {profileSearchKey as searchKey} from '../lib/international-profile.js';
 import { bedCard, hasBedCard, printBedCards } from './bedcard.js';
 import { isTrial, labelBedStay, statusLabel } from './admission.js';
 import { residentLabel } from './people-labels.js';
@@ -6,7 +7,6 @@ import { badge, btn, canAct, choose, hasGrant, named, node, today } from './shar
 
 const credentialKinds = {idFront:'身份证正面', idBack:'身份证反面', household:'户口本'};
 
-const searchKey = value => String(value ?? '').normalize('NFKC').trim().toLocaleLowerCase();
 const isArchived = p => ['已退住', '归档到期'].includes(p.status);
 const states = [
   ['all', '全部档案', () => true],
@@ -200,8 +200,8 @@ export function residentRoster(ctx, options) {
   });
   const title = dossier ? '长辈档案' : '入住管理';
   const heading = node('header','roster-heading',[node('h1','',title), choose(
-    options.create ? btn(ctx, '新建长辈档案',options.create,options.admit ? 'secondary' : 'primary') : null,
-    options.admit ? btn(ctx, '办理入住',options.admit,'primary') : null,
+    options.create ? btn(ctx, '新建长辈档案',options.create,'primary') : null,
+    options.admit ? btn(ctx, '办理入住',options.admit,options.create ? 'secondary' : 'primary') : null,
   )]);
   const submit = node('button','btn btn-primary',[ctx.ui.icon('search',14),'搜索']);
   submit.type = 'submit';

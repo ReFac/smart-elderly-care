@@ -89,7 +89,7 @@ python3 manage_plan.py --db .local/workspace.sqlite3 search-reconcile --actor AC
 ## 验收
 
 ```bash
-python3 -W error::ResourceWarning -m unittest discover -s tests -p test_provider.py -v
+python3 -W error::ResourceWarning tests/run.py -p test_provider.py -v
 ```
 
 模拟供应商响应可重复检验云端开通、请求最小化、并发限额、幂等、撤权、供应商异常、续期和对账。真实凭据联调应使用虚构任务与平台批准的预算。供应商密钥、原始请求、数据库及本地环境文件由部署端保管。

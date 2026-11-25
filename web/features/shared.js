@@ -1,3 +1,5 @@
+import { displayLocale } from '../lib/locale.js';
+import {profileSearchKey} from '../lib/international-profile.js';
 import { residentLabel, staffLabel } from './people-labels.js';
 export function node(tag, cls, content) {
   const element = document.createElement(tag);
@@ -93,7 +95,7 @@ export const residentField = (ctx, extra = {}) =>
   );
 
 export const money = (value) =>
-  Number(value || 0).toLocaleString('zh-CN', {
+  Number(value || 0).toLocaleString(displayLocale, {
     style: 'currency',
     currency: 'CNY',
     maximumFractionDigits: 2
@@ -303,12 +305,11 @@ export function table(
   jump.onchange=()=>{prefs.page=(Number(jump.value)||1)-1; update();};
   add(pagination,pageInfo,size,previous,pageNumber,next,node('label','desk-page-to',['前往',jump,'页']));
   const update = () => {
-    const needle = prefs.q.trim().normalize('NFKC').toLocaleLowerCase();
+    const needle = profileSearchKey(prefs.q);
     const subset = rows.filter(
       (row) =>
         (!needle ||
-          String(search?.value(row) || '')
-            .normalize('NFKC').toLocaleLowerCase()
+          profileSearchKey(search?.value(row))
             .includes(needle)) &&
         (!filter ||
           !prefs.filter ||

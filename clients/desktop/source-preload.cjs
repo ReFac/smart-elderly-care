@@ -13,6 +13,20 @@ function medicineReference(href) {
     !url.hash && url.searchParams.size === 1 && Boolean(url.searchParams.get('keyWord'));
 }
 
+function hospitalMap(href) {
+  let url;
+  try { url = new URL(href); } catch { return false; }
+  if (url.username || url.password || url.hash) return false;
+  const query = url.searchParams;
+  if (url.origin === 'https://www.google.com' && url.pathname === '/maps/search/') {
+    const place = query.get('query_place_id');
+    return Boolean(query.get('query')) && query.get('api') === '1'
+      && query.size === (place ? 3 : 2) && (!place || /^[a-zA-Z0-9_-]{1,160}$/.test(place));
+  }
+  return url.origin === 'https://uri.amap.com' && url.pathname === '/search' && query.size === 2
+    && Boolean(query.get('keyword')) && query.get('view') === 'map';
+}
+
 // Keep the IPC capability in the isolated world. Keyboard activation also emits a trusted click.
 window.addEventListener('click', async (event) => {
   if (!event.isTrusted || event.button !== 0 || event.defaultPrevented) return;
@@ -48,12 +62,17 @@ window.addEventListener('click', async (event) => {
     }
   }
   let link = event.target.closest?.('#assistant-chat:not([hidden]) a.assistant-source-link');
-  let medicine = false;
+  let inMedicalRecord = false;
+  if (!link) {
+    link = event.target.closest?.('dialog[open] a.hospital-map-link');
+    if (link && !hospitalMap(link.href)) return;
+    inMedicalRecord = Boolean(link);
+  }
   if (!link) {
     link = event.target.closest?.('.medication-source-scope a.medication-source-link');
     if (!link) return;
     if (!medicineReference(link.href)) return;
-    medicine = true;
+    inMedicalRecord = true;
   }
   if (!link || !link.isConnected || !link.getClientRects().length || link.origin === location.origin) return;
   event.preventDefault();
@@ -61,7 +80,7 @@ window.addEventListener('click', async (event) => {
   try {
     if (await ipcRenderer.invoke('assistant:open-public-source', link.href)) return;
   } catch { /* The institution window may have been closed during the lookup. */ }
-  const status = medicine ? link.parentElement : link.closest('li');
+  const status = inMedicalRecord ? link.parentElement : link.closest('li');
   if (status?.isConnected && !status.querySelector('[role="status"]')) {
     const hint = document.createElement('small');
     hint.setAttribute('role', 'status');

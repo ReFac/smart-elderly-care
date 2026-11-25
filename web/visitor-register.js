@@ -1,7 +1,13 @@
+import {internationalDeployment, nameEditor} from './lib/international-profile.js';
 import { publicPage } from './public-site.js';
 
 publicPage('访客注册');
 const form = document.querySelector('#visitor-register');
+let visitorName;
+if (internationalDeployment()) {
+  visitorName = nameEditor(document.createElement('input'), {}, {optional:true});
+  form.prepend(visitorName.element);
+}
 const submit = form.querySelector('[type=submit]');
 const error = document.querySelector('#register-error');
 submit.disabled = false;
@@ -26,7 +32,8 @@ form.addEventListener('submit', async event => {
   try {
     const response = await fetch('/api/public/visitor/register', {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: login, password: password.value }),
+      body: JSON.stringify({username:login, password:password.value,
+        ...(visitorName && Object.keys(visitorName.read()).length && {nameParts:visitorName.read()})}),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || '无法完成注册，请重试。');

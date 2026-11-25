@@ -199,6 +199,13 @@ def describe(db):
         "incoming", "SELECT id FROM {s}.facility_site"
     ):
         raise ValueError("备份所属机构与本机构不一致")
+    source_has_locale = db.execute(
+        "SELECT 1 FROM incoming.sqlite_master WHERE type='table' AND name='deployment_language'"
+    ).fetchone()
+    locale_query = "SELECT language FROM {s}.deployment_language WHERE id=1"
+    source_language = field("incoming", locale_query) if source_has_locale else "zh-CN"
+    if source_language != field("main", locale_query):
+        raise ValueError("备份的部署语言与当前机构不一致")
     workspace = "SELECT data FROM {s}.workspace WHERE id=1"
     source = with_reception_collections(json.loads(field("incoming", workspace)))
     live = json.loads(field("main", workspace))
@@ -221,6 +228,20 @@ def describe(db):
         for r in source.get("residents", ())
     ):
         blockers.append("已退住的只读档案不可恢复为待入住或在住")
+    from ..care.archive_retention import clinical_hold, formal_institution
+    if (db.execute("SELECT 1 FROM incoming.sqlite_master WHERE type='table' AND name='clinical_archive_policy'").fetchone()
+            and db.execute("SELECT 1 FROM incoming.clinical_archive_policy").fetchone() and not clinical_hold(db)):
+        blockers.append("请先为目标机构启用医疗档案保全")
+    if sealed and (clinical_hold(db) or formal_institution(db)):
+        incoming_people = {row["id"]: row for row in source.get("residents", [])}
+        if any(incoming_people.get(row["id"]) != row for row in live["residents"] if row["id"] in sealed):
+            blockers.append("医疗机构已封存的长辈身份及健康记录")
+        for rid, in db.execute("""SELECT resident_id FROM
+                (SELECT resident_id,basic,household FROM main.dossier_profiles EXCEPT
+                 SELECT resident_id,basic,household FROM incoming.dossier_profiles)"""):
+            if rid in sealed:
+                blockers.append("医疗机构已封存的登记资料")
+                break
     if source.keys() != live.keys():
         blockers.append("业务集合版本不同")
     for key in sorted(live.keys() | source.keys()):

@@ -19,6 +19,8 @@ APPROVE = "permissions.approve"
 PROFILE_FIELDS = {
     *dossier.BASIC,
     "name",
+    "nameParts",
+    "internationalAddress",
     "age",
     "birthRegion",
     "nativeRegion",

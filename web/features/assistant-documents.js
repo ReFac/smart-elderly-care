@@ -2,24 +2,29 @@ import { previewOriginal } from './assistant-original.js';
 import { staffLabel } from './people-labels.js';
 import { node } from './shared.js';
 import { openVisitEditor } from './medical-visit-intake.js';
-import { materialDestinations, materialKinds } from './assistant-materials.js';
+import { materialDestinations, materialKinds, registration, canDraftProfile } from './assistant-materials.js';
 import { privateFilename } from './credential-form.js';
+import { isWorkbook, previewWorkbook, workbookActions } from './assistant-workbook.js';
 
 const resume = '员工简历';
 const contract = '劳动合同';
 const medicalTypes = ['就诊记录', 'CT影像', '检查报告', '处方', '医嘱'];
 const clinical = row => medicalTypes.includes(row.category);
-const types = [resume, contract, ...Object.keys(materialKinds), ...medicalTypes, '其他'];
+const types = [resume, contract, registration, ...Object.keys(materialKinds), ...medicalTypes, '其他'];
 const formats = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
 const mib = 1024 * 1024;
 
 export function documentFiles(files) {
   if (!files.length || files.length > 12 || files.reduce((n, f) => n + f.size, 0) > 24 * mib)
-    throw Error('每组可选 1–12 份图片或 PDF，合计上限 24 MiB。');
+    throw Error('每组可选 1–12 份图片、PDF 或 Excel，合计上限 24 MiB。');
   return files.map(file => {
+    if (isWorkbook(file)) {
+      if (!file.size || file.size > 8 * mib) throw Error('请选择 8 MiB 以内的非空 Excel 工作簿。');
+      return {file, category:'电子表格', workbook:true, checked:true};
+    }
     const mime = file.type || formats[file.name.split('.').pop().toLowerCase()];
     if (!Object.values(formats).includes(mime) || !file.size || file.size > 8 * mib)
-      throw Error('请检查「' + file.name + '」，每份须为 8 MiB 以内的 JPEG、PNG 或 PDF。');
+      throw Error('请检查「' + file.name + '」，每份须为 8 MiB 以内的 JPEG、PNG、PDF 或 Excel。');
     return { file, mime, category: '其他', checked: true };
   });
 }
@@ -63,6 +68,10 @@ export function documentIntake(getContext, changed, hide) {
     if (!canReadDocuments(getContext())) throw Error('当前账号没有文件整理权限。');
     if (rows.length) throw Error('请先处理或关闭当前这组文件。');
     rows = documentFiles(files);
+    if (rows.some(row => row.workbook) && !canDraftProfile(getContext())) {
+      rows = [];
+      throw Error('处理长辈登记工作簿需要档案编辑权限。');
+    }
     stage = 'choose';
     render();
   }
@@ -77,6 +86,13 @@ export function documentIntake(getContext, changed, hide) {
         progress = '正在阅读第 ' + (index + 1) + ' / ' + rows.length + ' 份 · ' + privateFilename(row.file.name);
         render();
         try {
+          if (row.workbook) {
+            const result = await previewWorkbook(row.file, request.signal);
+            if (request.signal.aborted) return;
+            row.result = result;
+            row.error = '';
+            continue;
+          }
           const response = await fetch('/api/assistant/documents/preview', {
             method: 'POST', headers: { 'Content-Type': row.mime }, body: row.file, signal: request.signal,
           });
@@ -157,7 +173,7 @@ export function documentIntake(getContext, changed, hide) {
         render();
       }));
     }
-    if (stage === 'review') {
+    if (stage === 'review' && !row.workbook) {
       const select = node('select');
       select.setAttribute('aria-label', privateFilename(row.file.name) + '的文件类型');
       for (const type of types) select.add(new Option(type, type));
@@ -167,12 +183,18 @@ export function documentIntake(getContext, changed, hide) {
     }
     if (stage === 'confirmed') {
       parts.push(node('small', '', row.category));
-      if (row.category === resume) {
+      if (row.workbook) {
+        if (row.result && canDraftProfile(getContext())) parts.push(workbookActions({
+          ctx: getContext(), row, getContext, accompany: hide,
+          active: () => rows.includes(row) && stage === 'confirmed' && !card.closest('[hidden], [inert]'),
+        }));
+        else parts.push(node('small', '', row.error || '需重新识别工作簿并核对权限。'));
+      } else if (row.category === resume) {
         parts.push(canOpenStaff(getContext()) ? action('打开新增员工表单', () => staff(row)) :
           node('small', '', '需要新增员工权限'));
       } else if (row.category === contract) {
         parts.push(contractFields(row));
-      } else if (materialKinds[row.category]) {
+      } else if (materialKinds[row.category] || row.category === registration) {
         const category = row.category;
         parts.push(materialDestinations(row, getContext,
           () => rows.includes(row) && row.category === category && stage === 'confirmed' &&
@@ -187,7 +209,7 @@ export function documentIntake(getContext, changed, hide) {
     }
     if (stage === 'review' && (row.error || row.result?.note))
       parts.push(node('p', 'assistant-document-hint', row.error || row.result.note));
-    if (stage === 'review' || stage === 'confirmed') {
+    if (!row.workbook && (stage === 'review' || stage === 'confirmed')) {
       parts.push(action('查看原件', () => {
         if (canReadDocuments(getContext())) originalDialog = previewOriginal(getContext(), row);
       }));
@@ -206,6 +228,7 @@ export function documentIntake(getContext, changed, hide) {
         ? '这看起来是一份简历。确认后可打开新增员工表单，核对姓名和手机号，并手动选择岗位、权限。'
         : '请逐份核对，可以在列表里改正分类。') :
         stage === 'confirmed' ? '请选择要打开的业务表单。资料经核对并保存后才写入记录。' :
+        rows.some(row => row.workbook) ? '点击识别后，系统将读取表格及所选原件，供你核对。' :
         '确认后由机构 OCR 读取文字，云端模型建议分类。无可读文字的照片可提交机构视觉模型辨认类型。';
       const footer = node('div', 'assistant-document-actions');
       if (stage === 'choose') footer.append(action('识别并分类', recognize, true));

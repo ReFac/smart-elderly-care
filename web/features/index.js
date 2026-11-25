@@ -7,6 +7,7 @@ import { billing } from './billing.js';
 
 import { inventory, shifts, reports } from './operations.js';
 
+import { deploymentConsole } from './deployment-console.js';
 import { renderAccess } from './access.js';
 import { accountCenter } from './account.js';
 import { renderDossier } from './dossier.js';
@@ -19,6 +20,7 @@ import { renderFaqPage } from './faq.js';
 import { roomsPage, tourPage } from './rooms.js';
 
 const features = {
+  deployment: deploymentConsole,
   leads: leadsPage,
   account: accountCenter,
   faq: renderFaqPage,

@@ -4,11 +4,11 @@ from contextlib import closing
 import re
 from unicodedata import normalize
 
-from . import access, document_ocr, identity
+from . import access, document_ocr, identity, profile_fields
 
 
 MAX_BYTES = 8 * 1024 * 1024
-NAME = re.compile(r"(?:^|\s)(?:姓名|应聘人|candidate name|name)\s*[:：]\s*([\w·• -]{2,60}?)(?=\s+[\w ]{1,20}[:：]|$)", re.I)
+NAME = re.compile(r"(?:^|\s)(?:姓名|应聘人|candidate name|name)\s*[:：]\s*([\w·•’' -]{1,60}?)(?=\s+[\w ]{1,20}[:：]|$)", re.I)
 PHONE = re.compile(r"(?<![0-9+])(?:\+86[ -]?)?1[3-9][0-9]{9}(?![0-9])")
 
 
@@ -18,7 +18,7 @@ def authorize(store, db, token):
     return actor
 
 
-def suggestions(result):
+def suggestions(result, *, international=False):
     complete = {p["page"] for p in result.get("pages", ()) if p["state"] == "complete"}
     evidence = {"displayName": {}, "phone": {}}
     for line in result.get("lines", ()):
@@ -32,6 +32,11 @@ def suggestions(result):
                 evidence["displayName"].setdefault(value, line)
         phone_text = normalize("NFKC", text)
         if re.match(r"(?:手机号码?|联系电话|手机|电话|mobile|phone)\s*:", phone_text, re.I):
+            if international:
+                number = profile_fields.phone_number(phone_text.partition(":")[2].strip(), mobile=True)
+                if number:
+                    evidence["phone"].setdefault(number, line)
+                continue
             for match in PHONE.finditer(phone_text):
                 value = identity.destination("sms", re.sub(r"[ -]", "", match[0]))
                 evidence["phone"].setdefault(value, line)
@@ -50,7 +55,7 @@ def preview(store, token, raw):
         store, token, raw, lambda db, current: authorize(store, db, current),
         feature="access.resumeOcr",
     )
-    return suggestions(result)
+    return suggestions(result, international=store.deployment_edition == "international")
 
 
 def check(store, token):

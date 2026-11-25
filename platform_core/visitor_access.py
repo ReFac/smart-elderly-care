@@ -3,6 +3,7 @@
 from contextlib import closing
 import hmac
 import re
+import json
 import secrets
 from uuid import uuid4
 
@@ -46,7 +47,7 @@ def status(store, visitor_token, account_token, *, demo=False):
         "signedIn": False,
         "phoneEnabled": "sms" in identity.senders(store),
         "wechatEnabled": False,
-        "wechatContactLink": wechat_tour.contact_link(),
+        "wechatContactLink": wechat_tour.contact_link() if store.deployment_edition == "china" else "",
         "demoEnabled": demo,
     }
     with closing(store.connect()) as db:
@@ -122,12 +123,16 @@ def _verified_account(store, db, phone):
                          access._digest(secrets.token_urlsafe(32), salt), verified_phone=phone)
 
 
-def _new_customer(store, db, aid, username, salt, password_hash, *, verified_phone=None):
+def _new_customer(store, db, aid, username, salt, password_hash, *, verified_phone=None, parts=None):
     history.watch(db, "access.registerCustomer")
+    name = "Visitor" if getattr(store, "deployment_edition", "china") == "international" else "参观顾客"
+    if parts is not None:
+        from .international_profile import name_parts
+        name, parts = name_parts(parts)
     inserted = db.execute(
-        """INSERT INTO accounts(id,username,display_name,kind,role,salt,password_hash)
-        VALUES(?,?,?,'family',?,?,?) ON CONFLICT(username) DO NOTHING""",
-        (aid, username, "参观顾客", portal.CUSTOMER_ROLE, salt, password_hash),
+        """INSERT INTO accounts(id,username,display_name,kind,role,salt,password_hash,name_parts)
+        VALUES(?,?,?,'family',?,?,?,?) ON CONFLICT(username) DO NOTHING""",
+        (aid, username, name, portal.CUSTOMER_ROLE, salt, password_hash, json.dumps(parts or {}, ensure_ascii=False)),
     )
     if not inserted.rowcount:
         raise ValueError("此登录名已被使用")
@@ -143,7 +148,7 @@ def _new_customer(store, db, aid, username, salt, password_hash, *, verified_pho
 
 
 def register(store, payload, peer, current_session=None):
-    if not isinstance(payload, dict) or set(payload) != {"username", "password"}:
+    if not isinstance(payload, dict) or not {"username", "password"} <= set(payload) <= {"username", "password", "nameParts"}:
         raise ValueError("请仅填写登录名和密码")
     username = access.account_username(payload["username"])
     password = access._password(payload["password"])
@@ -154,7 +159,7 @@ def register(store, payload, peer, current_session=None):
         salt = secrets.token_bytes(16)
         password_hash = access._digest(password, salt)
         db.execute("BEGIN IMMEDIATE")
-        aid = _new_customer(store, db, uuid4().hex, username, salt, password_hash)
+        aid = _new_customer(store, db, uuid4().hex, username, salt, password_hash, parts=payload.get("nameParts"))
         return access.issue_session(db, aid), access.account(db, aid)
 
 

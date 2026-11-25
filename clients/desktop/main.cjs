@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, session, shell } = require('electron');
 const path = require('node:path');
+const words = require('./native-text.cjs');
 const { registerLeadCalls } = require('./lead-calls.cjs');
 const { configureMicrophone } = require('./microphone.cjs');
 const { registerPaymentLinks } = require('./payment-links.cjs');
@@ -13,7 +14,7 @@ function workspaceUrl() {
     target.username ||
     target.password
   ) {
-    throw new Error('机构服务需要 HTTPS 地址，或本机开发地址');
+    throw new Error(words.invalid);
   }
   if (target.pathname === '/' && !target.hash) target.searchParams.set('workspace', '1');
   return target;
@@ -29,7 +30,7 @@ const workspaceWindows = new WeakSet();
 
 async function showWorkspace(target) {
   const win = new BrowserWindow({
-    title: '医养管理平台',
+    title: words.app,
     width: 1320,
     height: 900,
     minWidth: 700,
@@ -45,7 +46,7 @@ async function showWorkspace(target) {
   try {
     await win.loadURL(target.href);
   } catch {
-    dialog.showErrorBox('未连接机构工作台', '请先启动机构服务，并核对 NH_APP_URL 配置。');
+    dialog.showErrorBox(words.offline, words.reconnect);
     win.close();
   }
 }
@@ -63,8 +64,8 @@ app
     };
     configureMicrophone(session.defaultSession, target, workspaceWindows, async contents => {
       const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(contents), {
-        type: 'question', message: '允许此工作台窗口使用麦克风吗？',
-        detail: '用于按住说话和语音转写。', buttons: ['允许使用', '取消'],
+        type: 'question', message: words.microphone,
+        detail: words.purpose, buttons: [words.allow, words.cancel],
         defaultId: 1, cancelId: 1,
       });
       return response === 0;
@@ -90,7 +91,7 @@ app
     await showWorkspace(target);
   })
   .catch((error) => {
-    dialog.showErrorBox('无法启动', error.message);
+    dialog.showErrorBox(words.startup, error.message);
     app.quit();
   });
 app.on('window-all-closed', () => {

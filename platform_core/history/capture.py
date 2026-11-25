@@ -61,6 +61,8 @@ JSON_COLUMNS = {
     "metadata",
     "permissions",
     "portal_scopes",
+    "name_parts",
+    "postal_address",
     "result",
     "review",
     "args",
@@ -101,7 +103,7 @@ def watch(db, action):
             WHEN OLD.data IS NOT NEW.data BEGIN
             INSERT INTO history_capture VALUES('workspace','1',OLD.data,NEW.data); END""")
     prefixes = PREFIXES.get(action.partition(".")[0], ())
-    if action == "permissionRequest.editProfile":
+    if action in ("permissionRequest.editProfile", "care.register"):
         prefixes += ("dossier_profiles",)
     if action.startswith("ops.subsidy") or action == "dossier.credential":
         prefixes = ("subsidy_",)

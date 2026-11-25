@@ -178,6 +178,7 @@ def smoke(browser, port):
         assert sum(row["source"] == source and row["phone"].endswith(suffix) for row in contacts) == 1
 
 
+@patch.dict(os.environ, {"NH_DEPLOYMENT_LANGUAGE": "zh-CN"})
 def run_browser(check, seed=lambda store: None, *, server_factory=server):
     browser = os.environ.get("BROWSER_BIN") or which("chromium") or which("microsoft-edge") or which("google-chrome")
     if not browser:
@@ -185,8 +186,12 @@ def run_browser(check, seed=lambda store: None, *, server_factory=server):
     with TemporaryDirectory(prefix="visitor-browser-") as temp, ExitStack() as stack:
         root = Path(temp)
         _, port = stack.enter_context(server_factory(root, seed))
+        _, body = checked(port, "/api/public/deployment")
+        deployment = json.loads(body)
+        if (deployment["language"], deployment["edition"]) != ("zh-CN", "china"):
+            raise RuntimeError("浏览器测试只允许中文机构部署")
         profile = root / "browser"
-        process = subprocess.Popen([browser, "--headless", "--disable-gpu", "--disable-extensions",
+        process = subprocess.Popen([browser, "--headless", "--lang=zh-CN", "--disable-gpu", "--disable-extensions",
             "--disable-background-networking", "--no-first-run", "--remote-debugging-port=0",
             "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1",
             f"--user-data-dir={profile}", "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -225,6 +230,9 @@ def check_wechat_invite(browser, port):
     assert not b.evaluate("document.getElementById('tour-invite').open")
     assert ("GET", "/api/public/visitor/status") not in b.api
     b.call("Target.activateTarget", targetId=tour_id)
+    b.call("Page.bringToFront")
+    b.call("Emulation.setFocusEmulationEnabled", enabled=True)
+    b.wait_for("!document.hidden && document.hasFocus()")
     b.wait_for("document.getElementById('tour-invite').open")
     assert b.evaluate("document.querySelector('.invite-wechat a').href === 'https://wxaurl.cn/fixture'")
     assert b.evaluate("document.getElementById('tour-contact').hidden")

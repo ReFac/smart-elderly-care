@@ -9,6 +9,7 @@ import { changePreview, confirmChange } from './lib/change-review.js';
 import { detail, formDialog } from './lib/dialogs.js';
 
 import { routes } from './lib/navigation.js';
+import { interfaceText } from './lib/locale.js';
 
 import { dashboard, operationalOverview } from './dashboard.js';
 
@@ -17,6 +18,7 @@ import { renderFeature } from './features/index.js';
 import { selectTab, resetSelectedTabs } from './features/shared.js';
 
 import { profile, renewalReminders, reopenBedFilter } from './features/residency.js';
+import { register } from './features/admission.js';
 import { dueMedicationCount } from './features/medication-rules.js';
 import { pendingLeadCalls } from './features/leads.js';
 import { residentLabel, residentHref, staffLabel } from './features/people-labels.js';
@@ -70,6 +72,7 @@ function signedOut() {
   epoch++;
   deferredRefresh = null;
   state = null;
+  window.NH_I18N?.setWorkspace(null);
   resetDesk();
   root.classList.remove("desk-shell");
   residentOverlay = null;
@@ -150,6 +153,7 @@ function applySnapshot(snapshot) {
     audit: snapshot.audit,
     revision: snapshot.revision,
   };
+  window.NH_I18N?.setWorkspace(state);
   for (const [key,page] of desk.pages) {
     const work = new URLSearchParams(key.split('?')[1]).get('work');
     if (work && page.render) {
@@ -590,7 +594,7 @@ function sidebar() {
   }
   for (const group of deskMenu) {
     if (group.route) {
-      nav.append(entry(group.route,group.label,group.icon,undefined,group.view));
+      nav.append(entry(group.route,group.label,group.icon,group.tab,group.view));
       continue;
     }
     const section = el('section','desk-nav-section');
@@ -614,7 +618,17 @@ function sidebar() {
     };
     expand(); section.append(toggle,children); nav.append(section);
   }
-  side.append(brand,nav);
+  side.append(brand);
+  if (available('residents') && state.allowedActions.includes('care.register')) {
+    const create = el('button','desk-new-resident');
+    create.type = 'button';
+    create.title = '新建长辈档案';
+    create.setAttribute('aria-label',create.title);
+    create.append(icon('plus',17),el('span','',create.title));
+    create.onclick = () => { closeMenu(); register(context()); };
+    side.append(create);
+  }
+  side.append(nav);
   return side;
 }
 
@@ -643,7 +657,7 @@ function searchDialog() {
     ? group.children.map(([route,label,tab])=>({label,keywords:group.label + ' ' + label,
         icon:viewIcon(tab,routes.get(route).icon),meta:group.label,open:()=>go(route,tab)}))
     : [{label:group.label,keywords:group.label,icon:group.icon,meta:'业务页面',
-        open:()=>go(group.route,undefined,undefined,group.view ? {view:group.view} : undefined)}]);
+        open:()=>go(group.route,group.tab,undefined,group.view ? {view:group.view} : undefined)}]);
   const data = [
     ...directory,
     ...quickDestinations.filter(r => available(r.route) && (!r.grant || state.allowedActions.includes(r.grant))).map(r => ({
@@ -673,7 +687,8 @@ function searchDialog() {
     const subset = [], matched = new Set();
     for (const row of data) {
       const key = row.href || row.label;
-      if (matched.has(key) || !(row.label + ' ' + row.keywords).normalize('NFKC').toLowerCase().includes(q)) continue;
+      const terms = row.href ? [row.label,row.keywords] : [row.label,row.keywords,interfaceText(row.label),interfaceText(row.meta)];
+      if (matched.has(key) || !terms.join(' ').normalize('NFKC').toLowerCase().includes(q)) continue;
       matched.add(key); subset.push(row);
       if (subset.length === 12) break;
     }
@@ -1035,7 +1050,8 @@ function render() {
     page.node = main;
     if (tab && !page.render) {
       const choice = main.querySelector('.fx-tabs > [aria-selected="true"]');
-      if (choice?.dataset.key === tab && (!path.label || !deskMenu.some(g => g.children?.some(([r,,k]) => r === route && k === tab))))
+      if (choice?.dataset.key === tab && (!path.label || !deskMenu.some(g =>
+        (g.route === route && g.tab === tab) || g.children?.some(([r,,k]) => r === route && k === tab))))
         page.title = choice.textContent;
     }
   }
@@ -1056,7 +1072,7 @@ function render() {
   // Keep native mouse/keyboard targets attached while a background revision refreshes the content.
   // Any change of account, permitted menu, active destination or brand rebuilds the rail.
   const nextSidebar = JSON.stringify([state.actorStamp, state.user.portalSelf, state.uiSettings.brandName,
-    deskMenu, route, page.tab, page.view]);
+    deskMenu, state.allowedActions.includes('care.register'), route, page.tab, page.view]);
   const rail = root.firstElementChild;
   if (rail?.matches('.sidebar') && sidebarStamp === nextSidebar) {
     while (rail.nextSibling) rail.nextSibling.remove();

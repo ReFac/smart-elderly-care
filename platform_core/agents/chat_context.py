@@ -31,6 +31,7 @@ ROUTES = {
     "integrations": "设备与接口",
     "access": "账号与权限",
     "settings": "机构设置",
+    "deployment": "部署控制台",
     "account": "个人中心",
     "tour": "环境导览",
     "family": "家属服务",

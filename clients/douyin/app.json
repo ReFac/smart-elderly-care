@@ -1,0 +1,8 @@
+{
+  "pages": ["pages/home/index"],
+  "window": {
+    "navigationBarTitleText": "医养管理平台",
+    "navigationBarBackgroundColor": "#172b50",
+    "navigationBarTextStyle": "white"
+  }
+}

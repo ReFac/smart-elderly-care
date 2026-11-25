@@ -1,0 +1,44 @@
+{
+  "mcpServers": {
+    "time": {
+      "transport": "stdio",
+      "command": "python",
+      "args": ["-m", "mcp_server_time", "--local-timezone=Asia/Shanghai"],
+      "tools": {
+        "get_current_time": {
+          "title": "查询当地时间",
+          "description": "查询机构或家属所在地的日期、星期和时间，默认使用北京时间。",
+          "grant": "assistants",
+          "keywords": ["几点", "当前时间", "现在时间", "当地时间", "机构时间", "院区时间", "北京时间", "今天几号", "星期几", "周几", "当前日期", "日期时间"],
+          "parameters": {
+            "timezone": {"type": "string", "enum": ["Asia/Shanghai", "Asia/Hong_Kong", "Asia/Tokyo", "Asia/Singapore", "Australia/Sydney", "Europe/London", "Europe/Paris", "America/Toronto", "America/New_York", "America/Los_Angeles", "UTC"]}
+          }
+        },
+        "convert_time": {
+          "title": "换算探视和通话时间",
+          "description": "在机构和家属所在的两个时区之间换算探视或通话时间。time 使用 24 小时制 HH:MM。",
+          "grant": "assistants",
+          "keywords": ["时差", "换算", "跨时区", "纽约时间", "多伦多时间", "伦敦时间", "当地几点", "那边几点", "家属通话时间", "国内国外", "海外家属"],
+          "required": ["time", "source_timezone", "target_timezone"],
+          "parameters": {
+            "time": {"type": "string", "format": "time"},
+            "source_timezone": {"type": "string", "enum": ["Asia/Shanghai", "Asia/Hong_Kong", "Asia/Tokyo", "Asia/Singapore", "Australia/Sydney", "Europe/London", "Europe/Paris", "America/Toronto", "America/New_York", "America/Los_Angeles", "UTC"]},
+            "target_timezone": {"type": "string", "enum": ["Asia/Shanghai", "Asia/Hong_Kong", "Asia/Tokyo", "Asia/Singapore", "Australia/Sydney", "Europe/London", "Europe/Paris", "America/Toronto", "America/New_York", "America/Los_Angeles", "UTC"]}
+          }
+        },
+        "get_time_ago": {
+          "title": "计算回顾时段起点",
+          "description": "从当前北京时间倒推指定天数、小时或分钟，核对巡查、交接班和回访的起始时刻。",
+          "grant": "assistants",
+          "keywords": ["倒推", "小时之前", "小时前是几点", "天前是几号", "之前是几点", "回顾时段", "时段起点", "起始时刻"],
+          "fixed": {"timezone": "Asia/Shanghai"},
+          "parameters": {
+            "days_ago": {"type": "integer", "minimum": 0, "maximum": 365},
+            "hours_ago": {"type": "integer", "minimum": 0, "maximum": 168},
+            "minutes_ago": {"type": "integer", "minimum": 0, "maximum": 1440}
+          }
+        }
+      }
+    }
+  }
+}

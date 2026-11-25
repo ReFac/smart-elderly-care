@@ -14,7 +14,7 @@ def phone_number(raw, *, mobile=False):
     """Canonical contact key for resident files, explicit visits and callback matching."""
     if not isinstance(raw, str) or len(raw) > 40:
         return ""
-    value = re.sub(r"[\s()-]", "", unicodedata.normalize("NFKC", raw))
+    value = re.sub(r"[\s().‐‑‒–-]", "", unicodedata.normalize("NFKC", raw))
     if value.startswith("00"):
         value = "+" + value[2:]
     if value.startswith("+86"):

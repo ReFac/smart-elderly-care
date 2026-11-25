@@ -1,3 +1,4 @@
+import {internationalDeployment, nameEditor, postalEditor} from '../lib/international-profile.js';
 import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { monitors, monitorPage } from './system-monitor.js';
 import { backupPanel } from './backups.js';
@@ -168,7 +169,10 @@ export function editAccount(ctx, kind, target = null, defaultRole = '护工', re
   const prefilled = resume?.result.fields;
   if (resume) form.append(staffResumeEvidence(resume));
   const [nameRow, name] = inputField('姓名', 'displayName', target?.displayName || prefilled?.displayName?.value || '', { max: 60 });
-  const identity = node('div', 'access-field-pair', nameRow);
+  const international = internationalDeployment();
+  const splitName = international && nameEditor(name, target?.nameParts);
+  const postal = international && !family && postalEditor(target?.internationalAddress);
+  const identity = node('div', 'access-field-pair', splitName?.element || nameRow);
   form.append(identity);
   let username, inviteAddress, duties, resident, familyServices, portalIdentity;
   const scopeControls = new Map();
@@ -186,8 +190,8 @@ export function editAccount(ctx, kind, target = null, defaultRole = '护工', re
   if (!target || target.activationPending) {
     let row;
     [row, inviteAddress] = inputField('本人手机号', 'destination', prefilled?.phone?.value || '', {
-      type: 'tel', max: 18, autocomplete: 'tel', required: !target,
-      placeholder: target ? '仅更正首次邀请时填写' : '中国大陆号码可直接填写',
+      type: 'tel', max: 40, autocomplete: 'tel', required: !target,
+      placeholder: international ? '+1 202 555 0100' : target ? '仅更正首次邀请时填写' : '中国大陆号码可直接填写',
     });
     if (!target && !family && !resume) form.prepend(staffResumeFields(name, inviteAddress));
     form.append(row, node('p', 'fx-muted', '本人通过登记的手机号验证身份并设置密码。邮箱可在开通后由本人验证添加。'));
@@ -199,6 +203,7 @@ export function editAccount(ctx, kind, target = null, defaultRole = '护工', re
         node('strong', '', target.username),
       ]),
     );
+  if (postal) form.append(postal.element);
   let role, grants, campus;
   if (family) {
     if (!target) {
@@ -306,7 +311,9 @@ export function editAccount(ctx, kind, target = null, defaultRole = '护工', re
     );
   }
   saveForm(form, target ? '保存变更' : '创建账号', () => {
-    const payload = { displayName: name.value };
+    const payload = {displayName:name.value, ...(splitName && {nameParts:splitName.read()})};
+    const address = postal?.read?.();
+    if (address !== undefined) payload.internationalAddress = address;
     if (target) {
       payload.id = target.id;
       if(target.activationPending && inviteAddress.value.trim()) payload.invitation={channel:'sms',destination:inviteAddress.value.trim()};
@@ -379,7 +386,49 @@ function accounts(ctx) {
       campuses.get(account.facilityScope?.campusIds?.[0]), account.directoryStay,
     ].filter(Boolean).join(' '));
   }
+  function phoneLookup() {
+    const form = node('form','access-form');
+    const [row, input] = inputField('Phone number including country code', 'phone', '',
+      {type:'tel', max:40, placeholder:'+1 202 555 0100', autocomplete:'off'});
+    const submit = node('button','btn btn-primary','Search');
+    submit.type = 'submit';
+    const result = node('div','fx-profile');
+    result.setAttribute('aria-live','polite');
+    form.append(row, submit, result);
+    form.onsubmit = async event => {
+      event.preventDefault();
+      if (submit.disabled) return;
+      submit.disabled = true;
+      result.replaceChildren();
+      try {
+        const response = await fetch('/api/accounts/by-phone',{method:'POST',
+          headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:input.value.trim()})});
+        const data = await response.json();
+        if (!response.ok) throw Error(data.error || 'Search failed.');
+        const ids = new Set(data.accountIds);
+        const accounts = state.accounts.filter(a=>ids.has(a.id));
+        if (!accounts.length) result.textContent = 'No matching account in your directory.';
+        for (const a of accounts) result.append(link(ctx, a.displayName+' · '+a.username, ()=>showPermissions(a)));
+      } catch (error) {
+        result.textContent = error.message;
+      } finally {
+        submit.disabled = false;
+      }
+    };
+    ctx.detail('Find account by phone',form);
+  }
   function editCustomer(account) {
+    if (internationalDeployment()) {
+      const input = document.createElement('input');
+      input.value = account.displayName;
+      const editor = nameEditor(input, account.nameParts);
+      const dialog = ctx.dialog({
+        title:'Edit visitor name', fields:[], content:editor.element, submitLabel:'Review and save',
+        onSubmit:()=>ctx.command('access.update',{id:account.id, displayName:input.value, nameParts:editor.read()}),
+      });
+      dialog.dataset.managedAccountId = account.id;
+      return;
+    }
     const dialog = ctx.dialog({
       title: '编辑注册顾客',
       fields: [{ name: 'displayName', label: '姓名', value: account.displayName, required: true, maxLength: 60 }],
@@ -530,6 +579,7 @@ function accounts(ctx) {
         ? btn(ctx, '绑定亲属或长辈', () => editAccount(ctx, 'family'))
         : null,
       btn(ctx, '新增员工', () => editAccount(ctx, 'staff'), 'primary'),
+      internationalDeployment() ? btn(ctx, 'Find account by phone', phoneLookup) : null,
     ),
     tabs('access', [
       ...(isOwner ? categories.map(([key,label,rows,stay])=>[
@@ -619,6 +669,19 @@ function settings(ctx) {
     node('p', 'fx-muted', config.unlimited ? '按实际调用统计用量，可在「AI 用量」查看明细。'
       : '云端规划按机构另购套餐启用。开通、续期与额度调整由平台运营方办理。'),
   ]);
+  deep.append(btn(ctx, '查看助理工具与技能', async () => {
+    try {
+      const response = await fetch('/api/assistant/extensions');
+      const data = await response.json();
+      if (!response.ok) throw Error(data.error || '无法读取机构配置');
+      ctx.detail('助理工具与技能', node('div', 'fx-profile', [
+        section('已接入的 MCP 工具', node('div','', data.tools.map(item => node('p', '', [
+          node('strong', '', item.title + '　'), item.description])))),
+        section('可用工作方法', node('div','', data.skills.map(item => node('p', '', [
+          node('strong', '', item.name + '　'), item.description])))),
+      ]));
+    } catch (err) { ctx.toast(err.message); }
+  }));
   if (config.media) {
     const fields = {};
     const form = node('form', 'fx-profile');

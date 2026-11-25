@@ -1,9 +1,21 @@
+import {internationalDeployment, nameEditor} from './lib/international-profile.js';
 import { publicPage, receptionInfo } from './public-site.js';
 
 publicPage('养老照护与参观');
 
 const visit = document.querySelector('#visit-form');
 const callback = document.querySelector('#callback-form');
+let visitorName;
+if (internationalDeployment()) {
+  const display = visit.elements.name;
+  const row = display.closest('label');
+  visitorName = nameEditor(display);
+  row.replaceWith(visitorName.element);
+  for (const telephone of document.querySelectorAll('input[type=tel]')) {
+    telephone.placeholder = '+1 202 555 0100';
+    telephone.maxLength = 40;
+  }
+}
 const booking = document.querySelector('#visit-request');
 const date = visit.elements.day;
 const time = visit.elements.time;
@@ -59,6 +71,7 @@ function enableForm(form, source) {
     const payload = { source, campusId: value('campusId'), phone: value('phone'), consent: form.elements.consent.checked };
     if (source === 'visit') {
       payload.name = value('name');
+      if (visitorName) payload.nameParts = visitorName.read();
       if (value('note')) payload.note = value('note');
       if (value('day') && value('time')) payload.preferredAt = value('day') + 'T' + value('time');
     }
@@ -74,7 +87,7 @@ function enableForm(form, source) {
       if (!response.ok) throw new Error(result.error || '提交失败，请重试。');
       form.reset();
       form.hidden = true;
-      if (source === 'visit') updatePreference();
+      if (source === 'visit') { visitorName?.reset(); updatePreference(); }
       receipt.hidden = false;
       receipt.focus();
     } catch (cause) {

@@ -98,7 +98,7 @@ function editor(ctx, plan) {
       const toggle = input('checkbox','选择项目 '+item.title,selected.has(item));
       toggle.onchange=()=>{if(toggle.checked) selected.add(item); else selected.delete(item); markCount();};
       const cat = choice('项目分类',categories,item.category); cat.onchange=()=>{item.category=cat.value;};
-      const name = input('text','项目名称',item.title); name.maxLength=80;
+      const name = input('text','项目名称',item.title); name.maxLength=80; name.dataset.field='title';
       name.oninput=()=>{item.title=name.value;};
       const period = choice('执行周期',periods,item.period);
       period.onchange=()=>{item.period=period.value; redraw();};
@@ -142,7 +142,7 @@ function editor(ctx, plan) {
     redraw();
   });
   const add=btn(ctx,'新增项目',()=>{saved.search=search.value=''; items.push(newItem('',plan.assignee)); redraw();
-    body.lastElementChild.querySelector('[aria-label="项目名称"]').focus();});
+    body.lastElementChild.querySelector('[data-field="title"]').focus();});
   const footer = node('footer','plan-footer',[
     btn(ctx,'返回照护方案',()=>ctx.closeWorkspaceTab()),
     readOnly?null:btn(ctx,'保存并提交复核',async()=>{

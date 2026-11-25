@@ -11,6 +11,8 @@ from ..operations.records import text_field, new_id
 
 
 def init(db):
+    from . import brief_workflow
+    brief_workflow.init(db)
     db.execute("""CREATE TABLE IF NOT EXISTS agent_runs (
         id TEXT PRIMARY KEY, actor TEXT NOT NULL, request TEXT NOT NULL, args TEXT NOT NULL,
         actorName TEXT NOT NULL, started TEXT NOT NULL, revision INTEGER NOT NULL,
@@ -186,6 +188,9 @@ def preflight(db, state, user, payload):
             "specs": (),
             "fingerprintScope": encoded,
         }
+    checkpoint = db.execute("SELECT revision FROM agent_work_progress WHERE actor=? AND request=?", (user["id"], request)).fetchone()
+    if checkpoint and checkpoint[0] != db.execute("SELECT revision FROM workspace WHERE id=1").fetchone()[0]:
+        raise ValueError("原简报的资料已更新，请以新请求开始")
     resolved = region.resolve(db, state, user, selected)
     specs = tuple(
         s for s in specialists(user) if not resolved or s.key in ("care", "finance")
@@ -269,6 +274,7 @@ def apply(db, state, action, payload, user, now, revision, planning=None):
             "INSERT INTO agent_audit_scope(runId,grants,residentId,room) VALUES(?,?,?,?)",
             (run_id, grants, context["residentId"], context["room"]),
         )
+        db.execute("DELETE FROM agent_work_progress WHERE actor=? AND request=?", (user["id"], check["request"]))
         return "协作任务已生成待确认简报", run_id
     row = get_row(db, user, payload.get("runId"))
     if "region" in payload:

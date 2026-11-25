@@ -41,6 +41,7 @@ class AssistantFormTests(unittest.TestCase):
         cases = (
             ("新增员工，李明护士", "staffAdd", "access", ""),
             ("请帮我创建长者档案", "residentAdd", "residents", "notAdmitted"),
+            ("请帮我新建老人档案", "residentAdd", "residents", "notAdmitted"),
             ("办理入住", "admission", "residents", "notAdmitted"),
             ("打开办理试住", "trial", "residents", "notAdmitted"),
             ("登记来电", "leadAdd", "leads", "contacts"),

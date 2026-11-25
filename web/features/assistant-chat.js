@@ -1,17 +1,20 @@
+import { displayLocale } from '../lib/locale.js';
 import { replyReader } from './assistant-reader.js';
 import { floatingWindow } from './assistant-window.js';
 import { streamReply } from './assistant-stream.js';
 import { networkControl, searchSources } from './assistant-network.js';
 import { el, icon } from '../lib/ui.js';
-import { node } from './shared.js';
+import { canAct, node } from './shared.js';
 import { holdToSpeak, voiceServiceReason } from './agent-voice.js';
 import { openPriorReports } from './assistants.js';
 import { assistantCommand, assistantPageLinks, openAssistantAction } from './assistant-actions.js';
 import { canReadDocuments, documentIntake } from './assistant-documents.js';
+import { canDraftProfile } from './assistant-materials.js';
+import { workbookButton } from './assistant-workbook.js';
 import { dictationReview } from './assistant-dictation.js';
 
 const path = '/api/assistant/chat';
-const dayLabel = new Intl.DateTimeFormat('zh-CN', {
+const dayLabel = new Intl.DateTimeFormat(displayLocale, {
   year: 'numeric',
   month: 'long',
   day: 'numeric',
@@ -264,9 +267,9 @@ function buildChat(getContext, actor, area, region, label) {
   if (filePicker) {
     filePicker.type = 'file';
     filePicker.multiple = true;
-    filePicker.accept = '.pdf,.png,.jpeg,.jpg,application/pdf,image/png,image/jpeg';
+    filePicker.accept = '.pdf,.png,.jpeg,.jpg,.xlsx,.xls,application/pdf,image/png,image/jpeg,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     filePicker.hidden = true;
-    uploadButton.title = '选择或拖入图片及 PDF，由助理阅读并建议分类';
+    uploadButton.title = '上传图片、PDF 或 Excel 工作簿，核对资料后预填表单';
     const receive = files => {
       if (!files.length || uploadButton.disabled) return;
       try { intake.start(Array.from(files)); }
@@ -345,23 +348,26 @@ function buildChat(getContext, actor, area, region, label) {
             : '可以从院里的近况问起，也可以让我帮您找到办理入口。',
       ),
     ]);
-    const examples = network.enabled
-      ? [['globe', '查一下河南长期护理保险的公开政策']]
-      : personal
-        ? [
-            ['heart', '在哪里查看照护消息？'],
-            ['building', '在哪里查看院内环境？'],
-          ]
-        : label
-          ? [
-              ['pulse', '这里过去24小时有哪些变化？'],
-              ['care', '有什么照护事项需要跟进？'],
-            ]
-          : [['pulse', '今天养老院情况怎么样？']];
+    const international = window.NH_DEPLOYMENT?.edition === 'international';
+    const examples = [];
+    if (network.enabled) {
+      examples.push(['globe', international ? 'Find public guidance on long-term care insurance' : '查一下河南长期护理保险的公开政策']);
+    } else if (personal) {
+      if (getContext().available('family'))
+        examples.push(['heart', international ? 'Open family services' : '在哪里查看照护消息？']);
+      if (getContext().available('tour'))
+        examples.push(['building', international ? 'Open room tour' : '在哪里查看院内环境？']);
+    } else if (label) {
+      examples.push(['pulse', international ? 'How are our residents doing today?' : '这里过去24小时有哪些变化？']);
+      if (!international || getContext().available('care') && canAct(getContext(), 'care.completeTask'))
+        examples.push(['care', international ? 'Open care tasks' : '有什么照护事项需要跟进？']);
+    } else {
+      examples.push(['pulse', international ? 'How are things today?' : '今天养老院情况怎么样？']);
+    }
     if (!personal && !label && getContext().available('inventory'))
-      examples.push(['box', '今天的护理用具状况如何？']);
+      examples.push(['box', international ? 'Show inventory' : '今天的护理用具状况如何？']);
     if (!personal && !label && getContext().available('intake'))
-      examples.push(['intake', '在哪里办理老人入住？']);
+      examples.push(['intake', international ? 'Open admissions' : '在哪里办理老人入住？']);
     const suggestions = el('div', 'assistant-starters');
     for (const [glyph, text] of examples) {
       const b = control(text, glyph, 'assistant-starter', () => transmit(text));
@@ -370,21 +376,46 @@ function buildChat(getContext, actor, area, region, label) {
       suggestions.append(b);
     }
     welcome.append(suggestions);
+    if (!area && canDraftProfile(getContext())) welcome.append(workbookButton(getContext()));
     return welcome;
   }
   function row(item) {
     const mine = item.role === 'user';
+    const en = window.NH_DEPLOYMENT?.edition === 'international';
     const body = node('div', 'assistant-turn-body', [messageBody(item.content)]);
     const sources = searchSources(item);
     if (sources) body.append(sources);
+    if (!mine && item.toolTrace?.length) {
+      const labels = {
+        care_evidence:['照护记录','Care records'], finance_evidence:['收款与欠款','Receipts and balances'],
+        inventory_evidence:['库存台账','Inventory'], account_evidence:['账号统计','Account totals'],
+        activity_evidence:['近期改动','Recent changes'], calculate_amount:['核对算式','Calculation'],
+        read_workflow_skill:['查阅工作方法','Workflow guide'],
+      };
+      const trace = document.createElement('details');
+      trace.append(node('summary', 'muted', en ? 'Tools used' : '查看使用的工具'));
+      for (const step of item.toolTrace) {
+        const label = labels[step.tool]?.[en ? 1 : 0] || step.tool;
+        trace.append(node('p','muted', label + ' · ' + step.durationMs + ' ms'));
+      }
+      body.append(trace);
+    }
+    if (!mine && item.action?.kind === 'uploadResidentProfile' && canDraftProfile(getContext()) && canReadDocuments(getContext())) {
+      const attach = control(en ? (area ? 'Open facility assistant to upload' : 'Upload resident documents') : area ? '前往机构助理上传资料' : '上传长辈资料', 'file', 'assistant-action', () => {
+        if (intake.present) { intake.card.scrollIntoView({block:'nearest'}); return; }
+        if (area) openChat(getContext);
+        current?.chooseFile();
+      });
+      body.append(attach, workbookButton(getContext()));
+    }
     const links = assistantPageLinks(getContext(), item);
     if (links.length) {
       const group = el('div', 'assistant-page-links');
       group.setAttribute('role', 'group');
-      group.setAttribute('aria-label', '相关页面');
+      group.setAttribute('aria-label', en ? 'Related pages' : '相关页面');
       for (const link of links) {
         const button = control(
-          '前往' + link.title,
+          en ? 'Open ' + (window.NH_I18N?.text(link.title) || link.title) : '前往' + link.title,
           link.icon,
           'assistant-action assistant-page-link',
           () => perform({ ...link, kind: 'navigate' }, button),
@@ -397,7 +428,7 @@ function buildChat(getContext, actor, area, region, label) {
     if (!mine && !item.webSearched && ['notice', 'workOrder', 'medicationRound', 'scheduledMeal', 'openForm'].includes(item.action?.kind)) {
       const action = item.action;
       const trigger = control(
-        action.kind === 'openForm' ? '打开' + action.title :
+        action.kind === 'openForm' ? (en ? action.title : '打开' + action.title) :
           action.kind === 'scheduledMeal' ? '查看伙食工单' : action.kind === 'medicationRound' ? '逐人核对服药' : action.kind === 'notice' ? '填写通知' : '填写工单',
         'file',
         'assistant-action',
@@ -741,6 +772,9 @@ function buildChat(getContext, actor, area, region, label) {
     actor,
     area,
     hide,
+    chooseFile() {
+      if (filePicker && !uploadButton.disabled && !destroyed && canReadDocuments(getContext())) filePicker.click();
+    },
     show() {
       floating.expand();
       if (reader.popup.parentNode !== composer) {

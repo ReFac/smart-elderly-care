@@ -1,6 +1,7 @@
 """Start the managed institution service or build an offline signed release."""
 
 import argparse
+import os
 from base64 import b64encode
 from hashlib import sha256
 from pathlib import Path
@@ -28,6 +29,14 @@ def build(version, output, keyfile, notes):
     archive = output / ("elderly-care-" + version + ".zip")
     with ZipFile(archive, "x", ZIP_DEFLATED, compresslevel=6) as package:
         package.write(ROOT / "server.py", "server.py")
+        # Bundle Markdown and connector metadata below the application prefix accepted by older launchers.
+        resources = "platform_core/agents/bundled/"
+        package.write(ROOT / "docs/examples/workspace-mcp.json", resources + "workspace-mcp.json")
+        for manifest in sorted(ROOT.glob("requirements-*.txt")):
+            package.write(manifest, resources + manifest.name)
+        for path in sorted((ROOT / "skills").rglob("*")):
+            if path.is_file() and not path.is_symlink() and (path.suffix == ".md" or path.name == "LICENSE.txt"):
+                package.write(path, resources + path.relative_to(ROOT).as_posix())
         for entry in ("platform_core", "web"):
             for path in sorted((ROOT / entry).rglob("*")):
                 name = path.relative_to(ROOT).as_posix()
@@ -53,7 +62,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     serve = commands.add_parser("run", help="托管机构服务，并在备份后安装经签名的新版")
     serve.add_argument("--db", type=Path, default=ROOT / ".local" / "workspace.sqlite3")
-    serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--port", type=int, help="固定端口，省略时读取部署设置")
     serve.add_argument("--public-origin")
     serve.add_argument("--demo-public-tour", action="store_true")
     serve.add_argument("--initial-data", choices=("demo", "empty"), default="demo")
@@ -69,8 +78,14 @@ def main():
                 parser.error("请提供正式数字版本号")
             build(args.version, args.output.resolve(), args.key_file, args.notes)
         else:
+            from platform_core.deployment_console import start_options
+            _, port, _ = start_options(args.db, args.port, args.public_origin)
+            if args.port is None:
+                os.environ["NH_DEPLOY_PORT_INHERITED"] = "1"
+            else:
+                os.environ.pop("NH_DEPLOY_PORT_INHERITED", None)
             launcher = Launcher(
-                ROOT, args.db.resolve(), args.port, public_origin=args.public_origin,
+                ROOT, args.db.resolve(), port, public_origin=args.public_origin,
                 demo=args.demo_public_tour, initial_data=args.initial_data,
             )
             launcher.run()

@@ -1,0 +1,6 @@
+{
+  "projectname": "care-workspace",
+  "miniprogramRoot": "./",
+  "appid": "touristappid",
+  "setting": { "es6": true, "urlCheck": true }
+}

@@ -21,7 +21,10 @@ export function publicPage(title) {
   for (const target of document.querySelectorAll('[data-icon]')) target.append(icon(target.dataset.icon, 19));
   receptionInfo().then(({ institutionName }) => {
     if (!institutionName) return;
-    for (const target of document.querySelectorAll('[data-brand]')) target.textContent = institutionName;
+    for (const target of document.querySelectorAll('[data-brand]')) {
+      target.translate = false;
+      target.textContent = institutionName;
+    }
     document.title = title + ' · ' + institutionName;
   }).catch(() => {});
 }
