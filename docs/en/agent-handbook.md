@@ -1,6 +1,6 @@
 # Health assistant and agent handover handbook
 
-[中文版](../agent-handbook.md) · [Institution workspace manual](workspace-manual.md) · [Owner deployment console](deployment-console.md)
+[Documentation](README.md) · [中文版](../agent-handbook.md) · [Institution workspace manual](workspace-manual.md) · [Owner deployment console](deployment-console.md)
 
 ## Using the assistant as a member of staff
 

@@ -1,6 +1,6 @@
 # 机构部署
 
-[English](en/quick-deploy.md) · [Owner 控制台](deployment-console.md) · [持证机构交付](medical-commercial.md) · [员工手册](workspace-manual.md)
+[文档导航](README.md) · [English](en/quick-deploy.md) · [Owner 控制台](deployment-console.md) · [持证机构交付](medical-commercial.md) · [员工手册](workspace-manual.md)
 
 推荐从一院一实例开始。为每家机构分配域名、服务账户、加密库、凭据库和单独的恢复密钥。在同一机构库内建立分院并配置岗位范围。服务由 systemd 托管，通过 HTTPS 反向代理供电脑、手机和小程序访问。
 

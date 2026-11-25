@@ -1,6 +1,6 @@
 # Institution workspace manual
 
-[中文版](../workspace-manual.md) · [Health assistant and project agent handbook](agent-handbook.md) · [Desktop menu and screenshot](../desktop-navigation.md)
+[Documentation](README.md) · [中文版](../workspace-manual.md) · [Health assistant and project agent handbook](agent-handbook.md) · [Desktop menu and screenshot](../desktop-navigation.md)
 
 English deployments use English interface labels. Chinese labels in parentheses help staff working across editions locate the same business view. Open the institution's published address for staff access; the workspace path is `/?workspace=1`. On the host machine the default URL is `http://localhost:8765`. Use an account issued by the institution. The first Owner sets a password at installation.
 

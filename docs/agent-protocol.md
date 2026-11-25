@@ -1,6 +1,6 @@
 # 机构只读 A2A 服务
 
-[English](en/agent-protocol.md)
+[文档导航](README.md) · [English](en/agent-protocol.md)
 
 合作方的智能体可用 A2A 1.0 JSON-RPC 查询授权范围内的空床和今日照护工单。两种查询都直接读取当前院区台账，返回汇总数量和任务编号。公开能力卡仅说明接口与认证方式。
 

@@ -1,6 +1,6 @@
 # Read-only A2A service
 
-[中文](../agent-protocol.md)
+[Documentation](README.md) · [中文](../agent-protocol.md)
 
 A partner agent can use A2A 1.0 JSON-RPC to query available beds or today's care workload. Each skill reads the caller's authorized operational records and returns aggregate counts and a task ID. Public discovery contains interface information only.
 

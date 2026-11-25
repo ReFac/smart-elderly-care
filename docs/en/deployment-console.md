@@ -1,5 +1,7 @@
 # Owner deployment console
 
+[Documentation](README.md)
+
 Sign in as Owner and open **部署控制台** in the main sidebar. The console reports the running release, facility profile, chat provider, model, credential availability, paid plan, gateway heartbeat times and change history. Actual access to a model also depends on the upstream account, plan and connectivity.
 
 ## Installation modes

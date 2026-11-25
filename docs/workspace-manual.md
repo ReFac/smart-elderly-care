@@ -1,6 +1,6 @@
 # 机构工作台使用手册
 
-[English edition](en/workspace-manual.md) · [健康助理与开发 Agent 手册](agent-handbook.md) · [带截图的电脑端目录](desktop-navigation.md)
+[文档导航](README.md) · [English edition](en/workspace-manual.md) · [健康助理与开发 Agent 手册](agent-handbook.md) · [带截图的电脑端目录](desktop-navigation.md)
 
 ## 从哪里开始
 

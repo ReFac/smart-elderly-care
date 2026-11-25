@@ -1,6 +1,6 @@
 # 浏览器与小程序交付
 
-[English](en/client-compatibility.md)
+[文档导航](README.md) · [English](en/client-compatibility.md)
 
 机构只需部署一套 HTTPS 网站。员工和家属通过 `/?workspace=1` 登录，访客从 `/visit` 进入，`/roomtour` 和 `/faq` 可以直接访问。小程序与 App 打开同一套业务界面。每个宿主独立登录，服务器按正在使用的账号和机构检查权限。
 

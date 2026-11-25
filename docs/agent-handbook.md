@@ -1,6 +1,6 @@
 # 健康助理使用与 Agent 交接手册
 
-[English edition](en/agent-handbook.md) · [机构业务操作手册](workspace-manual.md) · [Owner 部署控制台](deployment-console.md)
+[文档导航](README.md) · [English edition](en/agent-handbook.md) · [机构业务操作手册](workspace-manual.md) · [Owner 部署控制台](deployment-console.md)
 
 
 国际版可以问“How are things today?”，或说“Open bed management”取得床位管理按钮。法语机构可以问“Comment va la résidence aujourd’hui ?”，西语机构可以问“¿Cómo está hoy la residencia?”。概况中的人数、工单和款项来自当前账号可查看的记录。

@@ -1,5 +1,7 @@
 # 文书识别、语音转写与朗读
 
+[文档导航](README.md)
+
 医疗文书使用 DeepSeek OCR。语音转写与朗读默认使用 DeepSeek，可在服务端独立切换。Owner 控制识别开关，并查看 OCR 页数、ASR 秒数和 TTS 字符用量。部署方在服务端维护 API 凭据。[DeepSeek OCR](https://api-docs.deepseek.com/guides/ocr/) · [DeepSeek ASR](https://api-docs.deepseek.com/guides/asr/)
 
 ## 开通

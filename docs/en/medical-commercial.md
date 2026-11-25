@@ -1,6 +1,6 @@
 # Acceptance for licensed medical and residential care in China
 
-[中文](../medical-commercial.md) · [Deployment](quick-deploy.md) · [Operator manual](workspace-manual.md)
+[Documentation](README.md) · [中文](../medical-commercial.md) · [Deployment](quick-deploy.md) · [Operator manual](workspace-manual.md)
 
 Reviewed in November 2026. Establish the institution's licensed clinical scope, staff qualifications and supplier responsibilities before commissioning. Use a separate instance and keys per contracted institution. Clinical services and residential care have distinct requirements. Compare the site's service safety with mandatory GB 38600—2019 and its health management services with recommended WS/T 876—2026, effective September 1, 2026. [Integrated-care management guide](https://www.nhc.gov.cn/wjw/c100175/202010/accd70521a3444be9e4983c5a64cf0fd.shtml) · [GB 38600—2019](https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=D8AB02F0141FE11A4976E0E94FCF58B4) · [Health standards announcement](https://wsbz.nhc.gov.cn/wsbzw/article/7/2026/3/409002819b90d7ad019d04d301a60065.html)
 

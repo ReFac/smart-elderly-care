@@ -1,6 +1,6 @@
 # Deploy an institution
 
-[中文](../quick-deploy.md) · [Owner console](deployment-console.md) · [Clinical readiness](medical-commercial.md) · [User manual](workspace-manual.md)
+[Documentation](README.md) · [中文](../quick-deploy.md) · [Owner console](deployment-console.md) · [Clinical readiness](medical-commercial.md) · [User manual](workspace-manual.md)
 
 Use a separate instance, domain, service account, database and recovery keys for each contracted institution. Configure branches and staff access within that instance. A systemd service behind a TLS reverse proxy serves desktop and mobile browsers and the mobile app shells.
 

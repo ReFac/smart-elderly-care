@@ -1,6 +1,6 @@
 # Browser and mini-program delivery
 
-[中文](../client-compatibility.md)
+[Documentation](README.md) · [中文](../client-compatibility.md)
 
 Deploy one HTTPS site. Staff and families sign in at `/?workspace=1`. Visitors can open `/visit`, `/roomtour` and `/faq` directly. The mobile app and mini-programs use the same web workflows. Each host has its own sign-in session. The server checks the active account and its institutional scope.
 

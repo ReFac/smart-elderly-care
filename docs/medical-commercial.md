@@ -1,6 +1,6 @@
 # 持证医养机构交付与验收
 
-[English](en/medical-commercial.md) · [部署](quick-deploy.md) · [机构业务需求矩阵](commercial-design.md)
+[文档导航](README.md) · [English](en/medical-commercial.md) · [部署](quick-deploy.md) · [机构业务需求矩阵](commercial-design.md)
 
 截至 2026 年 11 月，本项目将一院一库、员工实名与岗位、可追溯写入、原件保全和人工核对作为交付设计。采购验收时应明确实际机构资质、许可的诊疗范围、经办医护资质、实际设备和接口供应商。医养结合机构需要按照资质和服务能力分别落实医疗和养老管理。养老服务安全应对照 GB 38600—2019，健康管理服务可对照自 2026 年 9 月 1 日起实施的推荐性标准 WS/T 876—2026。[医养结合机构管理指南](https://www.nhc.gov.cn/wjw/c100175/202010/accd70521a3444be9e4983c5a64cf0fd.shtml) · [GB 38600—2019](https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=D8AB02F0141FE11A4976E0E94FCF58B4) · [卫生健康标准公告](https://wsbz.nhc.gov.cn/wsbzw/article/7/2026/3/409002819b90d7ad019d04d301a60065.html)
 
