@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>慢性病标注回归</title><body>
+<main></main><output>运行中</output><div id="announcer"></div>
+<script type="module">
+import { healthProfile } from '../../web/features/resident-health.js';
+import { formDialog } from '../../web/lib/dialogs.js';
+import * as ui from '../../web/lib/ui.js';
+
+const person = { id: 'r1', name: '测试甲', status: '在住' };
+const data = { revision: 8, canRecordChronic: true, chronic: null, chronicHistory: [], additions: [], conversations: [] };
+const foreign = { id: 'v2', residentId: 'r2', fields: { diagnosis: '其他档案的私密原文' } };
+const visit = { id: 'v1', residentId: 'r1', fields: { diagnosis: '医生确认高血压。', eventDate: '2026-11-25' } };
+let approved = false;
+const commands = [];
+const ctx = { ui, dialog: formDialog, toast() {},
+  state: { user: { kind: 'owner' }, residents: [person], residentRooms: {r1:'101'}, medicalVisits: [foreign, visit] },
+  async get() { return structuredClone(data); }, async confirmChange() { return approved && {}; },
+};
+window.fetch = async (_, request) => {
+  const command = JSON.parse(request.body);
+  commands.push(command);
+  data.chronic = { ...command.payload, day: '2026-11-25' };
+  data.chronicHistory.unshift(data.chronic);
+  data.revision++;
+  return { ok: true, json: async () => ({}) };
+};
+const check = (v, text) => { if (!v) throw Error(text); };
+const flush = () => new Promise(resolve => setTimeout(resolve, 15));
+const button = (root, text) => [...root.querySelectorAll('button')].find(b => b.textContent === text);
+try {
+  const brief = healthProfile(ctx, person, { compact: true }), full = healthProfile(ctx, person);
+  document.querySelector('main').append(brief, full);
+  await flush();
+  check(brief.textContent.includes('慢性病未登记') && !button(brief, '核对慢性病'), '简易档案展示尚未登记');
+  button(full, '核对慢性病').click();
+  let form = document.querySelector('dialog form'), status = form.querySelector('select');
+  status.value = 'confirmed'; status.dispatchEvent(new Event('change'));
+  const select = form.querySelector('fieldset select');
+  check(select.options.length === 2 && !select.textContent.includes(foreign.fields.diagnosis), '只接受本人的就诊记录');
+  select.value = 'v1'; select.dispatchEvent(new Event('change'));
+  check(form.querySelector('blockquote').textContent === visit.fields.diagnosis, '核对完整原文');
+  form.querySelector('fieldset input[list]').value = '高血压';
+  form.requestSubmit(); await flush();
+  check(!commands.length, '取消确认不写入');
+  approved = true; form.requestSubmit(); await flush();
+  check(commands[0]?.action === 'dossier.recordChronic' && commands[0].payload.items[0].visitId === 'v1', '签认写入');
+  check(brief.textContent.includes('慢性病高血压') && full.textContent.includes(visit.fields.diagnosis), '同时更新两种档案');
+  button(full, '核对慢性病').click();
+  form = document.querySelector('dialog form'); status = form.querySelector('select');
+  check(status.value === 'confirmed' && form.querySelector('fieldset select').value === 'v1', '再编辑保留依据');
+  status.value = 'none'; status.dispatchEvent(new Event('change'));
+  form.querySelector('textarea').value = '已核对订正依据'; form.requestSubmit(); await flush();
+  check(brief.textContent.includes('经核对无已知慢性病') && full.textContent.includes('历史标注（1）'), '区分已核实无与未登记且留历史');
+  data.canRecordChronic = false;
+  const viewer = healthProfile(ctx, person); document.querySelector('main').append(viewer); await flush();
+  check(!button(viewer, '核对慢性病'), '只读权限');
+  document.querySelector('output').textContent = 'PASS';
+} catch (error) { document.querySelector('output').textContent = 'FAIL ' + error.message; }
+</script></body></html>

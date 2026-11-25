@@ -9,6 +9,7 @@ const titles = {
   'portal.reportMedication': '本人填报或更正用药',
   'care.healthNote': '记录个人健康情况',
   'dossier.signHealthIntro': '签认个人健康简介',
+  'dossier.recordChronic': '核对慢性病标注',
   'ops.supplyOrder': '发布物资工单',
   'ops.publishNotice': '发布全员通知',
   'ops.finishSupplyOrder': '完成物资工单',

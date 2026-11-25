@@ -1,11 +1,16 @@
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from email.message import Message
+from io import BytesIO
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from platform_core import portal, reset_links, secure_storage, visitor_access
 from platform_core.store import SignedOut, Store
+from server import Handler
 
 
 class VisitorAccessTests(TestCase):
@@ -27,6 +32,80 @@ class VisitorAccessTests(TestCase):
 
     def owner_change(self, token, action, **payload):
         return self.store.execute(action, payload, self.store.version(token)["revision"], token)
+
+    def test_public_password_registration_creates_isolated_login_without_contact_or_lead(self):
+        signup = {"username": "  Tour.Guest  ", "password": "my-own-secret-passphrase"}
+        owner, _ = self.store.login("owner", "visitor-test-only")
+        before = self.store.snapshot(owner)["data"].get("leadContacts", [])
+        handler = Handler.__new__(Handler)
+        handler.store, handler.client_address = self.store, ("127.0.0.1", 0)
+        handler.path = "/api/public/visitor/register"
+        handler.public_origin, handler.update_gate = "https://care.invalid", None
+        body = json.dumps(signup).encode()
+        handler.headers = Message()
+        for name, value in {"Host": "care.invalid", "Origin": "https://care.invalid",
+                            "Content-Type": "application/json", "Content-Length": str(len(body))}.items():
+            handler.headers[name] = value
+        handler.rfile = BytesIO(body)
+        replies = []
+        handler.send_json = lambda *args: replies.append(args)
+        handler.dispatch("POST")
+        status, reply, cookie = replies[0]
+        self.assertEqual(status, 201)
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("Secure", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        token = cookie.split(";")[0].removeprefix("nh_session=")
+        self.assertEqual(reply["user"]["username"], "tour.guest")
+        self.assertEqual(reply["user"]["routes"], ["tour", "faq", "account"])
+        self.assertTrue(visitor_access.status(self.store, None, token)["signedIn"])
+        data = self.store.snapshot(token)["data"]
+        self.assertEqual(data["residents"], [])
+        self.assertNotIn("accounts", data)
+        self.assertEqual(data["allowedActions"], ["account.changePassword"])
+        with self.assertRaises(PermissionError):
+            self.owner_change(token, "access.create")
+        self.store.logout(token)
+        with self.assertRaises(SignedOut):
+            self.store.snapshot(token)
+        _, guest = self.store.login("tour.guest", signup["password"])
+        self.assertEqual(guest["id"], reply["user"]["id"])
+        with closing(self.store.connect()) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM identity_contacts WHERE account_id=?",
+                                        (guest["id"],)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT count(*) FROM visitor_sessions").fetchone()[0], 0)
+        self.assertEqual(self.store.snapshot(owner)["data"].get("leadContacts", []), before)
+
+    def test_public_signup_rejects_privileged_fields_and_preserves_existing_identities(self):
+        payload = {"username": "reserved.name", "password": "a-private-password"}
+        for extra in ({"role": "Owner"}, {"residentId": "r001"}, {"phone": "13900000001"}):
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                visitor_access.register(self.store, {**payload, **extra}, "test")
+        with self.assertRaises(ValueError):
+            visitor_access.register(self.store, {**payload, "password": "short"}, "test")
+        owner, _ = self.store.login("owner", "visitor-test-only")
+        with self.assertRaises(PermissionError):
+            visitor_access.register(self.store, payload, "test", owner)
+        with self.assertRaisesRegex(ValueError, "已被使用"):
+            visitor_access.register(self.store, {**payload, "username": "OWNER"}, "test")
+
+        def try_register(password):
+            try:
+                _, user = visitor_access.register(self.store, {**payload, "password": password}, "test")
+            except ValueError as error:
+                self.assertIn("已被使用", str(error))
+                return None
+            return user["id"], password
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(try_register, ("private-phrase-one", "private-phrase-two")))
+        winner, = [result for result in results if result]
+        _, actual = self.store.login(payload["username"], winner[1])
+        self.assertEqual(actual["id"], winner[0])
+        with closing(self.store.connect()) as db:
+            self.assertEqual(self.store.actor(db, owner)["kind"], "owner")
+            self.assertEqual(db.execute("SELECT count(*) FROM accounts").fetchone()[0], 2)
+            self.assertEqual(db.execute("SELECT count(*) FROM audit WHERE action='access.registerCustomer'").fetchone()[0], 1)
 
     def test_public_branding_defaults_are_generic_and_preserve_configured_names(self):
         self.assertEqual(self.store.branding(), {

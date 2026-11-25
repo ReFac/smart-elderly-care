@@ -1,11 +1,10 @@
 import { colorModeControl } from './lib/color-mode.js';
 
-document.querySelector('.staff-link').before(colorModeControl());
+document.querySelector('.account-actions').prepend(colorModeControl());
 
 const visit = document.querySelector('#visit-form');
 const callback = document.querySelector('#callback-form');
-const dialog = document.querySelector('#callback');
-const status = document.querySelector('#load-error');
+const booking = document.querySelector('#visit-request');
 const date = visit.elements.day;
 const time = visit.elements.time;
 const localDay = new Intl.DateTimeFormat('sv-SE', {
@@ -25,26 +24,21 @@ function updatePreference() {
 }
 date.addEventListener('change', updatePreference);
 time.addEventListener('change', updatePreference);
+function openBooking() {
+  if (!booking.open) booking.showModal();
+}
+document.querySelector('#book-visit').addEventListener('click', openBooking);
+document.querySelector('a[href="#book-visit"]').addEventListener('click', event => {
+  event.preventDefault();
+  openBooking();
+});
+if (location.hash === '#book-visit') openBooking();
 document.querySelector('#open-callback').addEventListener('click', () => {
   callback.elements.campusId.value = visit.elements.campusId.value;
-  dialog.showModal();
+  callback.closest('dialog').showModal();
 });
-document.querySelector('#close').addEventListener('click', () => dialog.close());
-
-const pick = document.querySelector('#pick-phone');
-if (window.isSecureContext && typeof navigator.contacts?.select === 'function') {
-  pick.hidden = false;
-  pick.addEventListener('click', async () => {
-    const error = callback.querySelector('.form-error');
-    error.textContent = '';
-    try {
-      const [card] = await navigator.contacts.select(['tel'], { multiple: false });
-      if (card?.tel?.length) callback.elements.phone.value = card.tel[0];
-      else if (card) error.textContent = '这张名片没有电话号码，请手动填写。';
-    } catch (e) {
-      if (e.name !== 'AbortError') error.textContent = '可手动填写手机号。';
-    }
-  });
+for (const close of document.querySelectorAll('[data-close]')) {
+  close.addEventListener('click', () => close.closest('dialog').close());
 }
 
 function enableForm(form, source) {
@@ -81,7 +75,7 @@ function enableForm(form, source) {
   });
 }
 enableForm(visit, 'visit');
-enableForm(callback, 'consent');
+enableForm(callback, 'callback');
 
 async function load() {
   try {
@@ -98,7 +92,9 @@ async function load() {
       form.querySelector('[type=submit]').disabled = false;
     }
   } catch {
-    status.textContent = '院区信息暂时无法载入，请刷新后重试。';
+    for (const form of [visit, callback]) {
+      form.querySelector('.form-error').textContent = '院区信息暂时无法载入，请刷新后重试。';
+    }
   }
 }
 load();

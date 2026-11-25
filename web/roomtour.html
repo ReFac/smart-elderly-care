@@ -17,14 +17,17 @@
   <header class="site-header">
     <div class="site-wrap site-nav">
       <a class="site-brand" href="/visit"><img src="/assets/mark.svg" width="34" height="34" alt=""><strong data-tour-brand>养老机构</strong></a>
-      <nav aria-label="导览导航"><a href="/visit">官网首页</a><a href="/visit#appointment">预约参观</a></nav>
-      <button class="secondary visitor-entry" type="button" id="visitor-open">访客登录</button>
+      <nav aria-label="导览导航"><a href="/visit">官网首页</a><a href="/visit#book-visit">预约参观</a></nav>
+      <div class="site-actions account-actions">
+        <a class="staff-link" href="/?workspace=1">账号登录</a>
+        <a class="secondary" href="/visitor-register.html">免手机号注册</a>
+      </div>
     </div>
   </header>
   <main id="main" class="site-wrap tour-workspace">
     <header class="tour-title">
       <div><h1>3D 环境导览</h1><p>示范场景供线上体验，实际环境请来院参观。</p></div>
-      <a href="/visit#appointment" class="primary">预约实地参观</a>
+      <a href="/visit#book-visit" class="primary">预约实地参观</a>
     </header>
     <div class="tour-layout">
       <section class="tour-viewer" aria-labelledby="scene-name">
@@ -57,30 +60,5 @@
       </aside>
     </div>
   </main>
-  <dialog id="visitor-dialog" aria-labelledby="visitor-title">
-    <div class="dialog-head"><h2 id="visitor-title">访客快捷登录</h2><button type="button" id="visitor-close" aria-label="关闭登录提示">×</button></div>
-    <p class="visitor-intro" id="visitor-intro">可以继续浏览，也可以验证手机号登录或注册顾客账号。</p>
-    <p id="visitor-service" class="visitor-service" role="status"></p>
-    <form id="visitor-phone-form" hidden>
-      <label>中国大陆手机号<input name="phone" type="tel" inputmode="numeric" maxlength="18" required autocomplete="tel-national"></label>
-      <label class="consent"><input name="consent" type="checkbox" required><span>我同意验证手机号，用于登录或建立顾客账号。</span></label>
-      <button type="submit" class="primary">发送验证码</button>
-    </form>
-    <div id="visitor-demo" class="visitor-demo" hidden>
-      <p>演示号码 <strong>13900000000</strong>，用于体验验证流程。</p>
-      <button type="button" id="visitor-demo-fill" class="text-action">填入演示号码</button>
-    </div>
-    <form id="visitor-code-form" hidden>
-      <label>短信验证码<input name="code" type="text" pattern="[0-9]{8}" maxlength="8" required inputmode="numeric" autocomplete="one-time-code"></label>
-      <p class="visitor-demo" id="visitor-demo-code" hidden></p>
-      <div class="visitor-actions"><button type="submit" class="primary">验证并登录</button><button id="visitor-restart" type="button" class="text-action">更换号码</button></div>
-    </form>
-    <p id="visitor-error" class="form-error" role="alert"></p>
-    <div class="visitor-bottom">
-      <button class="secondary" type="button" id="visitor-wechat" disabled>微信快捷登录暂未开通</button>
-      <button class="secondary" type="button" id="visitor-continue">继续浏览</button>
-      <a href="/visit#appointment">预约参观或请求回电</a>
-    </div>
-  </dialog>
 </body>
 </html>

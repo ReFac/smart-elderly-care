@@ -991,7 +991,7 @@ class Store:
                     summary = daily_life.propose(db, data, user, payload, now)
                 elif action == "care.confirmGroupActivity":
                     summary = daily_life.confirm(db, data, user, payload, now)
-                elif action in ("care.healthNote", "dossier.signHealthIntro"):
+                elif action in ("care.healthNote", "dossier.signHealthIntro", "dossier.recordChronic"):
                     summary = resident_health.command(db, data, user, action, payload, now)
                 elif action == "care.timelineSettings":
                     summary = care_timeline.configure(db, data, user, payload)

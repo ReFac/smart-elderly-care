@@ -1,4 +1,4 @@
-"""Phone-verified customer registration and isolated public tour sessions."""
+"""Self-service customer accounts and isolated SMS tour sessions."""
 
 from contextlib import closing
 import hmac
@@ -116,21 +116,45 @@ def _verified_account(store, db, phone):
     if row:
         return row["id"] if row["enabled"] else None
     aid = uuid4().hex
-    username, salt = "visitor-" + aid[:20], secrets.token_bytes(16)
-    password_hash = access._digest(secrets.token_urlsafe(32), salt)
+    salt = secrets.token_bytes(16)
+    return _new_customer(store, db, aid, "visitor-" + aid[:20], salt,
+                         access._digest(secrets.token_urlsafe(32), salt), verified_phone=phone)
+
+
+def _new_customer(store, db, aid, username, salt, password_hash, *, verified_phone=None):
     history.watch(db, "access.registerCustomer")
-    db.execute(
+    inserted = db.execute(
         """INSERT INTO accounts(id,username,display_name,kind,role,salt,password_hash)
-        VALUES(?,?,?,'family',?,?,?)""",
+        VALUES(?,?,?,'family',?,?,?) ON CONFLICT(username) DO NOTHING""",
         (aid, username, "参观顾客", portal.CUSTOMER_ROLE, salt, password_hash),
     )
-    db.execute("INSERT INTO identity_contacts VALUES(?,'sms',?,1)", (aid, phone))
+    if not inserted.rowcount:
+        raise ValueError("此登录名已被使用")
+    if verified_phone:
+        db.execute("INSERT INTO identity_contacts VALUES(?,'sms',?,1)", (aid, verified_phone))
     revision = db.execute("UPDATE workspace SET revision=revision+1 WHERE id=1 RETURNING revision").fetchone()[0]
     activity.write(
         db, revision, store.now().isoformat(), "access.registerCustomer",
-        "顾客通过环境导览验证手机号后注册", access.account(db, aid), {}, {},
+        "顾客通过环境导览验证手机号后注册" if verified_phone else "顾客通过公开页面自行注册",
+        access.account(db, aid), {}, {},
     )
     return aid
+
+
+def register(store, payload, peer, current_session=None):
+    if not isinstance(payload, dict) or set(payload) != {"username", "password"}:
+        raise ValueError("请仅填写登录名和密码")
+    username = access.account_username(payload["username"])
+    password = access._password(payload["password"])
+    store.public_submissions.check(("registration", peer))
+    with closing(store.connect()) as db, db:
+        if access.authenticate(db, current_session):
+            raise PermissionError("请先退出当前账号再注册顾客账号")
+        salt = secrets.token_bytes(16)
+        password_hash = access._digest(password, salt)
+        db.execute("BEGIN IMMEDIATE")
+        aid = _new_customer(store, db, uuid4().hex, username, salt, password_hash)
+        return access.issue_session(db, aid), access.account(db, aid)
 
 
 def verify(store, payload, peer, *, demo=False):

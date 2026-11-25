@@ -21,7 +21,10 @@
         <a href="#care">照护服务</a>
         <a href="#plan">来访安排</a>
       </nav>
-      <a class="staff-link" href="/?workspace=1">员工与家属登录</a>
+      <div class="site-actions account-actions">
+        <a class="staff-link" href="/?workspace=1">账号登录</a>
+        <a class="secondary" href="/visitor-register.html">免手机号注册</a>
+      </div>
     </div>
   </header>
   <main id="main">
@@ -32,7 +35,7 @@
         <p>了解起居、用餐和日常照护。先在线走一遍，再和家人一起安排来院参观。</p>
         <div class="site-actions">
           <a class="primary" href="/roomtour">进入 3D 环境导览</a>
-          <a class="secondary" href="#appointment">预约来院</a>
+          <a class="secondary" href="#book-visit">预约来院</a>
         </div>
       </div>
       <figure class="hero-figure">
@@ -92,48 +95,47 @@
     <section class="site-wrap reception" id="appointment" aria-labelledby="visit-title">
       <div class="reception-intro">
         <h2 id="visit-title">预约来院参观</h2>
-        <p>请选择想参观的院区，填写接待人员可以联系到您的号码。日期和时刻可以晚些再定。</p>
-        <aside class="callback-card">
-          <h3>想先电话聊一聊？</h3>
-          <p>留下号码，让接待人员回电介绍试住、费用和照护服务。</p>
-          <button type="button" class="secondary" id="open-callback">请给我回电</button>
-        </aside>
+        <p>选好院区后，接待人员将与您商定来访时间。</p>
+        <button type="button" class="primary" id="book-visit">填写参观意愿</button>
       </div>
-      <div class="form-card">
-        <h3>填写参观意愿</h3>
-        <form id="visit-form">
-          <label>参观院区<select required name="campusId" class="campuses" disabled><option value="">正在载入院区…</option></select></label>
-          <div class="pair">
-            <label>您的称呼<input name="name" required maxlength="40" autocomplete="name" placeholder="怎么称呼您"></label>
-            <label>联系电话<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" required placeholder="可接通的手机号"></label>
-          </div>
-          <fieldset>
-            <legend>期望参观时间 <small>选填 · 北京时间</small></legend>
-            <div class="pair"><label><span class="sr-only">期望参观日期</span><input name="day" type="date"></label>
-              <label><span class="sr-only">期望参观时刻</span><select name="time"><option value="">请选择时间</option></select></label></div>
-          </fieldset>
-          <label>希望了解的内容 <small>选填</small><textarea name="note" rows="3" maxlength="400" placeholder="例如 想看看双人间，了解试住费用"></textarea></label>
-          <label class="consent"><input type="checkbox" required name="consent"><span>我同意所选院区使用我填写的号码联系我，安排本次咨询或参观。</span></label>
-          <p class="form-error" role="alert"></p>
-          <p class="form-error" role="alert" id="load-error"></p>
-          <button class="primary" type="submit" disabled>提交参观意愿</button>
-        </form>
-        <div class="receipt" id="visit-receipt" role="status" tabindex="-1" hidden><h3>参观意愿已送达</h3><p>请留意接待人员来电。电话确认后，工作人员会为您留出接待时段。</p></div>
-      </div>
+      <aside class="callback-card">
+        <h3>想先电话聊一聊？</h3>
+        <p>可请接待人员回电介绍试住、费用和照护服务。</p>
+        <button type="button" class="secondary" id="open-callback">请给我回电</button>
+      </aside>
     </section>
   </main>
   <footer class="site-footer">
     <div class="site-wrap footer-layout">
       <a class="site-brand" href="/visit"><img src="/assets/mark.svg" width="32" height="32" alt=""><strong data-brand>养老机构</strong></a>
-      <nav aria-label="页脚导航"><a href="/roomtour">环境导览</a><a href="#appointment">来访预约</a><a href="/faq">常见问题</a><a href="/?workspace=1">员工与家属登录</a></nav>
+      <nav aria-label="页脚导航"><a href="/roomtour">环境导览</a><a href="#appointment">来访预约</a><a href="/faq">常见问题</a><a href="/?workspace=1">账号登录</a></nav>
     </div>
   </footer>
+  <dialog id="visit-request" aria-labelledby="visit-request-title">
+    <div class="dialog-head"><h2 id="visit-request-title">填写参观意愿</h2><button type="button" aria-label="关闭参观申请" data-close>×</button></div>
+    <form id="visit-form" method="post">
+      <label>参观院区<select required name="campusId" class="campuses" disabled><option value="">正在载入院区…</option></select></label>
+      <div class="pair">
+        <label>您的称呼<input name="name" required maxlength="40" autocomplete="name" placeholder="怎么称呼您"></label>
+        <label>联系电话<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" required placeholder="手机或带区号的固定电话"></label>
+      </div>
+      <fieldset>
+        <legend>期望参观时间 <small>选填 · 北京时间</small></legend>
+        <div class="pair"><label><span class="sr-only">期望参观日期</span><input name="day" type="date"></label>
+          <label><span class="sr-only">期望参观时刻</span><select name="time"><option value="">请选择时间</option></select></label></div>
+      </fieldset>
+      <label>希望了解的内容 <small>选填</small><textarea name="note" rows="3" maxlength="400" placeholder="例如 想看看双人间，了解试住费用"></textarea></label>
+      <label class="consent"><input type="checkbox" required name="consent"><span>我同意所选院区使用我填写的号码联系我，安排本次咨询或参观。</span></label>
+      <p class="form-error" role="alert"></p>
+      <button class="primary" type="submit" disabled>提交参观意愿</button>
+    </form>
+    <div class="receipt" id="visit-receipt" role="status" tabindex="-1" hidden><h3>参观意愿已送达</h3><p>请留意接待人员来电。电话确认后，工作人员会为您留出接待时段。</p></div>
+  </dialog>
   <dialog id="callback" aria-labelledby="callback-title">
-    <div class="dialog-head"><h2 id="callback-title">请接待人员回电</h2><button type="button" id="close" aria-label="关闭">×</button></div>
-    <form id="callback-form">
+    <div class="dialog-head"><h2 id="callback-title">请接待人员回电</h2><button type="button" data-close aria-label="关闭回电申请">×</button></div>
+    <form id="callback-form" method="post">
       <label>咨询院区<select name="campusId" required class="campuses" disabled><option value="">正在载入院区…</option></select></label>
-      <label>我的手机号<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" required></label>
-      <button type="button" id="pick-phone" class="text-action" hidden>从本机名片选择我的号码</button>
+      <label>回电号码<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" required placeholder="手机或带区号的固定电话"></label>
       <label class="consent"><input type="checkbox" required name="consent"><span>我同意所选院区保存这个号码，并就本次养老服务咨询给我回电。</span></label>
       <p class="form-error" role="alert"></p><button class="primary" type="submit" disabled>同意并请求回电</button>
     </form>

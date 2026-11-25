@@ -10,7 +10,7 @@ LARGE_BODY = 512 * 1024
 SLOW_WRITES = frozenset({
     "/api/assistant/chat", "/api/assistant/chat/stream", "/api/assistant/voice",
     "/api/agent/voice/transcriptions", "/api/staff/resume/preview",
-    "/api/auth/login", "/api/auth/verify", "/api/auth/reset-link/redeem", "/api/auth/reset-link/send",
+    "/api/public/visitor/register", "/api/auth/login", "/api/auth/verify", "/api/auth/reset-link/redeem", "/api/auth/reset-link/send",
     "/api/auth/passkeys/enroll-options", "/api/auth/passkeys/revoke",
     "/api/updates/download", "/api/updates/install", "/api/backups/imports/preview",
 })

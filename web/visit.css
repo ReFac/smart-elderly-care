@@ -226,3 +226,13 @@ dialog::backdrop { background: #14291fe0; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
 }
+
+.reception-intro > .primary { margin-top: 1rem; }
+.reception > .callback-card { margin-top: 0; }
+.account-actions { gap: .55rem; }
+.register-page { width: min(460px, calc(100% - 32px)); margin: clamp(28px, 8vh, 85px) auto; }
+.register-page h1 { font-size: 1.65rem; line-height: 1.3; }
+.register-page .form-card > p { color: var(--muted); margin: .7rem 0 1.2rem; }
+.register-page .form-card > p:last-child { margin: 1.2rem 0 0; }
+.register-page form small { margin-top: -.55rem; }
+.register-page .primary { width: 100%; }

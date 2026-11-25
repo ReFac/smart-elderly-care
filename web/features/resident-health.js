@@ -1,5 +1,6 @@
 import { btn, choose, field, memo, node, today } from './shared.js';
 import { residentLabel, staffLabel } from './people-labels.js';
+import { chronicConditions } from './chronic-conditions.js';
 
 const titles = { intro: '填写健康简介', addition: '补充健康情况', conversation: '记录本人健康谈话' };
 const hints = {
@@ -29,6 +30,7 @@ function citation(point) {
 export function healthProfile(ctx, person, {compact = false} = {}) {
   const panel = node('section', compact ? 'rounds-card resident-brief-card' : 'rounds-card');
   panel.dataset.roundsResidentId = person.id;
+  panel.dataset.healthCard = '';
   const endpoint = '/api/residents/' + encodeURIComponent(person.id) + '/health-profile';
   const name = residentLabel(ctx, person);
   let data;
@@ -56,7 +58,11 @@ export function healthProfile(ctx, person, {compact = false} = {}) {
     }
     if (!response.ok) throw new Error(result.error || '健康记录保存失败');
     await load();
-    ctx.toast('已保存到' + name + '的健康简介。');
+    for (const other of document.querySelectorAll('[data-health-card]')) {
+      if (other !== panel && other.dataset.roundsResidentId === person.id)
+        other.dispatchEvent(new Event('health-reload'));
+    }
+    ctx.toast('已保存到' + name + '的健康档案。');
     return true;
   }
   function edit(kind) {
@@ -150,6 +156,7 @@ export function healthProfile(ctx, person, {compact = false} = {}) {
     } else {
       children.push(node('p', 'fx-muted', '尚未填写健康简介。'));
     }
+    children.push(chronicConditions(ctx, person, data, compact, save));
     if (compact) {
       panel.replaceChildren(...children);
       return;
@@ -172,6 +179,7 @@ export function healthProfile(ctx, person, {compact = false} = {}) {
     panel.replaceChildren(...children);
   }
   panel.append(node('h3', '', '健康简介'));
+  panel.addEventListener('health-reload', load);
   load();
   return panel;
 }

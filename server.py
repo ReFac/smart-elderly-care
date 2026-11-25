@@ -644,6 +644,11 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get_content_type() not in ("application/pdf", "image/png", "image/jpeg"):
                 raise InvalidMedia("请选择 PDF、PNG 或 JPEG 简历")
             return self.send_json(200, staff_resume.preview(self.store, token, self.read_body(staff_resume.MAX_BYTES)))
+        if path == "/api/public/visitor/register":
+            token, user = visitor_access.register(
+                self.store, self.read_json(2048), self.client_address[0], self.token()
+            )
+            return self.send_json(201, {"user": user}, self.session_cookie(token))
         if path == "/api/public/visitor/code":
             result = visitor_access.request_code(
                 self.store, self.read_json(512), self.client_address[0], demo=self.visitor_demo()

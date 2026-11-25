@@ -4,7 +4,7 @@ import {
 } from './shared.js';
 import { bookingForm, schedulePage } from './lead-schedule.js';
 
-const sources = { consent: '宣传页授权留号', visit: '网页申请参观', manual: '员工登记' };
+const sources = { callback: '主动请求回电', consent: '授权留号（历史）', visit: '网页申请参观', manual: '员工登记' };
 const outcomes = ['有参观意向', '继续联系', '未接通', '暂无意向'];
 const chinaClock = new Intl.DateTimeFormat('sv-SE', {
   timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -161,7 +161,10 @@ function registry(ctx, archive) {
   const filters = [{ text: '待电话回访', match: r => !exempt(r) && r.status === '待回访' },
     { text: '待接待', match: r => r.status === '待接待' }, { text: '跟进中', match: r => r.status === '跟进中' },
     { text: '免回访', match: exempt }];
-  const sourceFilters = Object.entries(sources).map(([id, text]) => ({ text, match: r => r.source === id }));
+  const requestedCallbacks = new Set(events(ctx).filter(e => e.kind === '请求回电').map(e => e.leadId));
+  const sourceFilters = Object.entries(sources).map(([id, text]) => ({
+    text, match: r => r.source === id || (id === 'callback' && requestedCallbacks.has(r.id)),
+  }));
   const choices = archive ? sourceFilters : [...filters, ...sourceFilters];
   return table(ctx, {
     title: archive ? '近 365 天归档客户' : '跟进中的客户',

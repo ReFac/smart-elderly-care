@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN" class="visitor-site">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f6f8f2">
+  <title>访客注册 · 养老照护与参观</title>
+  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/visit.css">
+  <link rel="stylesheet" href="/color-mode.css">
+  <script type="module" src="/visitor-register.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-wrap site-nav">
+      <a class="site-brand" href="/visit"><img src="/assets/mark.svg" width="34" height="34" alt=""><strong>访客服务</strong></a>
+      <nav aria-label="访客导航"><a href="/visit">官网首页</a><a href="/roomtour">环境导览</a></nav>
+      <div class="site-actions account-actions"><a class="staff-link" href="/?workspace=1">账号登录</a></div>
+    </div>
+  </header>
+  <main class="register-page">
+    <section class="form-card" aria-labelledby="register-title">
+      <h1 id="register-title">注册访客账号</h1>
+      <p>使用登录名和密码即可注册，免填手机号。</p>
+      <form id="visitor-register" method="post">
+        <label>登录名<input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required minlength="3" maxlength="40" aria-describedby="username-help"></label>
+        <small id="username-help">3–40 位，以字母或数字开头，可使用点、下划线和短横线。</small>
+        <label>密码<input name="password" type="password" autocomplete="new-password" required aria-describedby="password-help"></label>
+        <small id="password-help">请设置 10–128 个字符，并保存好您的登录名和密码。</small>
+        <p class="form-error" role="alert" id="register-error"></p>
+        <button type="submit" class="primary" disabled>注册并进入访客服务</button>
+        <noscript>请启用 JavaScript 完成注册。</noscript>
+      </form>
+      <p>已有账号？<a href="/?workspace=1">直接登录</a></p>
+    </section>
+  </main>
+</body>
+</html>

@@ -105,6 +105,53 @@ class ResidentHealthTests(TestCase):
                 "confirmed": True,
             },
         )
+        return draft["draftId"]
+
+    def test_chronic_register_human_confirmation_history_and_scoped_evidence(self):
+        action = "dossier.recordChronic"
+        visit_id = self.visit("r001", "医生记录：确诊高血压。")
+        foreign = self.visit("r002", "医生记录：确诊高血压。")
+        self.note("intro", "家属说可能有糖尿病。")
+        self.assertIsNone(self.view()["chronic"])
+        aide = self.account("chronic-aide", ["care", "residents"])
+        fields = {"residentId": "r001", "status": "confirmed", "requestId": "one", "confirmed": True,
+                  "reviewNote": "", "items": [{"name": "高血压", "source": "", "visitId": visit_id},
+                  {"name": "慢性肾脏病", "source": "人工核对外院出院小结", "visitId": ""}]}
+        self.assertNotIn(action, self.store.snapshot(aide)["data"]["allowedActions"])
+        with self.assertRaises(PermissionError):
+            self.cmd(action, fields, aide)
+        reviewer = self.account("chronic-read", ["medical", "clinical"])
+        self.assertFalse(self.view(reviewer)["canRecordChronic"])
+        with self.assertRaises(PermissionError):
+            self.cmd(action, fields, reviewer)
+        for updated in ({"confirmed": False}, {"items": []}, {"status": "none"},
+                        {"items": [fields["items"][0], fields["items"][0]]},
+                        {"items": [{"name": "高血压", "source": "", "visitId": foreign}]},
+                        {"items": [{"name": "病历以外的诊断", "source": "", "visitId": visit_id}]},
+                        {"items": [{"name": "高血压", "source": "", "visitId": ""}]}):
+            with self.subTest(updated=updated), self.assertRaises(ValueError):
+                self.cmd(action, {**fields, **updated})
+        self.cmd(action, fields)
+        self.cmd(action, fields)
+        signed = self.view()["chronicHistory"]
+        self.assertEqual(len(signed), 1)
+        self.assertEqual(signed[0]["items"], fields["items"])
+        self.assertEqual(self.view(aide)["chronic"]["items"], [{"name": "高血压"}, {"name": "慢性肾脏病"}])
+        self.assertEqual(self.view(aide)["chronicHistory"], [])
+        self.assertFalse(self.view(aide)["canRecordChronic"])
+        self.assertIsNone(self.view(rid="r002")["chronic"])
+        self.cmd(action, {**fields, "requestId": "two", "items": [], "status": "none", "reviewNote": "已核对更正资料"})
+        self.assertEqual(self.view()["chronic"]["status"], "none")
+        self.assertEqual(len(self.view()["chronicHistory"]), 2)
+        self.assertEqual(self.view()["additions"], [])
+        self.cmd("care.discharge", {"residentId": "r001", "reason": "家属接回"})
+        self.assertFalse(self.view()["canRecordChronic"])
+        with self.assertRaises(ValueError):
+            self.cmd(action, {**fields, "requestId": "three"})
+        with closing(self.store.connect()) as db:
+            self.assertEqual(db.execute(
+                "SELECT residentId FROM audit WHERE action=? LIMIT 1", (action,)
+            ).fetchone()[0], "r001")
 
     def cloud(self, phrase):
         def send(_, body, **unused):
@@ -189,13 +236,17 @@ class ResidentHealthTests(TestCase):
         campus = self.store.facility_resource(self.owner, "directory")["campuses"][-1][
             "id"
         ]
-        outsider = self.account("campus-nurse", ["clinical", "medical", "care"], campus)
+        outsider = self.account("campus-nurse", ["clinical", "medical", "medical.write", "care"], campus)
         draft = self.draft()
         for attempt in (
             lambda: self.view(outsider),
             lambda: self.draft(outsider),
             lambda: self.note("intro", "不应成功", token=outsider),
             lambda: self.sign(draft, outsider),
+            lambda: self.cmd("dossier.recordChronic", {
+                "residentId": "r001", "status": "none", "items": [], "reviewNote": "越区登记",
+                "requestId": "no", "confirmed": True,
+            }, outsider),
         ):
             with self.assertRaises(PermissionError):
                 attempt()
@@ -221,6 +272,10 @@ class ResidentHealthTests(TestCase):
         self.cloud("丙病史")
         draft = self.draft()
         self.sign(draft)
+        self.cmd("dossier.recordChronic", {
+            "residentId": "r001", "status": "confirmed", "requestId": "manual", "confirmed": True,
+            "items": [{"name": "合成病名", "visitId": "", "source": "核对时的私有说明"}], "reviewNote": "",
+        })
         for username, personal in (("elder-self", True), ("plain-relative", False)):
             self.cmd(
                 "access.create",
@@ -241,6 +296,8 @@ class ResidentHealthTests(TestCase):
             "access.update", {"id": self_user["id"], "portalScopes": ["personalHealth"]}
         )
         page = self.view(token)
+        self.assertEqual(page["chronic"], {"day": DAY, "status": "confirmed", "items": [{"name": "合成病名"}]})
+        self.assertNotIn("chronicHistory", page)
         self.assertEqual(
             page["intro"], {"kind": "ai", "text": "医生记录有丙病史。", "day": DAY}
         )

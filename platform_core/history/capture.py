@@ -112,7 +112,7 @@ def watch(db, action):
         prefixes = ("scheduled_work_",)
     if action == "care.confirmMedRound":
         prefixes = ("medication_round_receipts",)
-    if action in ("care.healthNote", "dossier.signHealthIntro"):
+    if action in ("care.healthNote", "dossier.signHealthIntro", "dossier.recordChronic"):
         prefixes = ("resident_health_notes",)
     if action in ("care.reportMedication", "portal.reportMedication"):
         prefixes = ("resident_medication_reports",)

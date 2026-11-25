@@ -145,27 +145,6 @@
 .tour-current { padding: .72rem; border-radius: 6px; background: #f3f8f0; }
 .tour-current h3 { font-size: .9rem; }
 .tour-current p { margin-top: .34rem; color: var(--muted); font-size: .9rem; }
-#visitor-dialog::backdrop { background: #14291f99; }
-.visitor-intro { color: var(--muted); margin-bottom: .7rem; }
-.visitor-service,
-.visitor-demo {
-  margin-block: .55rem;
-  padding: .5rem .65rem;
-  border-radius: 6px;
-  background: var(--sage);
-  color: var(--forest-dark);
-  font-size: .89rem;
-}
-.visitor-actions,
-.visitor-bottom {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .5rem;
-  align-items: center;
-}
-.visitor-bottom { margin-top: 1rem; }
-.visitor-bottom a { color: var(--forest-dark); font-size: .9rem; }
-.visitor-entry:disabled { opacity: 1; background: var(--sage); }
 @media (max-width: 800px) {
   .tour-layout { grid-template-columns: 1fr; }
   .tour-stops { grid-template-columns: repeat(2, minmax(0,1fr)); }

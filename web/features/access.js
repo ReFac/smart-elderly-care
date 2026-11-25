@@ -147,7 +147,7 @@ export function loginScreen(onLogin, branding = {}, onPasskey = null) {
   panel.append(
     node('span', 'access-login-icon', icon('shield', 25)),
     node('h2', '', '登录工作台'),
-    node('p', 'access-login-intro', '使用机构分配的员工、亲属或Owner 账号。'),
+    node('p', 'access-login-intro', '员工、家属与已注册访客可使用自己的账号登录。'),
   );
   const form = node('form', 'access-form access-login-form');
   const [nameRow, name] = inputField('登录账号', 'username', '', {
@@ -182,7 +182,7 @@ export function loginScreen(onLogin, branding = {}, onPasskey = null) {
   });
   const help = node('p', 'access-login-help', [
     icon('info', 16),
-    node('span', '', '账号使用已登记的邮箱或手机验证身份。'),
+    node('span', '', '找回密码时可使用账号已验证的联系方式。'),
   ]);
   const recover = node('button','btn btn-ghost','首次设置 / 找回密码');
   recover.type='button'; recover.onclick=()=>passwordFlow({username:name.value.trim()});
@@ -192,7 +192,9 @@ export function loginScreen(onLogin, branding = {}, onPasskey = null) {
   faq.href = '/faq';
   panel.append(form);
   if (onPasskey) panel.append(passkeyButton('用通行密钥登录', () => passkeySignIn(onPasskey)));
-  panel.append(recover, help, visit, faq, colorModeControl());
+  const register = node('a', 'access-visitor-link', [icon('people', 18), node('strong', '', '免手机号注册访客账号'), icon('chevron', 16)]);
+  register.href = '/visitor-register.html';
+  panel.append(recover, help, register, visit, faq, colorModeControl());
   entry.append(panel);
   main.append(hero, entry);
   return main;

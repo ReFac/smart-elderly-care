@@ -67,6 +67,42 @@ def _load(db, user, rid, *, ai=False):
     return person
 
 
+def _chronic_fields(db, rid, p):
+    status = p.get("status")
+    items = p.get("items")
+    if status not in ("confirmed", "none", "unknown") or not isinstance(items, list) or len(items) > 40:
+        raise ValueError("请核对慢性病登记状态和条目")
+    if bool(items) != (status == "confirmed"):
+        raise ValueError("有已确认慢性病时须登记病名，其他状态应清空病名")
+    review = dossier.text(p, "reviewNote", 300, required=status != "confirmed")
+    confirmed, seen = [], set()
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {"name", "visitId", "source"}:
+            raise ValueError("病名和核对依据有误")
+        name = dossier.text(item, "name", 100, True)
+        if any(ord(c) < 32 for c in name) or name.casefold() in seen:
+            raise ValueError("请逐条填写不重复的确诊病名")
+        seen.add(name.casefold())
+        visit_id = dossier.text(item, "visitId", 32)
+        source = dossier.text(item, "source", 300, required=not visit_id)
+        if visit_id:
+            row = db.execute(
+                """SELECT json_extract(metadata,'$.fields.diagnosis') FROM dossier_visit_records
+                   WHERE resident_id=? AND id=?""", (rid, visit_id)
+            ).fetchone()
+            if source or not row or not row[0] or name not in row[0]:
+                raise ValueError("请核对这位长辈已签认就诊记录中的诊断原文")
+        confirmed.append({"name": name, "visitId": visit_id, "source": source})
+    return {"status": status, "items": confirmed, "reviewNote": review}
+
+
+def _chronic_entry(row, with_sources):
+    snapshot = json.loads(row["refs"])
+    if not with_sources:
+        snapshot = {"status": snapshot["status"], "items": [{"name": i["name"]} for i in snapshot["items"]]}
+    return {**snapshot, "day": row["event_day"]}
+
+
 def read(store, token, rid):
     with closing(store.connect()) as db, db:
         db.execute("BEGIN")
@@ -83,11 +119,18 @@ def read(store, token, rid):
                 raise FileNotFoundError("找不到可查看的个人健康简介")
             result = {
                 "intro": None,
+                "chronic": None,
                 "additions": [],
                 "conversations": [],
                 "canWrite": False,
                 "canGenerate": False,
             }
+            last = db.execute(
+                "SELECT refs,event_day FROM resident_health_notes WHERE resident_id=? AND kind='chronic' ORDER BY rowid DESC LIMIT 1",
+                (rid,),
+            ).fetchone()
+            if last:
+                result["chronic"] = _chronic_entry(last, False)
             for kind, text, day in db.execute(
                 """SELECT kind,content,event_day FROM resident_health_notes
                 WHERE resident_id=? AND kind IN ('ai','intro','addition') ORDER BY rowid DESC""",
@@ -107,6 +150,9 @@ def read(store, token, rid):
                 "SELECT revision FROM workspace WHERE id=1"
             ).fetchone()[0],
             "intro": None,
+            "chronic": None,
+            "chronicHistory": [],
+            "canRecordChronic": editable and can_review and access.has(user, "medical.write"),
             "additions": [],
             "conversations": [],
             "canWrite": editable and access.has(user, "care"),
@@ -117,6 +163,15 @@ def read(store, token, rid):
             (rid,),
         ):
             kind = row["kind"]
+            if kind == "chronic":
+                if result["chronic"] is None or can_review:
+                    item = _chronic_entry(row, can_review)
+                    if can_review:
+                        item.update(at=row["recorded_at"], staff=row["actor_name"], staffId=row["actor"], role=row["actor_role"])
+                        result["chronicHistory"].append(item)
+                    if result["chronic"] is None:
+                        result["chronic"] = item
+                continue
             if kind in ("ai", "intro") and result["intro"]:
                 continue
             entry = {
@@ -225,6 +280,21 @@ def command(db, state, user, action, p, now):
             raise ValueError("健康记录提交编号有误")
         request = "manual/" + req
         refs = []
+    elif action == "dossier.recordChronic":
+        access.require(user, "medical")
+        access.require(user, "clinical")
+        access.require(user, "medical.write")
+        if set(p) != {"residentId", "status", "items", "reviewNote", "confirmed", "requestId"}:
+            raise ValueError("慢性病核对字段有误")
+        refs = _chronic_fields(db, rid, p)
+        kind, day = "chronic", today
+        req = dossier.text(p, "requestId", 80, True)
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+", req):
+            raise ValueError("本次慢性病核对编号有误")
+        request = "chronic/" + req
+        text = {"none": "经核对无已知慢性病", "unknown": "待核实"}.get(
+            refs["status"], "、".join(item["name"] for item in refs["items"])
+        )
     elif action == "dossier.signHealthIntro":
         access.require(user, "medical")
         access.require(user, "clinical")
@@ -287,4 +357,5 @@ def command(db, state, user, action, p, now):
         "intro": "已填写健康简介",
         "addition": "已补充健康简介",
         "conversation": "已记录长辈本人的健康谈话",
+        "chronic": "已核对长辈慢性病标注",
     }[kind]

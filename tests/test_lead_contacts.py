@@ -75,6 +75,34 @@ class LeadContactTests(unittest.TestCase):
         leads.project(self.db, self.state, actor or self.owner, data)
         return data
 
+    def test_explicit_callback_is_separate_from_legacy_consent_and_deduplicated(self):
+        self.assertTrue(self.receive())
+        self.account("family", "亲属", self.a)
+        self.assertTrue(self.view()["leadContacts"][0]["callbackExempt"])
+        self.assertTrue(self.receive(source="callback"))
+        self.assertFalse(self.receive(source="callback"))
+        lead, = self.view()["leadContacts"]
+        self.assertEqual(lead["source"], "consent")
+        self.assertFalse(lead["callbackExempt"])
+        self.assertEqual([e["kind"] for e in self.view()["leadEvents"]], ["授权留号", "请求回电"])
+        self.call(lead["id"], outcome="暂无意向")
+        self.assertTrue(self.receive(source="callback"))
+        self.assertTrue(self.view()["leadContacts"][0]["callbackStopped"])
+        with self.assertRaises(ValueError):
+            self.call(lead["id"])
+
+        self.state["residents"] = [{"id": "resident", "status": "在住", "contact": ""}]
+        self.account("family", "入住长辈", self.b, "resident")
+        with self.assertRaises(ValueError):
+            self.receive(self.b, source="callback", consent=False)
+        self.assertTrue(self.receive(self.b, source="callback"))
+        other = self.view()["leadContacts"][1]
+        self.assertEqual(other["source"], "callback")
+        self.assertEqual(other["callbackExemptReason"], "admitted")
+        with self.assertRaises(ValueError):
+            self.book(other["id"], "callback")
+        self.assertFalse(self.view()["visitBookings"])
+
     def test_consent_is_required_active_sources_excluded_and_no_existence_is_disclosed(
         self,
     ):

@@ -141,6 +141,7 @@ ACTION_GRANTS = {
     "care.confirmMedRound": "care",
     "care.healthNote": "care",
     "dossier.signHealthIntro": "medical",
+    "dossier.recordChronic": "medical.write",
     "care.acceptHandover": "care",
     "care.withdrawHandover": "care",
     "care.addMedication": "clinical",
@@ -397,7 +398,7 @@ def authorize(user, action, payload, state):
         require(user, "staff.manage")
     if action == "care.assess" and "scale" in payload and not can_record_scale(user):
         raise PermissionError("标准量表原表录入需要照护及临床或医疗档案权限")
-    if action in ("dossier.reviewDocument", "dossier.confirmVisit"):
+    if action in ("dossier.reviewDocument", "dossier.confirmVisit", "dossier.recordChronic"):
         require(user, "clinical")
         require(user, "medical")
     if action in VISIT_DOCUMENT_ACTIONS:
@@ -459,7 +460,7 @@ def allowed_actions(user):
         actions = [
             a
             for a in actions
-            if a not in ("dossier.reviewDocument", "dossier.signSummary", "dossier.confirmVisit", "dossier.signHealthIntro")
+            if a not in ("dossier.reviewDocument", "dossier.signSummary", "dossier.confirmVisit", "dossier.signHealthIntro", "dossier.recordChronic")
         ]
     if user["kind"] not in ("owner", "staff") or not has(user, "medical"):
         actions = [a for a in actions if a not in VISIT_DOCUMENT_ACTIONS]
@@ -504,7 +505,7 @@ def can_view_audit(user, action, *, agent_initiator=None, agent_grants=()):
         return has(user, "finance")
     if action == "family.consent":
         return has(user, "relatives") and has(user, "family.share")
-    if action == "dossier.signHealthIntro":
+    if action in ("dossier.signHealthIntro", "dossier.recordChronic"):
         return has(user, "medical") and has(user, "clinical")
     if action in VISIT_DOCUMENT_ACTIONS:
         return has(user, "medical") and has(user, "medical.write")

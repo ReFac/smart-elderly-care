@@ -51,6 +51,13 @@ def collect(db, person):
         ("allergies", "登记的过敏史"),
     ):
         add("登记介绍", rid, label, person.get(key))
+    latest_chronic = db.execute(
+        """SELECT id,content,event_day,refs FROM resident_health_notes
+           WHERE resident_id=? AND kind='chronic' ORDER BY rowid DESC LIMIT 1""", (rid,)
+    ).fetchone()
+    if latest_chronic and json.loads(latest_chronic["refs"])["status"] == "confirmed":
+        add("登记介绍", latest_chronic["id"], "人工核对的慢性病 · " + latest_chronic["event_day"],
+            latest_chronic["content"])
     for nid, kind, text, day in db.execute(
         """SELECT id,kind,content,event_day FROM resident_health_notes
         WHERE resident_id=? AND (kind IN ('addition','conversation') OR rowid=(

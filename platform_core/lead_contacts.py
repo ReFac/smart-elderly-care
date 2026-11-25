@@ -12,6 +12,7 @@ from .profile_fields import phone_number as _phone
 
 LOCAL = ZoneInfo("Asia/Shanghai")
 OUTCOMES = ("有参观意向", "继续联系", "未接通", "暂无意向")
+PUBLIC_EVENTS = {"visit": "申请参观", "callback": "请求回电", "consent": "授权留号"}
 PHONE_TEXT = re.compile(r"(?<![A-Za-z0-9])\+?[0-9][() 0-9-]{5,23}[0-9](?![A-Za-z0-9])")
 SELF_LABEL = re.compile(
     r"(?:^|[\s,;、/|(])(?:长辈本人|长者本人|老人本人|住户本人|本人)(?:的)?(?:联系)?(?:手机号码?|手机号?|电话(?:号码?)?)?[\s:]*$"
@@ -205,7 +206,7 @@ def receive(db, state, payload, now):
         {"source", "campusId", "phone", "consent", "name", "note", "preferredAt"},
     )
     source = payload.get("source")
-    if source not in ("visit", "consent") or payload.get("consent") is not True:
+    if not isinstance(source, str) or source not in PUBLIC_EVENTS or payload.get("consent") is not True:
         raise ValueError("请先确认同意机构使用本次提交的号码联系您")
     campus = payload.get("campusId", facility.HOME_CAMPUS)
     if (
@@ -218,7 +219,7 @@ def receive(db, state, payload, now):
     phone = _phone(payload.get("phone"), mobile=source == "consent")
     if not phone:
         raise ValueError("请填写有效的联系电话，固定电话请含区号")
-    if source == "consent" and any(
+    if source != "visit" and any(
         payload.get(k) for k in ("name", "note", "preferredAt")
     ):
         raise ValueError("参观偏好请从申请参观入口登记")
@@ -242,6 +243,11 @@ def receive(db, state, payload, now):
             )
         ):
             return False
+    if lead is not None and source == "callback":
+        last = next((e for e in reversed(state.get("leadEvents", ()))
+                     if e["leadId"] == lead["id"] and e["kind"] in ("请求回电", "回访", "来电")), None)
+        if last and last["kind"] == "请求回电":
+            return False
     if lead is not None and source == "visit":
         previous = next(
             (
@@ -259,6 +265,12 @@ def receive(db, state, payload, now):
             return False
     if lead is None:
         lead = _new(state, campus, phone, name, note, source, now)
+    if source == "callback":
+        lead["explicitInterest"] = True
+        if phone in _phone_index(db, state)[1]:
+            lead["admissionResolved"] = True
+        elif not lead["callbackStopped"] and lead["status"] == "跟进中":
+            lead["status"] = "待回访"
     if source == "visit":
         lead.update(
             name=name,
@@ -274,7 +286,7 @@ def receive(db, state, payload, now):
         lead,
         None,
         now,
-        "申请参观" if source == "visit" else "授权留号",
+        PUBLIC_EVENTS[source],
         name=name,
         feedback=note,
         consent=True,

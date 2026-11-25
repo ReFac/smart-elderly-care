@@ -55,6 +55,7 @@ PERSON_ACTIONS = {
     "care.confirmMedRound",
     "care.healthNote",
     "dossier.signHealthIntro",
+    "dossier.recordChronic",
     "care.fileArchive",
     "care.dateArchive",
     "ltci.record",

@@ -351,6 +351,13 @@ def _required(value, label, maxlen=60):
     return value.strip()
 
 
+def account_username(value):
+    username = _required(value, "登录名", 40).lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,39}", username):
+        raise ValueError("登录名须为 3–40 位字母、数字、点、下划线或短横线")
+    return username
+
+
 def _staff_grants(role, permissions):
     if not isinstance(role, str) or role not in PRESETS:
         raise ValueError("请选择已有岗位模板")
@@ -497,9 +504,7 @@ def _create(db, state, p, user, area_check):
     campus = _campus(db, user, p, kind)
     family_services = _family_services(p, kind)
     scopes = portal.scopes(p, kind, portal_self=portal.is_self_role(role))
-    username = _required(p.get("username"), "登录名", 40).lower()
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,39}", username):
-        raise ValueError("登录名须为 3–40 位字母、数字、点、下划线或短横线")
+    username = account_username(p.get("username"))
     display = _required(p.get("displayName"), "姓名")
     invitation = p.get("invitation")
     if invitation is not None:

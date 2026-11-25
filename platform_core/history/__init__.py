@@ -277,6 +277,7 @@ class Reader:
         if action in (
             "dossier.signSummary",
             "dossier.signHealthIntro",
+            "dossier.recordChronic",
             "dossier.reviewDocument",
             "dossier.confirmVisit",
         ) and not policy.has(self.user, "clinical"):
