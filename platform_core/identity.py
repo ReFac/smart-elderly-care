@@ -22,6 +22,8 @@ CHANNELS = ("email", "sms")
 
 
 def init(db):
+    from . import passkeys
+
     db.execute("""CREATE TABLE IF NOT EXISTS identity_contacts(
         account_id TEXT NOT NULL REFERENCES accounts(id), channel TEXT NOT NULL,
         destination TEXT NOT NULL, verified INTEGER NOT NULL,
@@ -35,6 +37,11 @@ def init(db):
     )
     db.execute("""CREATE TABLE IF NOT EXISTS identity_limits(
         subject TEXT PRIMARY KEY, since INTEGER NOT NULL, last INTEGER NOT NULL, count INTEGER NOT NULL)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS identity_reset_links(
+        account_id TEXT PRIMARY KEY REFERENCES accounts(id), proof BLOB NOT NULL UNIQUE,
+        channel TEXT NOT NULL, destination TEXT NOT NULL, expires INTEGER NOT NULL,
+        delivered INTEGER NOT NULL DEFAULT 0)""")
+    passkeys.init(db)
 
 
 def destination(channel, raw):
@@ -82,6 +89,20 @@ def smtp_enabled():
 
 
 def send_email(address, code):
+    _deliver_email(
+        address, "医养管理平台 · 账号验证码",
+        f"验证码为 {code}，10 分钟内有效。如非本人操作，可忽略本邮件。请勿向他人提供验证码。",
+    )
+
+
+def send_reset_email(address, link):
+    _deliver_email(
+        address, "医养管理平台 · 设置账号密码",
+        f"请在 10 分钟内通过以下链接设置自己的密码：\n\n{link}\n\n如非本人操作，可忽略本邮件。请勿转发此链接。",
+    )
+
+
+def _deliver_email(address, subject, content):
     sender = destination("email", os.environ["NH_SMTP_FROM"])
     mode = os.environ.get("NH_SMTP_TLS", "ssl")
     if mode not in ("ssl", "starttls"):
@@ -101,14 +122,8 @@ def send_email(address, code):
         if username:
             client.login(username, os.environ["NH_SMTP_PASSWORD"])
         msg = EmailMessage()
-        msg["From"], msg["To"], msg["Subject"] = (
-            sender,
-            address,
-            "医养管理平台 · 账号验证码",
-        )
-        msg.set_content(
-            f"验证码为 {code}，10 分钟内有效。如非本人操作，可忽略本邮件。请勿向他人提供验证码。"
-        )
+        msg["From"], msg["To"], msg["Subject"] = sender, address, subject
+        msg.set_content(content)
         client.send_message(msg)
 
 
@@ -163,11 +178,12 @@ def _check(db, store, challenge, code, purpose, now, *, aid=None):
     return row
 
 
-def _audit(store, db, aid, action, message):
+def _audit(store, db, aid, action, message, *, subject=None):
     actor = access.account(db, aid)
     revision = db.execute("SELECT revision FROM workspace WHERE id=1").fetchone()[0] + 1
     db.execute("UPDATE workspace SET revision=? WHERE id=1", (revision,))
-    scope = {"residentId": actor["residentId"]} if actor["residentId"] else {}
+    person = actor if subject is None else subject
+    scope = {"residentId": person["residentId"]} if person["residentId"] else {}
     activity.write(
         db, revision, store.now().isoformat(), action, message, actor, scope, {}
     )
@@ -372,6 +388,7 @@ def finish(store, payload, *, token=None, host_owner=False):
         if purpose == "bind":
             if host_owner and contacts(db, aid):
                 raise ValueError("请从本人账号更新已绑定的方式")
+            db.execute("DELETE FROM identity_reset_links WHERE account_id=?", (aid,))
             db.execute(
                 "INSERT OR REPLACE INTO identity_contacts VALUES(?,?,?,1)",
                 (aid, row["channel"], row["destination"]),

@@ -16,7 +16,7 @@ class AdmissionFinanceTests(TestCase):
             initial_owner_password="admission-test-only",
         )
         self.token, _ = self.store.login("owner", "admission-test-only")
-        self.command("care.register", {"name": "验收长者"})
+        self.command("care.register", {"name": "验收长辈"})
         state = self.state()
         self.rid = state["residents"][-1]["id"]
         self.bed = next(row["id"] for row in state["beds"] if row["status"] == "空闲")

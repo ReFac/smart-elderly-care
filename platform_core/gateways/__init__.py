@@ -89,7 +89,7 @@ def ingest(db, state, payload, user, today):
     if source not in SOURCES or signal not in SIGNALS:
         raise ValueError("请选择支持的来源和观测信号。")
     bed_id = required(payload, "bedId", "定位床位")
-    hint = text_field(payload.get("residentId"), "设备提示的长者", limit=160)
+    hint = text_field(payload.get("residentId"), "设备提示的长辈", limit=160)
     evidence = text_field(payload.get("evidenceRef"), "证据编号", limit=240)
     observation = text_field(payload.get("observation"), "设备观测摘要", limit=800)
     observed = timestamp(payload["observedAt"]) if payload.get("observedAt") else None
@@ -124,7 +124,7 @@ def ingest(db, state, payload, user, today):
         if b["id"] in room_beds and b["residentId"]
     ]
     if hint and hint not in ids:
-        raise ValueError("提示的长者不在此房间的在住名单中。")
+        raise ValueError("提示的长辈不在此房间的在住名单中。")
     observed = observed or timestamp()
     event_time = datetime.fromisoformat(observed)
     resident_map = {r["id"]: r for r in state["residents"]}
@@ -197,9 +197,9 @@ def review(db, state, payload, user, today):
     note = required(payload, "note", "现场核实与处置记录", 1000)
     resident_id = ""
     if decision == "已核实":
-        resident_id = required(payload, "residentId", "现场核实的长者")
+        resident_id = required(payload, "residentId", "现场核实的长辈")
         if resident_id not in json.loads(row["candidates"]):
-            raise ValueError("请选择该房间事件记录内经现场核实的长者。")
+            raise ValueError("请选择该房间事件记录内经现场核实的长辈。")
         resident = lookup(state, "residents", resident_id)
         # A later transfer or discharge must not reassign an earlier incident to a new occupant.
         summary = f"{SIGNALS[row['signal']]} · {row['room']} · {note}"
@@ -275,11 +275,11 @@ def propose(db, state, payload, user, today):
         or task["date"] > today
         or resident["status"] != "在住"
     ):
-        raise ValueError("请选择当日或逾期的在住长者待执行工单。")
+        raise ValueError("请选择当日或逾期的在住长辈待执行工单。")
     bed = lookup(state, "beds", resident["bedId"])
     allocation = active_card(state, resident)
     if not allocation or bed["residentId"] != resident["id"]:
-        raise ValueError("当前床位与长者档案不一致。")
+        raise ValueError("当前床位与长辈档案不一致。")
     if db.execute(
         "SELECT 1 FROM gateway_voice WHERE task_id=? AND status='待确认'", (task_id,)
     ).fetchone():

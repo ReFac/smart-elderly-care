@@ -10,7 +10,7 @@ export const stops = [
     links: [{id:'bedroom', point:[2.9, .8, 1.0]}, {id:'reception', point:[-2.7, .8, 1.3]}],
   },
   {
-    id: 'bedroom', name: '长者居室', place: '室内 · 双人居室示范',
+    id: 'bedroom', name: '长辈居室', place: '室内 · 双人居室示范',
     description: '看看床位间距、床旁通道和个人物品收纳的布置示意。',
     links: [{id:'activity', point:[-2.8, .8, 1.25]}, {id:'garden', point:[2.5, .8, .8]}],
   },

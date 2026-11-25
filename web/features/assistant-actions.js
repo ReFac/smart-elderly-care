@@ -1,5 +1,5 @@
-import { openScheduledMeal } from './scheduled-meals.js';
 import { openMedicationRound } from './med-rounds.js';
+import { manualFormAvailable, openManualForm } from './assistant-manual-forms.js';
 import { staffLabel } from './people-labels.js';
 import { badge, canAct, field, memo, node, select, table, today } from './shared.js';
 import { taskForm } from './care.js';
@@ -14,14 +14,14 @@ export const quickDestinations = [
   { label: '等级判定', words: '评估结果 护理等级', route: 'assessments', tab: 'grading' },
   { label: '用药安全筛查', words: '用药冲突 过敏核对 重复用药', route: 'medications', tab: 'safety' },
   { label: '定时工单', words: '自动工单 伙食排期 伙食工单 定时巡查 菜单 照护排程', route: 'care', tab: 'scheduledWork', grant: 'care.completeTask' },
-  { label: 'DeepSeek 用量', words: '模型用量 API 用量 Token 用量 OCR ASR 缓存命中率 员工用量', route: 'settings', tab: 'deepseekUsage' },
+  { label: 'AI 用量', words: 'DeepSeek 用量 模型用量 API 用量 Token 用量 OCR ASR 缓存命中率 员工用量', route: 'settings', tab: 'deepseekUsage' },
   { label: '登记集体活动', words: '集体用餐 早餐 午餐 晚餐 登记餐单', route: 'care', tab: 'groupLife', grant: 'care.proposeGroupActivity' },
   { label: '核对活动参加名单', words: '集体活动待确认 用餐签认', route: 'care', tab: 'groupLife', grant: 'care.confirmGroupActivity' },
   { label: '意向客户', words: '来电登记 电话回访 客户反馈', route: 'leads' },
   { label: '接待时间表', words: '意向客户 来访排班 电话预约 参观时间', route: 'leads', tab: 'schedule' },
   {
     label: '办理老人入住',
-    words: '创建老人入住 办理长者入住 老人入院 分配床位',
+    words: '创建老人入住 办理长辈入住 老人入院 分配床位',
     route: 'residents',
     tab: 'all',
     grant: 'care.admit',
@@ -32,7 +32,8 @@ export const quickDestinations = [
     route: 'beds',
     tab: 'plan',
   },
-  { label: '试住', words: '办理试住 试住管理 试住转正式', route: 'residents', tab: 'trials' },
+  { label: '办理试住', words: '试住入住 开始试住', route: 'residents', tab: 'notAdmitted', grant: 'care.admit' },
+  { label: '试住', words: '试住管理 试住转正式 试住记录', route: 'residents', tab: 'trials' },
   { label: '试住回访', words: '试住离院 回访报告', route: 'residents', tab: 'followups' },
   { label: '待出月账单', words: '月付账单 核算月费 账单日', route: 'billing', tab: 'due' },
   { label: '护理用具库存', words: '护理用品 物资情况 仓库盘点', route: 'inventory', tab: 'stock' },
@@ -95,6 +96,7 @@ export function assistantPageLinks(ctx, message) {
 export function assistantCommand(ctx, message) {
   const action = message?.action;
   if (message?.role !== 'assistant' || message.webSearched || !action) return null;
+  if (action.kind === 'openForm') return manualFormAvailable(ctx, action) ? action : null;
   if (action.kind !== 'navigate') return ['notice', 'workOrder', 'medicationRound', 'scheduledMeal'].includes(action.kind) ? action : null;
   const target = pageDestination(ctx, action);
   if (!target) return null;
@@ -106,11 +108,12 @@ export function assistantCommand(ctx, message) {
 export function openAssistantAction(ctx, action) {
   if (!action || !routes.has(action.route) || !ctx.available(action.route))
     return ctx.toast('当前账号无法打开这个页面');
+  if (action.kind === 'openForm') return openManualForm(ctx, action);
   if (action.kind === 'scheduledMeal') {
-    return openScheduledMeal(ctx, { text: action.text, region: action.region });
+    return ctx.go('care', 'scheduledWork');
   }
   if (action.kind === 'medicationRound') {
-    return openMedicationRound(ctx, {text: action.text, ...(action.region ? {region: action.region} : {})});
+    return ctx.go('care', 'medRounds', () => openMedicationRound(ctx, { region: action.region }));
   }
   if (action.kind === 'navigate') {
     const link = pageDestination(ctx, action);
@@ -138,9 +141,8 @@ export function openAssistantAction(ctx, action) {
   )
     return ctx.toast('这项建议已经发布，可直接查看办理记录');
   const fields = [
-    field('title', notice ? '通知标题' : '工单标题', { value: action.title, maxLength: 100 }),
+    field('title', notice ? '通知标题' : '工单标题', { maxLength: 100 }),
     memo('description', notice ? '通知正文' : '执行内容', true, {
-      value: action.description,
       maxLength: 2000,
     }),
   ];
@@ -172,9 +174,9 @@ export function openAssistantAction(ctx, action) {
         ? '发布后，所有在岗员工都可以从右上角铃铛查看。'
         : '请核对用具和执行人。发布后，执行人的待办中会收到这项工单。',
       fields,
-      submitLabel: '确认发布',
+      submitLabel: '核对发布',
       onSubmit: (values) =>
-        ctx.command(command, { ...values, assistantActionId: action.id }, { confirmed: true }),
+        ctx.command(command, { ...values, assistantActionId: action.id }),
     });
   return ctx.go(dest, tab, review);
 }

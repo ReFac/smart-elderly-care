@@ -90,7 +90,7 @@ export function channelOrders(ctx) {
     title: '渠道订单',
     rows: ctx.state.paymentOrders || [],
     search: {
-      placeholder: '搜索订单、账单或长者',
+      placeholder: '搜索订单、账单或长辈',
       value: (r) => [r.id, r.billId, residentName(ctx, r.residentId)].join(' '),
     },
     filter: { value: (r) => r.status },
@@ -100,7 +100,7 @@ export function channelOrders(ctx) {
     ),
     cols: [
       { label: '商户订单', view: (r) => named(r.id, r.channel) },
-      { label: '长者 / 账单', view: (r) => named(residentAnchor(ctx, r.residentId), r.billId) },
+      { label: '长辈 / 账单', view: (r) => named(residentAnchor(ctx, r.residentId), r.billId) },
       { label: '应收金额', view: (r) => money(r.amount) },
       { label: '状态', view: (r) => r.status },
       {
@@ -157,6 +157,21 @@ export function channelOrders(ctx) {
   return node('div', 'fx-page', [orders,receipts,channelGuide]);
 }
 
+export function expenseForm(ctx) {
+  return runForm(ctx, {
+    title: '登记已发生支出',
+    action: 'ops.expense',
+    fields: [
+      date(ctx, 'date', '支出日期'),
+      select('category', '分类', options(['照护耗材', '餐饮', '人力', '设施', '其他'])),
+      amount(),
+      field('voucher', '支出凭证号'),
+      field('payee', '收款对象'),
+      memo('note', '支出事由', true),
+    ],
+  });
+}
+
 export function expensePanel(ctx) {
   const rows = ctx.state.expenses || [];
   return table(ctx, {
@@ -169,20 +184,8 @@ export function expensePanel(ctx) {
     filter: { value: (r) => r.category },
     action: choose(
       canAct(ctx, 'ops.importExpenses') ? btn(ctx, '导入银行或电费凭证', () => importExpenses(ctx)) : null,
-      btn(ctx, '登记支出', () =>
-      runForm(ctx, {
-        title: '登记已发生支出',
-        action: 'ops.expense',
-        fields: [
-          date(ctx, 'date', '支出日期'),
-          select('category', '分类', options(['照护耗材', '餐饮', '人力', '设施', '其他'])),
-          amount(),
-          field('voucher', '支出凭证号'),
-          field('payee', '收款对象'),
-          memo('note', '支出事由', true),
-        ],
-      })
-    )),
+      btn(ctx, '登记支出', () => expenseForm(ctx)),
+    ),
     cols: [
       { label: '日期', view: (r) => r.date },
       { label: '收款对象', view: (r) => named(r.payee, r.category) },
@@ -208,11 +211,11 @@ export function reminders(ctx) {
     rows,
     empty: '当前没有到期仍欠费的账单',
     search: {
-      placeholder: '搜索长者或账期',
+      placeholder: '搜索长辈或账期',
       value: (r) => residentName(ctx, r.residentId) + r.month,
     },
     cols: [
-      { label: '长者 / 账期', view: (r) => named(residentAnchor(ctx, r.residentId), r.month) },
+      { label: '长辈 / 账期', view: (r) => named(residentAnchor(ctx, r.residentId), r.month) },
       { label: '服务期末', view: (r) => r.endDate },
       { label: '待缴', view: (r) => money(r.balance) },
       { label: '最近跟进', view: (r) => r.reminders?.[0]?.date || '待跟进' },

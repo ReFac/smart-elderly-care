@@ -1,4 +1,7 @@
 import { stops, tourModel } from './roomtour-model.js';
+import { colorModeControl } from './lib/color-mode.js';
+
+document.getElementById('visitor-open').before(colorModeControl());
 
 const byId = new Map(stops.map(stop => [stop.id, stop]));
 const canvas = document.querySelector('#tour-canvas');
@@ -71,6 +74,8 @@ for (const control of document.querySelectorAll('[data-tour-turn]'))
 const access = '/api/public/visitor';
 const dialog = document.querySelector('#visitor-dialog');
 const login = document.querySelector('#visitor-open');
+const loginTitle = document.querySelector('#visitor-title');
+const loginIntro = document.querySelector('#visitor-intro');
 const phone = document.querySelector('#visitor-phone-form');
 const confirm = document.querySelector('#visitor-code-form');
 const service = document.querySelector('#visitor-service');
@@ -94,17 +99,23 @@ async function query(path, payload) {
 
 function updateStatus(value) {
   status = value;
-  login.disabled = Boolean(value?.signedIn);
-  login.textContent = value?.signedIn ? value.maskedPhone ? '访客 ' + value.maskedPhone : '已登录' : '访客登录';
+  const signedIn = Boolean(value?.signedIn);
+  const customer = value?.customerUsername;
+  login.disabled = signedIn && !customer;
+  login.textContent = customer ? '我的顾客账号' : signedIn ? '已登录' : '访客登录';
+  loginTitle.textContent = customer ? '我的顾客账号' : '访客快捷登录';
+  loginIntro.hidden = signedIn;
   const phoneEnabled = value?.phoneEnabled || value?.demoEnabled;
-  phone.hidden = Boolean(challenge) || !phoneEnabled;
-  confirm.hidden = !challenge;
-  demo.hidden = !value?.demoEnabled || Boolean(challenge);
+  phone.hidden = signedIn || Boolean(challenge) || !phoneEnabled;
+  confirm.hidden = signedIn || !challenge;
+  demo.hidden = signedIn || !value?.demoEnabled || Boolean(challenge);
+  wechat.hidden = signedIn;
   const wechatUrl = value?.wechatEnabled && value.wechatUrl ? new URL(value.wechatUrl, location.origin) : null;
   wechat.disabled = !wechatUrl || wechatUrl.origin !== location.origin;
   wechat.textContent = wechat.disabled ? '微信快捷登录暂未开通' : '微信快捷登录';
   wechat.onclick = wechat.disabled ? null : () => location.assign(wechatUrl);
-  service.textContent = !value ? '暂时无法读取登录方式。您仍可浏览或提交参观意愿。'
+  service.textContent = customer ? `登录名 ${customer}。如需设置登录密码，可请机构发送设置密码链接。`
+    : !value ? '暂时无法读取登录方式。您仍可浏览或提交参观意愿。'
     : value.phoneEnabled ? '请输入能接收短信的本人号码。'
     : value.demoEnabled ? '当前只开放本机演示验证。'
     : '短信登录暂未开通。可以预约参观，或主动留下电话请求回电。';
@@ -134,7 +145,7 @@ async function openLogin() {
   failure.textContent = '';
   try {
     if (!status) await loadStatus();
-    if (!status?.signedIn) dialog.showModal();
+    if (!status?.signedIn || status.customerUsername) dialog.showModal();
   } finally { loading = false; }
 }
 login.addEventListener('click', openLogin);

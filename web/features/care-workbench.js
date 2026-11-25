@@ -105,7 +105,7 @@ export function healthDesk(ctx, { vitalForm, inspectVital, resolveVital }) {
   if (canVitals) {
     const body = node('div', 'cw-panel-body', [
       node('p', 'cw-summary', '今日已记录 ' + todayVitals.length + ' 条体征，共 ' +
-        new Set(todayVitals.map((row) => row.residentId)).size + ' 位长者'),
+        new Set(todayVitals.map((row) => row.residentId)).size + ' 位长辈'),
       queueList(pendingVitals.slice(0, 5), (row) => [
         node('div', 'cw-list-text', [
           residentAnchor(ctx, row.residentId),
@@ -153,9 +153,9 @@ export function healthDesk(ctx, { vitalForm, inspectVital, resolveVital }) {
   if (canManageFamily || canViewResidents) {
     const body = node('div', 'cw-panel-body', [
       node('dl', 'cw-share', [
-        node('div', '', [node('dt', '', '照护服务'), node('dd', '', '查看绑定长者的照护安排和获授权的完成记录')]),
+        node('div', '', [node('dt', '', '照护服务'), node('dd', '', '查看绑定长辈的照护安排和获授权的完成记录')]),
         node('div', '', [node('dt', '', '用药凭证'), node('dd', '', '按家属账号单独开通查阅范围')]),
-        node('div', '', [node('dt', '', '巡查简报'), node('dd', '', '长者授权后由家属订阅站内简报')]),
+        node('div', '', [node('dt', '', '巡查简报'), node('dd', '', '长辈授权后由家属订阅站内简报')]),
       ]),
       canShareConsent && canViewResidents
         ? action(ctx, '到入住管理核对分享授权', () => ctx.go('residents','all'))

@@ -54,12 +54,12 @@ export function medicationReminders(ctx, execute) {
         title: '已复核给药安排',
         rows,
         search: {
-          placeholder: '搜索长者或药品',
+          placeholder: '搜索长辈或药品',
           value: (r) => residentName(ctx, r.residentId) + r.name,
         },
         cols: [
           { label: '给药时间（上海）', view: (r) => r.scheduledAt.replace('T', ' ') },
-          { label: '长者', view: (r) => residentAnchor(ctx, r.residentId) },
+          { label: '长辈', view: (r) => residentAnchor(ctx, r.residentId) },
           { label: '药品', view: (r) => r.name },
           { label: '负责人员', view: (r) => staffLabel(ctx, r.assignee, r.assigneeId) },
           {
@@ -82,7 +82,7 @@ export function drugRules(ctx) {
       title: '发布配伍规则',
       action: 'care.publishDrugRule',
       description:
-        '请按机构已核准的资料填写药品通用名、核查内容与版本。规则核对同一长者待复核和待执行医嘱中的药名组合。',
+        '请按机构已核准的资料填写药品通用名、核查内容与版本。规则核对同一长辈待复核和待执行医嘱中的药名组合。',
       fields: [
         field('drugA', '药品一'),
         field('drugB', '药品二'),

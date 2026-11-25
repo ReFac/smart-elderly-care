@@ -28,8 +28,8 @@
       campuses:[{id:'home',name:'本院'},{id:'west',name:'西院'}],
       rooms:[{id:'room1',label:'主楼 · 101 房',campusId:'home',campusName:'本院'},
         {id:'room2',label:'二号楼 · 201 房',campusId:'west',campusName:'西院'}],
-      roster:[{id:'elder1',name:'长者甲',roomNumber:'101',bedLabel:'101-01',campusId:'home'},
-        {id:'elder2',name:'长者乙',roomNumber:'201',bedLabel:'201-01',campusId:'west'}],
+      roster:[{id:'elder1',name:'长辈甲',roomNumber:'101',bedLabel:'101-01',campusId:'home'},
+        {id:'elder2',name:'长辈乙',roomNumber:'201',bedLabel:'201-01',campusId:'west'}],
       staff:[{id:'staff1',label:'员工甲',role:'护工'}], roles:['护工','护士'],
       builtins:[
         {id:'patrol',title:'内置巡查',kind:'work',nextAt:day+'T21:30:00', route:'settings',tab:'rounds',status:'运行中',description:'夜间巡查',count:2},
@@ -79,8 +79,8 @@
       const search = dialog().querySelector('input[type=search]');
       search.value = '201';
       search.dispatchEvent(new Event('input'));
-      check(dialog().querySelector('.scheduled-residents').textContent.includes('长者乙') &&
-        !dialog().querySelector('.scheduled-residents').textContent.includes('长者甲'), '按房号定位长者');
+      check(dialog().querySelector('.scheduled-residents').textContent.includes('长辈乙') &&
+        !dialog().querySelector('.scheduled-residents').textContent.includes('长辈甲'), '按房号定位长辈');
       dialog().querySelector('.scheduled-residents input').click();
       choose('重复方式','weekly');
       dialog().querySelectorAll('.scheduled-days input').forEach((input, index) => { input.checked = index === 1; });

@@ -89,7 +89,7 @@ def require_resident(db, user, resident_id, state=None):
             db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0]
         )
     if resident_id not in resident_ids(state, beds, user):
-        raise PermissionError("长者不在本人获授权的分院范围内")
+        raise PermissionError("长辈不在本人获授权的分院范围内")
 
 
 def require_document(db, user, document_id):

@@ -10,7 +10,7 @@ NO_TOPIC = "这句话没有提取到可独立检索的养老或医疗主题。�
 PUBLIC_SUBJECTS = {
     "insurance": r"长护险|长护保险|长期照护保险|长期护理(?:保险|险)|医保|医疗保障|医疗险|社保.{0,5}待遇|"
                  r"long.term care insurance|health insurance|medicaid|medicare",
-    "eldercare": r"养老|医养|护养|疗养院|护理|照护|失能|失智|老年|老龄|长者|高龄|老人|安宁疗护|"
+    "eldercare": r"养老|医养|护养|疗养院|护理|照护|失能|失智|老年|老龄|长[辈者]|高龄|老人|安宁疗护|"
                  r"eldercare|elderly|geriatr\w*|older adults|senior care|nursing|caregivers?|care homes?|"
                  r"long.term care|assisted living|dementia care|palliative care|hospice",
     "health": r"疾病|医疗|医学|医院|卫生健康|疾控|感染|并发症|体征|临床|康复|药物|用药|疫苗|"
@@ -50,7 +50,7 @@ ELDERCARE_PRACTICE = re.compile(
 INSTITUTION = re.compile(
     r"院务|院区|院内|院里|院门|我院|本院|分院|院方|护工|护理员|病房|床位|房型|楼层平面图|"
     r"退住|试住|续住|排班|班次|交班|探访|来访登记|入住办理|办理入住|巡查|体检|"
-    r"配餐|餐单|餐费|行政简报|工单|医疗档案|长者档案|病历|物资|仓库|仓储|供应商|经销员|"
+    r"配餐|餐单|餐费|行政简报|工单|医疗档案|长[辈者]档案|病历|物资|仓库|仓储|供应商|经销员|"
     r"欠款|账单|营收|收款|缴费|流水|财务|机构设置|系统设置|工作区备份|机构的?数据备份|全员通知|"
     r"家属服务|员工|重复用药|医疗|疾病|用药|服药|喂药|给药|吃药|医嘱|台账|运营总览|环境导览|"
     r"看我上次聊天|新对话|历史对话|复盘对话|对话记忆|这个界面|本页|工作台|本平台|医养平台|"

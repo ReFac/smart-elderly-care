@@ -70,7 +70,7 @@ FIELDS = {
 
 def scoped_records(state, spec, resident_id, member_ids=None, *, actor_id=None):
     if spec.tool == CARE_PLAN_TOOL.tool and not resident_id:
-        raise ValueError("请先选择一位长者再生成个体照护计划")
+        raise ValueError("请先选择一位长辈再生成个体照护计划")
     archived = {
         r["id"]
         for r in state.get("residents", ())
@@ -131,7 +131,7 @@ def validate_artifact(artifact, spec, resident_id, allowed_ids):
     }:
         raise ValueError("工具产物字段无效")
     if any(artifact[key] != value for key, value in identity.items()):
-        raise PermissionError("工具产物的专员、工具、业务类别或长者与委派不符")
+        raise PermissionError("工具产物的专员、工具、业务类别或长辈与委派不符")
     if not all(
         isinstance(artifact[k], str) and artifact[k].strip()
         for k in ("title", "detail")
@@ -208,7 +208,7 @@ class LocalTools:
             result = (
                 resident_id,
                 "复核范围内到期照护工单",
-                f"截至 {day} 有 {len(due)} 项到期工单待执行，涉及 {count} 位长者。",
+                f"截至 {day} 有 {len(due)} 项到期工单待执行，涉及 {count} 位长辈。",
                 [cite_records("tasks", "到期工单", due, f"{len(due)} 项")],
             )
         elif specialist.key == "inventory":
@@ -258,7 +258,7 @@ def execute(
     if any(key not in allowed for key in planned):
         raise PermissionError("协作计划使用了未授权的工具")
     if resident_id and "care" not in planned:
-        raise ValueError("指定长者时，请选择包含照护的协作任务")
+        raise ValueError("指定长辈时，请选择包含照护的协作任务")
     trace.append(
         "coordinator", "plan.created", "、".join(allowed[k].title for k in planned)
     )

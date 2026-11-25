@@ -3,7 +3,7 @@ import { editResident } from './profile-editor.js';
 import { badge, btn, canAct, choose, facts, field, memo, node, select } from './shared.js';
 
 const endpoint = '/api/permission-requests';
-const scopeLabel = '编辑长者登记资料';
+const scopeLabel = '编辑长辈登记资料';
 const statusLabels = {
   pending: ['待审批', 'amber'],
   approved: ['可办理', 'blue'],
@@ -207,7 +207,7 @@ export async function openPermissionRequest(ctx, resident, knownData) {
       onSubmit: async values => {
         const live = ctx.current?.() || ctx;
         const residentId = target.read();
-        if (!residentId) throw new Error('请选择长者或填写完整档案编号。');
+        if (!residentId) throw new Error('请选择长辈或填写完整档案编号。');
         const saved = await live.command('permissionRequest.create', {
           residentId, approverId: values.approverId, reason: values.reason.trim(),
         }, { confirmed: true, quiet: true, expectedRevision: revision });

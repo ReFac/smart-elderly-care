@@ -28,7 +28,7 @@ import { supplyOrders } from './assistant-actions.js';
 import { monthlyPanel } from './monthly.js';
 import { addItem, editStockItem, itemDetails } from './inventory-dedupe.js';
 
-function stock(ctx, type, itemId) {
+export function stock(ctx, type, itemId) {
   runForm(ctx, {
     title: '登记' + type,
     action: 'ops.stock',
@@ -192,36 +192,37 @@ export function inventory(ctx) {
   );
 }
 
+export function shiftForm(ctx) {
+  runForm(ctx, {
+    title: '安排班次',
+    action: 'ops.shift',
+    fields: [
+      select(
+        'campusId',
+        '值班分院',
+        (ctx.state.campusOptions || []).map((c) => ({ value: c.id, label: c.name })),
+      ),
+      staffField(ctx, 'staff', '值班人员'),
+      field('date', '排班日期', {
+        type: 'date',
+        value: today(ctx),
+      }),
+      select('period', '班次', options(['早班', '中班', '夜班'])),
+    ],
+  });
+}
+
 export function shifts(ctx) {
   const state = ctx.state;
   const workload = (staff, date) =>
     state.tasks.filter((t) => t.assignee === staff && t.date === date && t.status !== '已取消');
-  function create() {
-    runForm(ctx, {
-      title: '安排班次',
-      action: 'ops.shift',
-      fields: [
-        select(
-          'campusId',
-          '值班分院',
-          (ctx.state.campusOptions || []).map((c) => ({ value: c.id, label: c.name })),
-        ),
-        staffField(ctx, 'staff', '值班人员'),
-        field('date', '排班日期', {
-          type: 'date',
-          value: today(ctx),
-        }),
-        select('period', '班次', options(['早班', '中班', '夜班'])),
-      ],
-    });
-  }
   return page(
     ctx,
     '排班管理',
     hasGrant(ctx, 'care')
       ? '安排值班人员并查看当日工单量。'
       : '按分院和日期安排值班人员。',
-    btn(ctx, '安排班次', create, 'primary'),
+    btn(ctx, '安排班次', () => shiftForm(ctx), 'primary'),
     table(ctx, {
       title: '人员排班',
       rows: [...state.shifts].sort((a, b) => b.date.localeCompare(a.date)),
@@ -303,7 +304,7 @@ function reportDetails(ctx, r) {
         ? section('照护运营汇总', facts([
             ['计划工单（按计划日期）', String(r.serviceMetrics.scheduledTasks)],
             ['完成工单（按完成日期）', String(r.serviceMetrics.completedTasks)],
-            ['实际服务长者（去重）', r.serviceMetrics.servedResidents + ' 人'],
+            ['实际服务长辈（去重）', r.serviceMetrics.servedResidents + ' 人'],
           ]))
         : node('p', 'fx-muted', '这一版尚未收录照护运营汇总。'),
       section(
@@ -413,23 +414,24 @@ function reportDetails(ctx, r) {
   );
 }
 
+export function reportForm(ctx) {
+  runForm(ctx, {
+    title: '生成民政报送草稿',
+    description: '归集当月业务数据并校验完整性。相同月份会刷新本地草稿。',
+    action: 'ops.report',
+    fields: [
+      field('month', '报送月份', {
+        type: 'month',
+        value: today(ctx).slice(0, 7),
+        max: today(ctx).slice(0, 7),
+      }),
+    ],
+    submitLabel: '生成并校验',
+  });
+}
+
 export function reports(ctx) {
   const state = ctx.state;
-  function create() {
-    runForm(ctx, {
-      title: '生成民政报送草稿',
-      description: '归集当月业务数据并校验完整性。相同月份会刷新本地草稿。',
-      action: 'ops.report',
-      fields: [
-        field('month', '报送月份', {
-          type: 'month',
-          value: today(ctx).slice(0, 7),
-          max: today(ctx).slice(0, 7),
-        }),
-      ],
-      submitLabel: '生成并校验',
-    });
-  }
   const drafts = () =>
     table(ctx, {
       title: '月度报送草稿',
@@ -500,7 +502,7 @@ export function reports(ctx) {
     canAct(ctx, 'ops.report')
       ? '按月归集业务数据并生成民政报送草稿。'
       : '查阅获授权业务的操作记录。',
-    canAct(ctx, 'ops.report') ? btn(ctx, '生成报送草稿', create, 'primary') : null,
+    canAct(ctx, 'ops.report') ? btn(ctx, '生成报送草稿', () => reportForm(ctx), 'primary') : null,
     tabs('reports', [
       ...(canAct(ctx, 'ops.report') ? [['drafts', '民政报送', drafts]] : []),
       ...(hasGrant(ctx, 'reports') && hasGrant(ctx, 'finance', 'care', 'inventory')

@@ -49,7 +49,7 @@ export function scaleForm(ctx, residentId = '') {
   }
   scoreBox.append(sum);
   const subject = residentField(ctx, { value: residentId });
-  subject.options.unshift({ value: '', label: '请选择本次评估的长者' });
+  subject.options.unshift({ value: '', label: '请选择本次评估的长辈' });
   const dialog = ctx.dialog({
     title: '标准量表评估',
     description:

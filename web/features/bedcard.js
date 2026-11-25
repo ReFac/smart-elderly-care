@@ -107,7 +107,7 @@ export function bedCard(ctx, resident) {
     (row) => row.id === resident.bedId && row.residentId === resident.id
   );
   if (!bed || !assignment || assignment.bedId !== bed.id || resident.status !== '在住') {
-    ctx.toast('长者当前没有有效床头卡。');
+    ctx.toast('长辈当前没有有效床头卡。');
     return;
   }
   const qr = node('img');
@@ -181,7 +181,7 @@ export function bedside(ctx) {
     add(
       result,
       facts([
-        ['长者', residentLabel(ctx, person)],
+        ['长辈', residentLabel(ctx, person)],
         ['当前床位', `${bed.ward} · ${bed.label}`]
       ]),
       canAct(ctx, 'care.confirmMedRound')

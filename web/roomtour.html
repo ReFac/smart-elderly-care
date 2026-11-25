@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="visitor-site">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,6 +9,7 @@
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/visit.css">
   <link rel="stylesheet" href="/roomtour.css">
+  <link rel="stylesheet" href="/color-mode.css">
   <script type="module" src="/roomtour.js"></script>
 </head>
 <body>
@@ -58,11 +59,11 @@
   </main>
   <dialog id="visitor-dialog" aria-labelledby="visitor-title">
     <div class="dialog-head"><h2 id="visitor-title">访客快捷登录</h2><button type="button" id="visitor-close" aria-label="关闭登录提示">×</button></div>
-    <p class="visitor-intro">可以继续浏览，也可以验证手机，使用访客身份返回导览。</p>
+    <p class="visitor-intro" id="visitor-intro">可以继续浏览，也可以验证手机号登录或注册顾客账号。</p>
     <p id="visitor-service" class="visitor-service" role="status"></p>
     <form id="visitor-phone-form" hidden>
       <label>中国大陆手机号<input name="phone" type="tel" inputmode="numeric" maxlength="18" required autocomplete="tel-national"></label>
-      <label class="consent"><input name="consent" type="checkbox" required><span>我同意验证此号码，用于建立本次访客登录。</span></label>
+      <label class="consent"><input name="consent" type="checkbox" required><span>我同意验证手机号，用于登录或建立顾客账号。</span></label>
       <button type="submit" class="primary">发送验证码</button>
     </form>
     <div id="visitor-demo" class="visitor-demo" hidden>

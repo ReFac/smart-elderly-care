@@ -6,7 +6,7 @@ import unicodedata
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from . import access, facility, lead_directory, visit_schedule
+from . import access, facility, lead_directory, portal, visit_schedule
 from .care.records import append_record, text_field
 from .profile_fields import phone_number as _phone
 
@@ -14,7 +14,7 @@ LOCAL = ZoneInfo("Asia/Shanghai")
 OUTCOMES = ("有参观意向", "继续联系", "未接通", "暂无意向")
 PHONE_TEXT = re.compile(r"(?<![A-Za-z0-9])\+?[0-9][() 0-9-]{5,23}[0-9](?![A-Za-z0-9])")
 SELF_LABEL = re.compile(
-    r"(?:^|[\s,;、/|(])(?:长者本人|老人本人|住户本人|本人)(?:的)?(?:联系)?(?:手机号码?|手机号?|电话(?:号码?)?)?[\s:]*$"
+    r"(?:^|[\s,;、/|(])(?:长辈本人|长者本人|老人本人|住户本人|本人)(?:的)?(?:联系)?(?:手机号码?|手机号?|电话(?:号码?)?)?[\s:]*$"
 )
 
 
@@ -77,7 +77,9 @@ def _phone_index(db, state):
                                        AND c.verified>=0"""
     ):
         phones = (_phone(username), _phone(destination))
-        if kind == "family" and role == "入住长者":
+        if kind == "family" and role == portal.CUSTOMER_ROLE:
+            continue
+        if kind == "family" and portal.is_self_role(role):
             if rid in in_house:
                 admitted.update(phones)
         else:

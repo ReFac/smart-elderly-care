@@ -324,6 +324,8 @@ def restore_snapshot(source, target_db, recovery_key_file, *, same_host=False):
             local_tables = (
                 "sessions",
                 "identity_challenges",
+                "identity_reset_links",
+                "identity_passkey_challenges",
                 "identity_limits",
                 "backup_retrievals",
                 "backup_restores",
@@ -340,7 +342,7 @@ def restore_snapshot(source, target_db, recovery_key_file, *, same_host=False):
             }
             with db:
                 if same_host:
-                    local_tables = ()
+                    local_tables = ("identity_reset_links", "identity_passkey_challenges")
                 if "identity_contacts" in existing:
                     # An earlier snapshot may name a mailbox or SIM that was later replaced.
                     # Preserve encrypted history but require fresh verification on this host.

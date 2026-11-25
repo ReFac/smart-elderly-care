@@ -1,0 +1,302 @@
+:root[data-color-mode='dark'] {
+  color-scheme: dark;
+  --paper: #101824;
+  --surface: #172332;
+  --panel: var(--surface);
+  --surface-soft: #1d2a3c;
+  --surface-field: #111d2b;
+  --surface-hover: #25374e;
+  --ink: #e9eff8;
+  --muted: #adbbce;
+  --line: #344458;
+  --input-line: #657b92;
+  --side: #14243b;
+  --accent: #9bbcff;
+  --action-background: #2d5eaf;
+  --soft: #233954;
+  --gold: #e4ba79;
+  --good-text: #9de4c5;
+  --good-surface: #1d3c35;
+  --warning-text: #f0c786;
+  --warning-surface: #463723;
+  --danger-text: #ffadb6;
+  --danger-surface: #492e39;
+  --dark-shadow: #060d1866;
+}
+:root[data-color-mode='dark'][data-theme='ocean'] {
+  --side: #102c39;
+  --accent: #85d1ed;
+  --action-background: #0d627f;
+  --soft: #1d3b4a;
+}
+:root[data-color-mode='dark'][data-theme='plum'] {
+  --side: #28223a;
+  --accent: #d1afe8;
+  --action-background: #704e91;
+  --soft: #38304a;
+}
+
+/* Shared surfaces, navigation, forms and dialogs. */
+:root[data-color-mode='dark'] :is(
+  .sidebar, .contextbar, .panel, .dialog, .skip-link, .result, .audit-filter,
+  .fx-kpis, .fx-kpi, .fx-panel, .fx-disclosure, .fx-timeline, .fx-document,
+  .fx-form-group, .fx-bed-filters, .fx-original figcaption, .fx-bedcard
+) {
+  background: var(--surface);
+  border-color: var(--line);
+}
+:root[data-color-mode='dark'] .masthead { box-shadow: 0 1px 0 var(--line); }
+:root[data-color-mode='dark'] :is(.nav-item, .nav-item svg, .side-org) { color: var(--muted); }
+:root[data-color-mode='dark'] :is(.nav-item.active, .nav-item.active svg, .nav-item:hover, .skip-link) {
+  color: var(--accent);
+}
+:root[data-color-mode='dark'] .header-avatar { background: var(--soft); color: var(--accent); }
+:root[data-color-mode='dark'] :is(.dialog-head, .fx-table-tools, .fx-facts dt, .resident-dossier-nav,
+  .fx-disclosure[open] > .fx-disclosure-head) {
+  background: var(--surface-soft);
+  border-color: var(--line);
+}
+:root[data-color-mode='dark'] .dialog {
+  border-top-color: var(--accent);
+  box-shadow: 0 16px 46px var(--dark-shadow);
+}
+:root[data-color-mode='dark'] .dialog::backdrop { background: #070d18bd; }
+:root[data-color-mode='dark'] :is(.form-description, .empty svg) { color: var(--muted); }
+:root[data-color-mode='dark'] :is(
+  .field :is(input, select, textarea), .search-input, .fx-input, .fx-table-search, [data-color-mode-control]
+) {
+  color: var(--ink);
+  background: var(--surface-field);
+  border-color: var(--input-line);
+}
+:root[data-color-mode='dark'] .fx-table-search .fx-input { background: transparent; }
+:root[data-color-mode='dark'] :is(input, textarea)::placeholder { opacity: 1; color: var(--muted); }
+:root[data-color-mode='dark'] :focus-visible { outline-color: var(--accent); }
+:root[data-color-mode='dark'] .btn {
+  color: var(--ink);
+  background: var(--surface-soft);
+  border-color: var(--input-line);
+}
+:root[data-color-mode='dark'] :is(.btn-text, .btn-ghost, .btn-icon) { background: transparent; }
+:root[data-color-mode='dark'] :is(.btn-text, .btn-ghost) { color: var(--accent); }
+:root[data-color-mode='dark'] :is(.btn, .result):hover { background: var(--surface-hover); }
+:root[data-color-mode='dark'] :is(
+  .btn-primary, .fx-tabs button[aria-selected='true'], .fx-bed-filters button[aria-pressed='true'],
+  .assistant-send, .assistant-hold[data-phase='recording'], .room-floor-btn[aria-pressed='true']
+) {
+  color: #fff;
+  background: var(--action-background);
+  border-color: var(--action-background);
+}
+:root[data-color-mode='dark'] :is(.btn-primary:hover, .assistant-send:not(:disabled):hover) {
+  background: color-mix(in srgb, var(--action-background), white 13%);
+}
+:root[data-color-mode='dark'] .fx-module-mark { background: var(--soft); color: var(--accent); }
+:root[data-color-mode='dark'] :is(.fx-person-mark, .fx-initial) { background: var(--soft); }
+:root[data-color-mode='dark'] :is(.fx-table th, .op-task-table th) {
+  color: var(--muted);
+  background: var(--surface-hover);
+  border-color: var(--line);
+}
+:root[data-color-mode='dark'] :is(.fx-table tbody tr:nth-child(even), .op-task-table tbody tr:nth-child(even)) {
+  background: var(--surface-soft);
+}
+:root[data-color-mode='dark'] :is(.fx-table tbody tr:hover, .op-task-table tbody tr:hover) {
+  background: var(--surface-hover);
+}
+:root[data-color-mode='dark'] :is(.fx-table tr + tr td, .op-task-table td) { border-color: var(--line); }
+:root[data-color-mode='dark'] .badge-blue { color: var(--accent); background: var(--soft); }
+:root[data-color-mode='dark'] .badge-neutral { color: var(--muted); background: var(--surface-hover); }
+:root[data-color-mode='dark'] :is(.badge-green, .usage-status-ok) {
+  color: var(--good-text);
+  background: var(--good-surface);
+}
+:root[data-color-mode='dark'] :is(.badge-amber, .rounds-warning, .medical-visit-warning, .fx-attention,
+  .admission-match:not(:empty), .usage-notice, .usage-status-wait, .access-role.owner, .gw-gold,
+  .gw-contract-meta small, .op-open-count, .room-bed-row.matched, .history-comment) {
+  color: var(--warning-text);
+  background: var(--warning-surface);
+}
+:root[data-color-mode='dark'] .badge-red { color: var(--danger-text); background: var(--danger-surface); }
+:root[data-color-mode='dark'] :is(.form-error, .required, .assistant-error, .room-status.error,
+  .scheduled-missing, .scheduled-editor .form-error:not(:empty)) { color: var(--danger-text); }
+
+/* Sign-in, account management and the operational dashboard. */
+:root[data-color-mode='dark'] .access-login {
+  --login-ink: var(--ink);
+  --login-blue: var(--accent);
+  background: var(--paper);
+}
+:root[data-color-mode='dark'] :is(
+  .access-login-entry, .access-check, .access-templates, .access-settings,
+  .usage-filters, .usage-service, .op-white-card, .op-ring-inner, .op-shortcut
+) { background: var(--surface); border-color: var(--line); }
+:root[data-color-mode='dark'] .access-login-form .field input { background: var(--surface-field); border-color: var(--input-line); }
+:root[data-color-mode='dark'] .access-login-form .field input::placeholder { color: var(--muted); }
+:root[data-color-mode='dark'] .access-login-panel h2 { color: var(--ink); }
+:root[data-color-mode='dark'] :is(.access-login-intro, .access-login-help, .access-login-help svg,
+  .access-template small, .access-credential span) { color: var(--muted); }
+:root[data-color-mode='dark'] .access-visitor-link { color: var(--accent); }
+:root[data-color-mode='dark'] :is(.access-visitor-link:hover, .access-login-icon, .access-template-icon,
+  .access-check:has(input:checked), .access-person-icon, .access-role:not(.owner)) {
+  background: var(--soft);
+  color: var(--accent);
+}
+:root[data-color-mode='dark'] :is(.access-template, .access-credential, .op-queue-item, .op-zero-count) {
+  background: var(--surface-soft);
+  border-color: var(--line);
+}
+:root[data-color-mode='dark'] :is(.access-template:hover, .op-queue-item:hover, .op-shortcut:hover) {
+  background: var(--surface-hover);
+  border-color: var(--input-line);
+}
+:root[data-color-mode='dark'] :is(.access-credential strong, .usage-partial, .op-queue-icon.op-warning) {
+  color: var(--warning-text);
+}
+:root[data-color-mode='dark'] .access-credential strong { background: var(--warning-surface); }
+:root[data-color-mode='dark'] .usage-view-controls button[aria-pressed='true'] { background: var(--soft); }
+:root[data-color-mode='dark'] .usage-service .usage-muted { color: var(--muted); }
+:root[data-color-mode='dark'] :is(.op-meta-sep, .op-ward-strip i:not(.op-occupied), .op-key-vacant) { background: var(--line); }
+:root[data-color-mode='dark'] .op-key-vacant { box-shadow: none; }
+:root[data-color-mode='dark'] .op-card-head { border-color: var(--line); }
+:root[data-color-mode='dark'] .op-bed-ring {
+  background: conic-gradient(from -90deg, var(--op-blue) 0 var(--occupied), var(--line) var(--occupied) 100%);
+}
+:root[data-color-mode='dark'] .op-zero-count { color: var(--muted); }
+:root[data-color-mode='dark'] .op-cash-item:first-child strong { color: var(--good-text); }
+
+/* Assistant, publicly shareable FAQ and authorization dialogs. */
+:root[data-color-mode='dark'] :is(.assistant-launch, .assistant-reader, .assistant-mark,
+  .assistant-page-link, .permission-views .btn[aria-pressed='true']) {
+  background: var(--soft);
+  color: var(--accent);
+  border-color: var(--input-line);
+}
+:root[data-color-mode='dark'] :is(.global-tools .assistant-launch:hover, .assistant-launch[aria-expanded='true']) {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+:root[data-color-mode='dark'] :is(.assistant-drawer, .assistant-composer, .agent-target-list,
+  .assistant-starter, .assistant-action:not(.assistant-page-link), .assistant-network,
+  .assistant-reader-controls .assistant-reader-toggle, .permission-request-card) {
+  background: var(--surface);
+  border-color: var(--line);
+}
+:root[data-color-mode='dark'] .assistant-drawer { box-shadow: -4px 14px 46px var(--dark-shadow); }
+:root[data-color-mode='dark'] .assistant-header { background: linear-gradient(110deg, var(--soft), var(--surface) 78%); }
+:root[data-color-mode='dark'] .assistant-compose-box { background: var(--surface-field); border-color: var(--input-line); }
+:root[data-color-mode='dark'] :is(.assistant-icon-control, .assistant-retry, .assistant-network) { color: var(--muted); }
+:root[data-color-mode='dark'] :is(.assistant-page-link, .assistant-hold) { border-color: var(--input-line); }
+:root[data-color-mode='dark'] :is(.assistant-starter:hover, .assistant-action:hover, .assistant-reader-controls button:hover) {
+  background: var(--surface-hover);
+}
+:root[data-color-mode='dark'] .assistant-send:disabled { background: var(--surface-hover); color: var(--muted); }
+:root[data-color-mode='dark'] .assistant-network[aria-pressed='true'] { color: var(--good-text); background: var(--good-surface); border-color: #557d6d; }
+:root[data-color-mode='dark'] .assistant-reader-wave { color: var(--accent); }
+:root[data-color-mode='dark'] .faq-standalone { background: var(--paper); color: var(--ink); }
+:root[data-color-mode='dark'] :is(.faq-public-header, .faq-filters, .faq-entry, .faq-state, .faq-filter) {
+  background: var(--surface);
+  border-color: var(--line);
+}
+:root[data-color-mode='dark'] :is(.faq-public-brand, .faq-search input) { color: var(--ink); }
+:root[data-color-mode='dark'] :is(.faq-filter, .faq-count, .faq-answer, .faq-state, .faq-question svg) { color: var(--muted); }
+:root[data-color-mode='dark'] :is(.faq-link, .faq-state .faq-filter) { color: var(--accent); }
+:root[data-color-mode='dark'] :is(.faq-filter:hover, .faq-filter[aria-pressed='true']) { color: var(--accent); background: var(--soft); }
+:root[data-color-mode='dark'] .faq-search { background: var(--surface-field); color: var(--accent); border-color: var(--input-line); }
+:root[data-color-mode='dark'] .faq-banner .faq-link { color: #f4f8ff; }
+:root[data-color-mode='dark'] .faq-entry[open] { border-color: var(--input-line); }
+
+/* Beds, floor plans and care workspaces. Media and plan imagery keep their colors. */
+:root[data-color-mode='dark'] :is(.room-search-box, .room-matches, .room-match, .room-bed-row,
+  .room-admin-link, .room-tour-stop, .room-locator, .room-map-card, .room-detail, .room-tour-view,
+  .room-tour-index, .room-tour-empty, .room-direct-profile, .fx-bed.available, .care-area-workspace-header,
+  .care-area-office, .care-area-tags span, .care-area-form-actions, .cw-panel, .rounds-card) {
+  background: var(--surface);
+  border-color: var(--line);
+}
+:root[data-color-mode='dark'] :is(.room-floor-btn:not([aria-pressed='true']), .room-number,
+  .room-layout-preview, .fx-bed.occupied, .care-area-sidebar, .care-area-position-row, .care-area-floor-card) {
+  background: var(--surface-soft);
+  border-color: var(--line);
+}
+:root[data-color-mode='dark'] :is(.room-match:hover, .room-bed-row:not(.matched):hover,
+  .room-number:hover, .room-admin-link:hover) { background: var(--surface-hover); }
+:root[data-color-mode='dark'] .room-bed-row.matched { background: var(--warning-surface); }
+:root[data-color-mode='dark'] .room-number[aria-pressed='true'] { color: var(--accent); background: var(--soft); border-color: var(--input-line); }
+:root[data-color-mode='dark'] .room-building-select { color: var(--ink); background: var(--surface-field); border-color: var(--input-line); }
+:root[data-color-mode='dark'] :is(.room-dot, .fx-occupancy) { background: var(--line); }
+:root[data-color-mode='dark'] .fx-occupancy::-webkit-progress-bar { background: var(--line); }
+:root[data-color-mode='dark'] .room-dot.filled { background: var(--accent); }
+:root[data-color-mode='dark'] .fx-bed.occupied { border-inline-start-color: var(--accent); }
+:root[data-color-mode='dark'] .room-plan-canvas {
+  background-color: var(--surface-field);
+  background-image: linear-gradient(to right, var(--line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--line) 1px, transparent 1px);
+}
+:root[data-color-mode='dark'] .room-vector rect { fill: var(--surface); stroke: var(--input-line); }
+:root[data-color-mode='dark'] .room-vector rect.occupied { fill: var(--soft); stroke: var(--accent); }
+:root[data-color-mode='dark'] .room-vector text { fill: var(--muted); }
+:root[data-color-mode='dark'] .room-plan-tile { color: var(--muted); }
+:root[data-color-mode='dark'] .room-plan-tile[data-occupied='true'] { color: var(--ink); }
+:root[data-color-mode='dark'] .survey-loaded .room-plan-tile { background: #172332d9; }
+:root[data-color-mode='dark'] .survey-loaded .room-plan-tile[data-occupied='true'] { background: #233954e6; }
+:root[data-color-mode='dark'] .room-plan-tile[aria-pressed='true'] {
+  color: #fff;
+  background: var(--action-background);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-field);
+}
+:root[data-color-mode='dark'] .cw-tile {
+  background: linear-gradient(165deg, var(--soft), var(--surface) 78%);
+  color: var(--accent);
+  border-color: var(--input-line);
+}
+:root[data-color-mode='dark'] .cw-tile--urgent {
+  background: linear-gradient(160deg, var(--warning-surface), var(--surface) 83%);
+  color: var(--warning-text);
+}
+:root[data-color-mode='dark'] .cw-tile:hover { background: var(--surface-hover); }
+:root[data-color-mode='dark'] .cw-tile--urgent:hover { background: var(--warning-surface); }
+:root[data-color-mode='dark'] :is(.cw-panel-head h3, .cw-share dt) { color: var(--ink); }
+:root[data-color-mode='dark'] :is(.cw-tile-hint, .cw-summary, .cw-empty, .cw-list-text span, .cw-share div) { color: var(--muted); }
+:root[data-color-mode='dark'] .cw-action { color: var(--accent); }
+
+/* Finance, clinical forms, periodic jobs, visit booking and audit. */
+:root[data-color-mode='dark'] :is(
+  .admission-price-breakdown .fx-section .fx-records, .scheduled-summary > div, .scheduled-form-actions,
+  .scheduled-week-menu, .gw-panel, .gw-category, .gw-catalog-main, .gw-contract, .lead-counts,
+  .assistant-visit, .medical-hospital-options, .history-room-results:not(:empty), .history-layout, .history-item
+) { background: var(--surface); border-color: var(--line); }
+:root[data-color-mode='dark'] :is(.medical-visit-originals, .lead-day-info, .lead-slot, .history-day,
+  .admission-quote, .gw-transcript, .gw-schema > summary, .change-fields) {
+  background: var(--surface-soft);
+  border-color: var(--line);
+}
+:root[data-color-mode='dark'] :is(.lead-grid thead th, .lead-grid tbody th) {
+  color: var(--muted);
+  background: var(--surface-hover);
+}
+:root[data-color-mode='dark'] :is(.gw-queues .fx-tabs button:not([aria-selected='true']), .gw-search, .gw-select,
+  .medical-visit-originals select, .medical-file select, .scheduled-roster-head input,
+  .group-intake-note input, .life-date input) {
+  color: var(--ink);
+  background: var(--surface-field);
+  border-color: var(--input-line);
+}
+:root[data-color-mode='dark'] :is(.gw-mark, .gw-change-column + section, .gw-category-item[aria-pressed='true'],
+  .lead-booking, .history-tools > .btn[aria-pressed='true'], .history-item[aria-current='true'], .change-focus) {
+  color: var(--accent);
+  background: var(--soft);
+  border-color: var(--input-line);
+}
+:root[data-color-mode='dark'] :is(.lead-slot:is(:hover, :focus-visible), .gw-category-item:hover,
+  .gw-contract:hover, .history-item:hover) { background: var(--surface-hover); }
+:root[data-color-mode='dark'] :is(.lead-event-outcome, .lead-slot, .history-scope, .history-item-meta,
+  .history-item small, .history-day, .history-version, .history-side-label, .history-note,
+  .history-object > summary small, .history-field-label, .change-target, .change-fields dt,
+  .history-record-values dt) { color: var(--muted); }
+:root[data-color-mode='dark'] .lead-booking-callback { color: var(--good-text); background: var(--good-surface); }
+:root[data-color-mode='dark'] .history-before { background: var(--danger-surface); }
+:root[data-color-mode='dark'] .history-after { background: var(--good-surface); }
+:root[data-color-mode='dark'] .history-record h4 { color: var(--good-text); }
+:root[data-color-mode='dark'] .history-record-remove h4 { color: var(--danger-text); }

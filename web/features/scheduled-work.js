@@ -72,16 +72,16 @@ function audiencePicker(directory, original) {
     residents: people,
   };
   const values = choice([
-    ...(directory.allowAll ? [['all', '全部分院在住长者']] : []),
+    ...(directory.allowAll ? [['all', '全部分院在住长辈']] : []),
     ...(directory.campuses.length ? [['campus', '按分院动态派发']] : []),
     ['rooms', '按房间动态派发'],
-    ['residents', '指定长者名单'],
+    ['residents', '指定长辈名单'],
   ], original?.kind || 'residents');
   const campuses = new Map(directory.rooms.map(room => [room.campusId, room.campusName]));
   for (const branch of directory.campuses) campuses.set(branch.id, branch.name);
   const campus = choice([['', '查看全部分院'], ...campuses]);
   const campusFilter = label('按分院筛选', campus);
-  const find = input('search', '', { placeholder: '搜索长者、床号或房间' });
+  const find = input('search', '', { placeholder: '搜索长辈、床号或房间' });
   find.setAttribute('aria-label', '搜索执行范围候选项');
   const list = node('div', 'scheduled-residents');
   const count = node('strong', 'scheduled-selected');
@@ -103,7 +103,7 @@ function audiencePicker(directory, original) {
     campusFilter.hidden = kind === 'campus';
     if (kind === 'all') return;
     const candidates = entries[kind] || [];
-    find.placeholder = { campus: '搜索分院', rooms: '搜索房间', residents: '搜索长者姓名、床号或房间' }[kind];
+    find.placeholder = { campus: '搜索分院', rooms: '搜索房间', residents: '搜索长辈姓名、床号或房间' }[kind];
     const needle = find.value.trim().toLocaleLowerCase();
     const rows = candidates.filter(row =>
       (kind === 'campus' || !campus.value || row.campusId === campus.value) &&
@@ -112,7 +112,7 @@ function audiencePicker(directory, original) {
 
     function syncCount() {
       const visible = chosen().length;
-      count.textContent = '已选 ' + visible + { campus: ' 个分院', rooms: ' 间房', residents: ' 位长者' }[kind];
+      count.textContent = '已选 ' + visible + { campus: ' 个分院', rooms: ' 间房', residents: ' 位长辈' }[kind];
       const absent = selected[kind].size - visible;
       missing.hidden = absent === 0;
       missing.textContent = absent ? '有 ' + absent + ' 个原执行对象已离开当前可选范围，请核对后保存。' : '';
@@ -144,7 +144,7 @@ function audiencePicker(directory, original) {
       if (kind !== 'all' && !rows.length) throw new Error('请至少选择一个执行对象。');
       return {
         scope: field ? { kind, [field]: rows.map(row => row.id) } : { kind },
-        display: field ? rows.map(row => row.label).join('、') : '全部分院在住长者',
+        display: field ? rows.map(row => row.label).join('、') : '全部分院在住长辈',
       };
     },
   };
@@ -462,8 +462,8 @@ function builtinsTable(ctx, rows, related = false) {
 }
 
 const templates = [
-  { kind: 'patrol', title: '早班查房', time: '08:00', note: '逐位观察长者状态并记录变化。' },
-  { kind: 'care', title: '下午饮水照护', time: '15:00', note: '根据长者的照护安排提供饮水并记录。' },
+  { kind: 'patrol', title: '早班查房', time: '08:00', note: '逐位观察长辈状态并记录变化。' },
+  { kind: 'care', title: '下午饮水照护', time: '15:00', note: '根据长辈的照护安排提供饮水并记录。' },
   { kind: 'meal', title: '每日午餐', time: '12:30', mealKind: '午餐' },
 ];
 
@@ -491,12 +491,18 @@ function report(ctx, data) {
   ];
 }
 
+export async function openScheduledPlan(ctx) {
+  const data = await ctx.get('/api/scheduled-work');
+  if (!data.canManage) return ctx.toast('当前账号没有管理定时计划的权限');
+  return editor(ctx, data);
+}
+
 export function scheduledWork(ctx) {
   const content = node('div', 'scheduled-content');
   const actions = node('div', 'scheduled-toolbar');
   const root = node('section', 'scheduled-work', [
     node('header', 'scheduled-heading', [
-      node('div', '', [node('h2', '', '定时工单'), node('p', 'fx-muted', '按上海时间管理自动派发及今日执行批次。')]),
+      node('div', '', [node('h2', '', '定时工单与批量派发'), node('p', 'fx-muted', '按上海时间管理自动派发及今日执行批次。')]),
       actions,
     ]),
     content,
@@ -514,6 +520,7 @@ export function scheduledWork(ctx) {
         if (ctx.refreshWorkspace) await ctx.refreshWorkspace();
         else await load();
       }));
+      if (ctx.available('reports')) actions.append(btn(ctx, '统计报送', () => ctx.go('reports')));
       if (data.canManage) actions.append(btn(ctx, '新建定时计划', () => editor(ctx, data), 'primary'));
       content.replaceChildren(...report(ctx, data).filter(Boolean));
     } catch (error) {

@@ -134,7 +134,7 @@ def sign_summary(db, state, p, user, today):
             and row.get("draftFingerprint") == draft["fingerprint"]
         ):
             if row["summary"] == value:
-                return f"长者 {rid} 的本次动态档案摘要已签认"
+                return f"长辈 {rid} 的本次动态档案摘要已签认"
             raise ValueError("该组资料已有签认版本，请核对历史摘要")
     resident = lookup(state, "residents", rid)
     append_record(
@@ -153,4 +153,4 @@ def sign_summary(db, state, p, user, today):
         draftFingerprint=draft["fingerprint"],
     )
     resident["summary"] = value
-    return f"已签认长者 {rid} 的动态档案摘要"
+    return f"已签认长辈 {rid} 的动态档案摘要"

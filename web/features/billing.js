@@ -55,7 +55,7 @@ function residentBillingPolicy(ctx, person) {
   });
 }
 
-function generate(ctx, selected, onIssued) {
+export function generate(ctx, selected, onIssued) {
   if (!ctx.state.allowedActions.includes('ops.bill')) return ctx.toast('当前账号无权核算账单');
   const due = new Map((ctx.state.billingDue || []).map((r) => [r.residentId, r]));
   const people = ctx.state.residents.filter((r) =>
@@ -63,7 +63,7 @@ function generate(ctx, selected, onIssued) {
   if (!people.length) return ctx.toast('当前没有可核算的月付账期');
   const resident = select(
     'residentId',
-    '长者',
+    '长辈',
     people.map((r) => ({ value: r.id, label: residentLabel(ctx, r) + ' · ' + r.status })),
   );
   const month = today(ctx).slice(0, 7);
@@ -94,7 +94,7 @@ function generate(ctx, selected, onIssued) {
       return done;
     },
     description:
-      '按长者约定的账期核算。日费率和请假天数留空时，使用相应床位、照护等级及请假记录。',
+      '按长辈约定的账期核算。日费率和请假天数留空时，使用相应床位、照护等级及请假记录。',
     submitLabel: '生成账单',
     fields: [
       resident,
@@ -157,7 +157,7 @@ export function admissionPayment(ctx, residentId) {
   const editable = canAct(ctx, 'ops.residentBillingPolicy') && person.admissionTerms &&
     person.status === '在住' && person.stayType === 'formal';
   const body = node('div', 'fx-profile', [
-    facts([['长者', residentName(ctx, residentId)],
+    facts([['长辈', residentName(ctx, residentId)],
       ...(person.admissionStatus ? [['入住交费状态', person.admissionStatus]] : []), ['可用预缴金', money(account?.amount)]]),
     ...bills.map((bill) => section((admission && bill.kind !== 'trial' && bill.kind !== 'security' ? '首期月费' : billType(bill)) +
       ' · ' + (bill.billingDate || bill.month),
@@ -181,7 +181,7 @@ export function billDetail(ctx, bill) {
     ? ctx.state.payments.filter((payment) => payment.securityBillId === bill.id).reduce((total, p) => total + p.amount, 0) : null;
   const content = node('div', 'fx-profile', [
     facts([
-      ['长者', residentName(ctx, bill.residentId)],
+      ['长辈', residentName(ctx, bill.residentId)],
       ['收费类型', billType(bill)],
       ['账期', bill.month],
       ...(bill.billingDate ? [['账单日期', bill.billingDate]] : []),
@@ -279,7 +279,7 @@ export function billing(ctx) {
             title: '账单明细',
             rows: bills,
             search: {
-              placeholder: '搜索长者或账期',
+              placeholder: '搜索长辈或账期',
               value: (b) => residentName(ctx, b.residentId) + ' ' + b.month,
             },
             filter: {
@@ -287,7 +287,7 @@ export function billing(ctx) {
             },
             cols: [
               {
-                label: '长者',
+                label: '长辈',
                 view: (b) => residentAnchor(ctx, b.residentId),
               },
               {
@@ -320,9 +320,9 @@ export function billing(ctx) {
         title: '已到账单日的月付账期',
         rows: ctx.state.billingDue || [],
         empty: '当前没有已到期且尚未出账的约定月付账期。',
-        search: { placeholder: '搜索长者', value: (r) => residentName(ctx, r.residentId) },
+        search: { placeholder: '搜索长辈', value: (r) => residentName(ctx, r.residentId) },
         cols: [
-          { label: '长者', view: (r) => residentAnchor(ctx, r.residentId) },
+          { label: '长辈', view: (r) => residentAnchor(ctx, r.residentId) },
           { label: '本期账单日', view: (r) => r.billingDate },
           { label: '计费区间', view: (r) => r.startDate + ' 至 ' + r.endDate },
           { label: '操作', align: 'end', view: (r) => ctx.state.allowedActions.includes('ops.bill')
@@ -341,12 +341,12 @@ export function billing(ctx) {
             title: '预交账户',
             rows: ctx.state.deposits,
             search: {
-              placeholder: '搜索长者姓名',
+              placeholder: '搜索长辈姓名',
               value: (r) => residentName(ctx, r.residentId),
             },
             cols: [
               {
-                label: '长者',
+                label: '长辈',
                 view: (r) => residentAnchor(ctx, r.residentId),
               },
               {
@@ -383,7 +383,7 @@ export function billing(ctx) {
             title: '账单核销记录',
             rows: ctx.state.payments,
             search: {
-              placeholder: '搜索长者或账单',
+              placeholder: '搜索长辈或账单',
               value: (r) => residentName(ctx, r.residentId) + ' ' + r.billId,
             },
             filter: {
@@ -396,7 +396,7 @@ export function billing(ctx) {
                 view: (r) => r.date,
               },
               {
-                label: '长者',
+                label: '长辈',
                 view: (r) => residentAnchor(ctx, r.residentId),
               },
               {

@@ -13,6 +13,7 @@ ROUTES = {
     "overview": "运营总览",
     "intake": "老人入住",
     "residents": "入住管理",
+    "leads": "意向客户",
     "beds": "床位管理及平面图",
     "dossier": "个人与医疗档案",
     "assessments": "能力评估",

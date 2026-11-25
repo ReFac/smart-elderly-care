@@ -137,7 +137,7 @@ class FamilyServiceAccessTests(unittest.TestCase):
         )
         sibling, _ = self.family("family-peer", "r003")
         data = self.store.snapshot(token)["data"]
-        self.assertEqual(resident["role"], "入住长者")
+        self.assertEqual(resident["role"], "入住长辈")
         self.assertNotIn("dossier.relative", data["allowedActions"])
         self.assertNotIn("portalMedication", self.store.snapshot(sibling)["data"])
         self.assertTrue(data["portalMedication"])
@@ -161,7 +161,7 @@ class FamilyServiceAccessTests(unittest.TestCase):
         check = self.store.snapshot(self.owner)["data"]["qualityChecks"][-1]
         self.assertEqual(
             (check["source"], check["rating"], check["residentId"]),
-            ("长者本人评价", 4, "r003"),
+            ("长辈本人评价", 4, "r003"),
         )
         self.command(self.owner, "access.update", id=resident["id"], portalScopes=[])
         data = self.store.snapshot(token)["data"]

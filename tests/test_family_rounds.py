@@ -58,7 +58,7 @@ class FamilyRoundTests(unittest.TestCase):
             residentId="r001",
             accountId=self.family["id"],
             enabled=state,
-            method="长者当面确认",
+            method="长辈当面确认",
             evidence="在接待室逐项核对简报范围",
         )
 
@@ -177,7 +177,7 @@ class FamilyRoundTests(unittest.TestCase):
             self.call(self_user, "family.subscribe", residentId="r001", enabled=True)
         self.consent(True, self_user)
         self.assertEqual(
-            self.data(proxy)["familyRoundRecipients"][0]["method"], "长者本人账号确认"
+            self.data(proxy)["familyRoundRecipients"][0]["method"], "长辈本人账号确认"
         )
         self.consent(False, proxy)
         self.assertFalse(self.data(self.token)["familyRoundInbox"]["allowed"])
@@ -215,7 +215,7 @@ class FamilyRoundTests(unittest.TestCase):
 
         def save(**p):
             return self.call(
-                self.owner, "dossier.profile", residentId="r001", name="测试长者", **p
+                self.owner, "dossier.profile", residentId="r001", name="测试长辈", **p
             )
 
         save(children="原有自由文本", address="原现住址")
@@ -263,7 +263,7 @@ class FamilyRoundTests(unittest.TestCase):
                 reader,
                 "dossier.profile",
                 residentId="r001",
-                name="测试长者",
+                name="测试长辈",
                 familyContact={
                     "id": records["familyMembers"][-1]["id"],
                     "remove": True,
@@ -347,8 +347,8 @@ class FamilyRoundTests(unittest.TestCase):
                 "family.consent",
                 {
                     "accountId": self.family["id"],
-                    "method": "长者电话确认",
-                    "evidence": "重新征求长者同意",
+                    "method": "长辈电话确认",
+                    "evidence": "重新征求长辈同意",
                 },
             ),
             (family, "family.subscribe", {}),

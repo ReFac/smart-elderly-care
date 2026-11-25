@@ -28,7 +28,7 @@ class BillingLifecycleTests(unittest.TestCase):
         )
         self.resident = {
             "id": "person-a",
-            "name": "测试长者",
+            "name": "测试长辈",
             "status": "在住",
             "stayType": "formal",
             "admittedAt": "2026-10-25",

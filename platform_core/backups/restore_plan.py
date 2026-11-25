@@ -15,9 +15,9 @@ MUTABLE = {
     "facility_plans": "楼层平面图",
     "facility_scenes": "导览场景",
     "facility_media": "导览资源",
-    "dossier_profiles": "长者档案资料",
+    "dossier_profiles": "长辈档案资料",
     "dossier_relatives": "亲属档案资料",
-    "rounds_modes": "长者巡查生成设置",
+    "rounds_modes": "长辈巡查生成设置",
     "rounds_policy": "机构巡查排程设置",
     "care_areas": "楼栋照护区域",
     "care_area_floors": "区域分层",
@@ -30,7 +30,7 @@ ORIGINALS = {
     "legacy_bed_cards": "历史床位补卡凭证",
     "resident_medication_reports": "体检用药自报及历次更正",
     "medication_round_receipts": "逐人服药核对签认",
-    "resident_health_notes": "长者健康简介和个人谈话记录",
+    "resident_health_notes": "长辈健康简介和个人谈话记录",
     "daily_life_events": "集体活动登记",
     "daily_life_invitees": "活动候选名单",
     "daily_life_signatures": "活动签认凭证",
@@ -45,7 +45,7 @@ ORIGINALS = {
     "storage_assets": "环境与历史原件",
     "protected_documents": "签发的加密文书",
     "rounds_observations": "已核对咳嗽时段观测",
-    "rounds_reports": "已生成的长者巡查简报",
+    "rounds_reports": "已生成的长辈巡查简报",
     "scheduled_work_runs": "定时工单派发凭证",
     "permission_requests": "实名签署的权限申请和一次性使用凭证",
 }
@@ -82,7 +82,7 @@ LABELS = {
     "paymentFeeSettings": "收款手续费设置",
     "visitSchedulePolicies": "院区并行接待席位",
     "beds": "床位",
-    "residents": "长者",
+    "residents": "长辈",
     "inquiries": "入住咨询",
     "plans": "照护计划",
     "tasks": "护理工单",
@@ -235,7 +235,7 @@ def describe(db):
         if key == "residents" and {r["id"] for r in current} - {
             r["id"] for r in wanted
         }:
-            blockers.append("当前已建档长者在选定时间点缺失")
+            blockers.append("当前已建档长辈在选定时间点缺失")
 
     live_campuses = {
         r[0]

@@ -1,12 +1,15 @@
 import { asBase64 } from './document-original.js';
 import { btn, canAct, node, today } from './shared.js';
 import { residentLabel } from './people-labels.js';
+import { medicalResidentPicker } from './medical-resident-picker.js';
 import { reviewVisit, visitsFor } from './medical-visit-review.js';
 
 const types = ['就诊记录', 'CT影像', '检查报告', '处方', '医嘱', '其他'];
 const mimeByExtension = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
 const mib = 1024 * 1024;
 const closed = new Set(['已退住', '已归档', '归档', '已出院', '归档到期']);
+
+const visitCandidates = ctx => (ctx.state.residents || []).filter(row => !closed.has(row.status));
 
 function categoryFrom(filename) {
   if (/报告|结论/.test(filename)) return '检查报告';
@@ -71,8 +74,7 @@ function attachmentsInput(ctx, rows, changed) {
 
 export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '') {
   if (!canAct(ctx, 'dossier.confirmVisit')) return ctx.toast('当前账号没有就诊病例核对权限。');
-  const candidates = (ctx.state.residents || []).filter(row => !closed.has(row.status));
-  if (resident && !candidates.some(row => row.id === resident.id)) return ctx.toast('这份档案当前只读。');
+  if (resident && !visitCandidates(ctx).some(row => row.id === resident.id)) return ctx.toast('这份档案当前只读。');
   const ai = mode === 'ai';
   const form = node('form', 'medical-visit-form medical-visit-wizard');
   form.autocomplete = 'off';
@@ -108,33 +110,28 @@ export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '')
     dialog.dataset.roundsResidentId = person.id;
   }
   function selectPerson() {
-    const select = node('select');
-    select.name = 'residentId';
-    select.dataset.visitAutofocus = '';
-    select.add(new Option('请选择长者', ''));
-    const sorted = [...candidates].sort((a,b) => a.name.localeCompare(b.name, 'zh-CN'));
-    const duplicateNames = new Set(sorted.filter((row, i) => i && row.name === sorted[i - 1].name).map(row => row.name));
-    for (const row of sorted) {
-      const option = new Option(row.name, row.id);
-      if (!duplicateNames.has(row.name)) select.add(option);
-      else {
-        const group = node('optgroup');
-        group.label = ctx.state.beds?.find(bed => bed.id === row.bedId)?.label
-          || ctx.state.residentRooms?.[row.id] || '床位未登记';
-        group.append(option);
-        select.append(group);
+    const live = ctx.current?.() || ctx;
+    let selectedId = '';
+    function proceed() {
+      if (!selectedId) return;
+      const current = ctx.current?.() || ctx;
+      const chosen = canAct(current, 'dossier.confirmVisit') && visitCandidates(current).find(row => row.id === selectedId);
+      if (!chosen) {
+        ctx.toast('这位长辈当前不可办理，请重新选择。');
+        return selectPerson();
       }
-    }
-    select.value = person?.id || '';
-    const onward = next(() => {
-      const chosen = candidates.find(row => row.id === select.value);
-      if (!chosen) return;
       setPerson(chosen);
       selectRecord();
+    }
+    const onward = next(proceed);
+    onward.disabled = true;
+    const candidates = canAct(live, 'dossier.confirmVisit') ? visitCandidates(live) : [];
+    const picker = medicalResidentPicker(live, candidates, person?.id, chosen => {
+      selectedId = chosen?.id || '';
+      onward.disabled = !selectedId;
     });
-    onward.disabled = !select.value;
-    select.onchange = () => { onward.disabled = !select.value; };
-    stage('选择长者', [field('长者姓名', select)], [onward], false);
+    stage('选择长辈', [picker], [onward], false);
+    form.onsubmit = event => { event.preventDefault(); proceed(); };
   }
   function selectRecord() {
     const list = visitsFor(ctx.current?.() || ctx, person.id);
@@ -149,7 +146,7 @@ export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '')
     select.value = existing?.id || '';
     stage('选择就诊记录', [
       field('要写入的就诊记录', select),
-      list.length ? null : node('p', 'fx-muted', '这位长者暂无已存档的就诊记录。'),
+      list.length ? null : node('p', 'fx-muted', '这位长辈暂无已存档的就诊记录。'),
     ], [
       resident ? null : back(selectPerson),
       next(() => {
@@ -202,8 +199,8 @@ export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '')
         existing ? ' · 补充 ' + (existing.fields.facility || '原就诊记录') : ' · 新建就诊记录']),
       picker.element,
       node('label', 'access-check', [check, ai
-        ? '已核对资料归属，同意提交 DeepSeek 识别。'
-        : '已核对长者与就诊日期。']),
+        ? '已核对资料归属，同意由 DeepSeek 识别原件，并由机构配置的云端模型整理识别文字。'
+        : '已核对长辈与就诊日期。']),
       note, error,
     ]);
     stage(ai ? '上传就诊资料' : '添加原件与记录', [inputGroup], [

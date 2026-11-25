@@ -32,7 +32,7 @@ def plan_facts(row):
 
 def draft(state, resident, today, cite):
     rid = resident["id"]
-    evidence = [cite("residents", "长者档案", [resident], resident["level"])]
+    evidence = [cite("residents", "长辈档案", [resident], resident["level"])]
     lines = [f"档案护理等级为{resident['level']}。"]
     assessments = []
     for row in state.get("assessments", ()):

@@ -201,7 +201,7 @@ def record(db, state, user, payload, now):
             (report, rid),
         ).fetchone()[0]
         if current != previous:
-            raise ValueError("这条自报已变更或不属于这位长者，请重新查看后更正")
+            raise ValueError("这条自报已变更或不属于这位长辈，请重新查看后更正")
     else:
         report = uuid4().hex
     db.execute(
@@ -226,4 +226,4 @@ def record(db, state, user, payload, now):
             request,
         ),
     )
-    return "已更正长者用药自报" if previous else "已登记长者用药自报"
+    return "已更正长辈用药自报" if previous else "已登记长辈用药自报"

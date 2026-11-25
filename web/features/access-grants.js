@@ -42,7 +42,7 @@ const commands = {
       giveMedication: '登记给药',
       reviewMedication: '复核医嘱',
       vital: '录入体征',
-      reportMedication: '登记长者本人自报的用药',
+      reportMedication: '登记长辈本人自报的用药',
       resolveVital: '复核异常体征',
       archive: '登记健康记录',
       screen: '登记筛查',
@@ -59,7 +59,7 @@ const commands = {
   dossier: [
     '档案维护',
     {
-      profile: '维护长者资料',
+      profile: '维护长辈资料',
       document: '存档医疗文书',
       relative: '维护亲属资料',
       ocr: '识别已存原件',
@@ -124,8 +124,8 @@ const commands = {
   ],
   account: ['个人账号', { changePassword: '修改本人密码' }],
   permissionRequest: ['权限申请', { create: '申请档案编辑权限', review: '实名签署审批', editProfile: '使用临时档案授权' }],
-  family: ['巡查简报', { consent: '登记长者分享意愿', subscribe: '本人订阅站内简报', read: '签收本人简报' }],
-  portal: ['长者与家属服务', { feedback: '评价已完成的服务' }],
+  family: ['巡查简报', { consent: '登记长辈分享意愿', subscribe: '本人订阅站内简报', read: '签收本人简报' }],
+  portal: ['长辈与家属服务', { feedback: '评价已完成的服务' }],
 };
 
 export function grantPicker(options, current) {

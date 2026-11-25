@@ -1,11 +1,12 @@
-"""Phone-verified sessions for the public tour, separate from workspace accounts."""
+"""Phone-verified customer registration and isolated public tour sessions."""
 
 from contextlib import closing
 import hmac
 import re
 import secrets
+from uuid import uuid4
 
-from . import access, identity
+from . import access, activity, history, identity, portal
 
 DEMO_PHONE = "+8613900000000"
 CODE_TTL = 300
@@ -19,7 +20,17 @@ def init(db):
       ready INTEGER NOT NULL DEFAULT 0, demo INTEGER NOT NULL)""")
     db.execute("""CREATE TABLE IF NOT EXISTS visitor_sessions(
       proof BLOB PRIMARY KEY, masked TEXT NOT NULL, expires INTEGER NOT NULL,
-      demo INTEGER NOT NULL)""")
+      demo INTEGER NOT NULL, account_id TEXT REFERENCES accounts(id))""")
+    if "account_id" not in {r[1] for r in db.execute("PRAGMA table_info(visitor_sessions)")}:
+        db.execute("ALTER TABLE visitor_sessions ADD COLUMN account_id TEXT REFERENCES accounts(id)")
+        db.execute("DELETE FROM visitor_sessions WHERE demo=0")
+    db.execute("CREATE INDEX IF NOT EXISTS visitor_session_account ON visitor_sessions(account_id)")
+    db.execute("""CREATE INDEX IF NOT EXISTS identity_sms_number
+      ON identity_contacts(destination) WHERE channel='sms' AND verified>=0""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS visitor_revoke_disabled
+      AFTER UPDATE OF enabled ON accounts WHEN NEW.enabled=0 BEGIN
+        DELETE FROM visitor_sessions WHERE account_id=NEW.id;
+      END""")
 
 
 def _tag(store, *parts):
@@ -38,15 +49,22 @@ def status(store, visitor_token, account_token, *, demo=False):
         "demoEnabled": demo,
     }
     with closing(store.connect()) as db:
-        if account_token and access.authenticate(db, account_token):
+        user = access.authenticate(db, account_token) if account_token else None
+        if user:
             output["signedIn"] = True
+            if portal.is_customer(user):
+                output["customerUsername"] = user["username"]
         elif visitor_token and len(visitor_token) <= 100:
             session = db.execute(
-                "SELECT masked,demo FROM visitor_sessions WHERE proof=? AND expires>?",
+                """SELECT s.masked,s.demo,a.username,a.kind,a.role FROM visitor_sessions s
+                LEFT JOIN accounts a ON a.id=s.account_id
+                WHERE s.proof=? AND s.expires>? AND (s.account_id IS NULL OR a.enabled=1)""",
                 (_tag(store, "session", visitor_token), _clock(store)),
             ).fetchone()
             if session and (not session["demo"] or demo):
                 output.update(signedIn=True, maskedPhone=session["masked"])
+                if session["kind"] == "family" and session["role"] == portal.CUSTOMER_ROLE:
+                    output["customerUsername"] = session["username"]
     return output
 
 
@@ -88,6 +106,33 @@ def request_code(store, payload, peer, *, demo=False):
     return result
 
 
+def _verified_account(store, db, phone):
+    row = db.execute(
+        """SELECT a.id,a.enabled FROM identity_contacts c JOIN accounts a ON a.id=c.account_id
+        WHERE c.channel='sms' AND c.verified>=0 AND c.destination=?
+        ORDER BY a.enabled DESC, c.verified DESC, (a.role=?) ASC, a.id LIMIT 1""",
+        (phone, portal.CUSTOMER_ROLE),
+    ).fetchone()
+    if row:
+        return row["id"] if row["enabled"] else None
+    aid = uuid4().hex
+    username, salt = "visitor-" + aid[:20], secrets.token_bytes(16)
+    password_hash = access._digest(secrets.token_urlsafe(32), salt)
+    history.watch(db, "access.registerCustomer")
+    db.execute(
+        """INSERT INTO accounts(id,username,display_name,kind,role,salt,password_hash)
+        VALUES(?,?,?,'family',?,?,?)""",
+        (aid, username, "参观顾客", portal.CUSTOMER_ROLE, salt, password_hash),
+    )
+    db.execute("INSERT INTO identity_contacts VALUES(?,'sms',?,1)", (aid, phone))
+    revision = db.execute("UPDATE workspace SET revision=revision+1 WHERE id=1 RETURNING revision").fetchone()[0]
+    activity.write(
+        db, revision, store.now().isoformat(), "access.registerCustomer",
+        "顾客通过环境导览验证手机号后注册", access.account(db, aid), {}, {},
+    )
+    return aid
+
+
 def verify(store, payload, peer, *, demo=False):
     if set(payload) != {"challengeId", "code"}:
         raise ValueError("请填写验证码")
@@ -108,13 +153,15 @@ def verify(store, payload, peer, *, demo=False):
         if row:
             db.execute("UPDATE visitor_challenges SET attempts=attempts+1 WHERE id=?", (challenge,))
             if hmac.compare_digest(row["proof"], _tag(store, challenge, code)):
-                token = secrets.token_urlsafe(32)
                 db.execute("DELETE FROM visitor_challenges WHERE id=?", (challenge,))
-                db.execute(
-                    "INSERT INTO visitor_sessions VALUES(?,?,?,?)",
-                    (_tag(store, "session", token), identity.masked("sms", row["phone"]),
-                     now + SESSION_TTL, row["demo"]),
-                )
+                aid = None if row["demo"] else _verified_account(store, db, row["phone"])
+                if row["demo"] or aid:
+                    token = secrets.token_urlsafe(32)
+                    db.execute(
+                        "INSERT INTO visitor_sessions(proof,masked,expires,demo,account_id) VALUES(?,?,?,?,?)",
+                        (_tag(store, "session", token), identity.masked("sms", row["phone"]),
+                         now + SESSION_TTL, row["demo"], aid),
+                    )
     if not token:
         raise ValueError("验证码无效或已过期")
     return token

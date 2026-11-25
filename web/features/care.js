@@ -40,7 +40,7 @@ import { groupActivities } from './group-activities.js';
 import { assessmentStages, healthDesk } from './care-workbench.js';
 
 const personSearch = (ctx, extra) => ({
-  placeholder: '搜索长者或记录',
+  placeholder: '搜索长辈或记录',
   value: (r) => residentName(ctx, r.residentId) + ' ' + (extra?.(r) || ''),
 });
 
@@ -49,7 +49,7 @@ const statusFilter = {
 };
 
 const personCol = (ctx) => ({
-  label: '长者',
+  label: '长辈',
   view: (r) => residentAnchor(ctx, r.residentId),
 });
 
@@ -189,7 +189,7 @@ export function assessments(ctx) {
       ],
     });
   const grading = () => table(ctx, {
-    title: '在住长者的最近一次等级判定',
+    title: '在住长辈的最近一次等级判定',
     rows: [...latest.values()],
     search: personSearch(ctx, (row) => (row.scale?.gradeName || '') + ' ' + row.level),
     cols: [
@@ -200,7 +200,7 @@ export function assessments(ctx) {
       { label: '评估日期', view: assessedOn },
       { label: '判定依据', align: 'end', view: (r) => link(ctx,'查看评估与依据',() => evaluationDetails(ctx,r)) },
     ],
-    empty: '暂无可查看的在住长者评估，可先登记新评估。',
+    empty: '暂无可查看的在住长辈评估，可先登记新评估。',
   });
   const reviews = () =>
     table(ctx, {
@@ -268,7 +268,7 @@ export function assessments(ctx) {
               : link(ctx, '查看', () =>
                   ctx.detail('个性化照护方案', node('div', 'fx-profile', [
                     facts([
-                      ['长者', residentName(ctx, r.residentId)],
+                      ['长辈', residentName(ctx, r.residentId)],
                       ['计划', r.title],
                       ['内容', r.note],
                       ['负责人员', staffLabel(ctx, r.assignee, r.assigneeId)],
@@ -288,7 +288,7 @@ export function assessments(ctx) {
   return page(
     ctx,
     '评估与计划',
-    '记录长者能力与服务需求，复核方案后派发照护工单。',
+    '记录长辈能力与服务需求，复核方案后派发照护工单。',
     choose(
       btn(ctx, '登记照护观察', () => assess()),
       canUseScale ? btn(ctx, '标准量表评估', () => scaleForm(ctx), 'primary') : null,
@@ -336,12 +336,10 @@ export function taskForm(ctx, proposal = null) {
     submitLabel: '创建任务',
   };
   if (!proposal) return runForm(ctx, config);
-  const title = config.fields.find(f => f.name === 'title');
-  title.value = proposal.title;
   return ctx.dialog({
-    title: '审核照护工单', fields: [...config.fields, memo('note', '执行说明', false, { value: proposal.description, maxLength: 500 })],
-    submitLabel: '确认发布',
-    onSubmit: values => ctx.command('care.addTask', { ...values, assistantActionId: proposal.id }, { confirmed: true }),
+    title: '填写照护工单', fields: [...config.fields, memo('note', '执行说明', false, { maxLength: 500 })],
+    submitLabel: '核对发布',
+    onSubmit: values => ctx.command('care.addTask', { ...values, assistantActionId: proposal.id }),
   });
 }
 
@@ -460,7 +458,7 @@ function taskHistory(ctx) {
   });
 }
 
-function vitalForm(ctx) {
+export function vitalForm(ctx) {
   runForm(ctx, {
     title: '录入健康体征',
     action: 'care.vital',
@@ -495,7 +493,7 @@ function vitalForm(ctx) {
 
 function vitalDetail(ctx, row) {
   ctx.detail('体征与处置凭证', facts([
-    ['长者', residentAnchor(ctx, row.residentId)],
+    ['长辈', residentAnchor(ctx, row.residentId)],
     ['体征项目', row.metric],
     ['测量结果', [row.value,row.unit].filter(Boolean).join(' ')],
     ['登记日期', row.date],
@@ -578,7 +576,7 @@ export function care(ctx) {
         ['completed', '已完成服务', () => careTimeline(ctx, 'work', '', (id) => serviceProof(ctx, id))],
       ] : []),
       ...(ctx.permitted('care') || ctx.permitted('clinical') || ctx.permitted('care.schedule')
-        ? [['scheduledWork', '定时工单', () => scheduledWork(ctx)]] : []),
+        ? [['scheduledWork', '定时工单与批量派发', () => scheduledWork(ctx)]] : []),
       ...(canAct(ctx, 'care.confirmMedRound') ? [['medRounds', '服药核对', () => medicationRoundDesk(ctx)]] : []),
       ...(canAct(ctx, 'care.vital') ? [['vitals', '健康体征', () => vitals(ctx)]] : []),
       ...(canAct(ctx, 'care.proposeGroupActivity') || canAct(ctx, 'care.confirmGroupActivity')
@@ -594,12 +592,34 @@ export function care(ctx) {
   );
 }
 
+export function medicationForm(ctx) {
+  runForm(ctx, {
+    title: '登记用药计划',
+    action: 'care.addMedication',
+    description: '按现有医嘱录入，保存后进入人工复核。',
+    fields: [
+      residentField(ctx),
+      field('name', '药品名称'),
+      memo('instruction', '医嘱与执行说明', true),
+      field('scheduledAt', '本次医嘱给药时间（上海）', {
+        type: 'datetime-local',
+        required: false,
+      }),
+      staffField(ctx, 'assignee', '负责人员', {
+        required: false,
+      }),
+      memo('interactionNote', '医护人员登记的配伍提醒'),
+    ],
+    submitLabel: '提交复核',
+  });
+}
+
 export function medications(ctx) {
   const warnings = (row) => row.warnings || [];
   function detail(row) {
     ctx.detail('医嘱、核查与执行凭证', node('div', 'fx-profile', [
       facts([
-        ['长者', residentAnchor(ctx, row.residentId)],
+        ['长辈', residentAnchor(ctx, row.residentId)],
         ['药品', row.name],
         ['医嘱', row.instruction],
         ['状态', row.status],
@@ -616,27 +636,6 @@ export function medications(ctx) {
         named([entry.date, staffLabel(ctx, entry.reviewer)].filter(Boolean).join(' · '),
           [...(entry.warnings || []), entry.note].filter(Boolean).join(' · ')))),
     ]));
-  }
-  function create() {
-    runForm(ctx, {
-      title: '登记用药计划',
-      action: 'care.addMedication',
-      description: '按现有医嘱录入，保存后进入人工复核。',
-      fields: [
-        residentField(ctx),
-        field('name', '药品名称'),
-        memo('instruction', '医嘱与执行说明', true),
-        field('scheduledAt', '本次医嘱给药时间（上海）', {
-          type: 'datetime-local',
-          required: false,
-        }),
-        staffField(ctx, 'assignee', '负责人员', {
-          required: false,
-        }),
-        memo('interactionNote', '医护人员登记的配伍提醒'),
-      ],
-      submitLabel: '提交复核',
-    });
   }
   function review(r) {
     runForm(ctx, {
@@ -692,7 +691,7 @@ export function medications(ctx) {
     ctx,
     '用药管理',
     '登记既有医嘱，查看筛查提醒并保留复核、执行凭证。',
-    btn(ctx, '登记用药计划', create, 'primary'),
+    btn(ctx, '登记用药计划', () => medicationForm(ctx), 'primary'),
     tabs('medications', [
       [
         'orders',

@@ -1,4 +1,4 @@
-"""Platform-funded DeepSeek planning. One hosted workspace database owns one entitlement."""
+"""Platform-funded model planning. One hosted workspace database owns one entitlement."""
 
 import hashlib
 import json
@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .. import access_policy
 from ..agents import specialists
-from . import deepseek, late_receipts, search_usage, token_receipt
+from . import completions, deepseek, late_receipts, search_usage, token_receipt
 from .late_receipts import late_usage as late_usage, unsettled as unsettled
 
 DEFAULT_MODEL = "deepseek-flash"
@@ -123,7 +123,21 @@ def reconcile(db, actor, request, actual, now=None):
 
 
 def model_name():
-    return DEFAULT_MODEL
+    return completions.model_name(DEFAULT_MODEL)
+
+
+def read_model_key():
+    return read_key() if completions.provider_name() == "deepseek" else completions.read_key()
+
+
+def model_configured():
+    if completions.provider_name() == "deepseek":
+        return configured()
+    try:
+        completions.read_key()
+    except ValueError:
+        return False
+    return True
 
 
 def key_file():
@@ -224,9 +238,12 @@ def status(db, user, now=None):
         reason = "inactive"
     elif used + held >= plan["tokenLimit"]:
         reason = "exhausted"
-    elif not model or not configured():
+    elif not model or not model_configured():
         reason = "unconfigured"
-    result = {"state": reason, "available": reason == "available", "model": model}
+    result = {
+        "state": reason, "available": reason == "available", "model": model,
+        "modelProvider": completions.provider_name() if model else "",
+    }
     if user["kind"] == "owner":
         result.update(
             planName=plan["name"] if plan else "",
@@ -312,14 +329,14 @@ def plan(
         if body is None:
             return decision("unavailable", "no_signal", model)
         try:
-            key = read_key()
+            key = read_model_key()
         except (OSError, ValueError):
             return decision("unavailable", "unconfigured", model)
         entitlement = latest(db)
         # Each UTF-8 byte can represent at most one byte-fallback token.
         allowance = (
             len(json.dumps(body["messages"], ensure_ascii=False).encode())
-            + body["max_tokens"]
+            + completions.output_budget(body)
             + 128
         )
         if sum(usage(db, entitlement["id"])) + allowance > entitlement["tokenLimit"]:
@@ -340,7 +357,7 @@ def plan(
         )
     # The network call never holds a workspace transaction. Unknown billing keeps its reservation.
     outcome = deepseek.complete(
-        transport or deepseek.send, key, body, allowed, allowance=allowance
+        transport or completions.send, key, body, allowed, allowance=allowance
     )
     with closing(connect()) as db, db:
         receipt = db.execute(

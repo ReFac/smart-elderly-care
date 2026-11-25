@@ -45,7 +45,7 @@ function branchField(ctx) {
   return select('campusId', '所属分院', (ctx.state.leadCampuses || []).map(c => ({ value: c.id, label: c.name })));
 }
 
-function register(ctx) {
+export function registerLead(ctx) {
   const dialog = ctx.dialog({
     title: '手工登记客户',
     fields: [
@@ -166,7 +166,7 @@ function registry(ctx, archive) {
   return table(ctx, {
     title: archive ? '近 365 天归档客户' : '跟进中的客户',
     rows, empty: archive ? '尚无归档客户' : '暂无待跟进客户，可手工登记来电或来访。',
-    search: { placeholder: '搜索客户、电话、床号或关联长者', value: r => [leadName(r), r.phone, relationships(r), campusName(ctx, r.campusId)].join(' ') },
+    search: { placeholder: '搜索客户、电话、床号或关联长辈', value: r => [leadName(r), r.phone, relationships(r), campusName(ctx, r.campusId)].join(' ') },
     filter: { label: '筛选客户', all: '全部客户', options: choices.map(c => c.text), matches: (r, text) => choices.find(c => c.text === text)?.match(r) },
     cols: [
       { label: '客户', view: r => named(leadName(r), r.phone) },
@@ -207,7 +207,7 @@ export function leadsPage(ctx) {
     ['待电话回访', pending, 'clock'], ['今日待接待', coming, 'calendar'], ['今日来电', calls, 'list'],
   ].map(([label, number, icon]) => node('div', '', [node('dt', '', [ctx.ui.icon(icon, 16), label]), node('dd', '', number)])));
   return page(ctx, '意向客户', '', canAct(ctx, 'leads.register')
-    ? ctx.ui.button('手工登记', () => register(ctx), 'primary', 'plus') : null,
+    ? ctx.ui.button('手工登记', () => registerLead(ctx), 'primary', 'plus') : null,
     counts,
     tabs('leads', [
       ['contacts', '客户跟进', () => registry(ctx, false)],

@@ -1,4 +1,4 @@
-"""Metered Flash generation. Only server-built scoped projections belong in facts."""
+"""Metered model generation. Only server-built scoped projections belong in facts."""
 
 from contextlib import closing
 import hashlib
@@ -6,7 +6,7 @@ from http.client import HTTPException
 import json
 from urllib.error import HTTPError, URLError
 
-from . import deepseek, token_receipt
+from . import completions, deepseek, token_receipt
 
 
 def init(db):
@@ -36,7 +36,7 @@ def generate(
     on_delta=None,
 ):
     """Reserve before sending, persist confirmed billing even if the returned JSON is unusable."""
-    from . import late_usage, latest, model_name, read_key, usage
+    from . import late_usage, latest, model_name, read_model_key, usage
 
     now = store.now()
     model = model_name()
@@ -58,7 +58,7 @@ def generate(
     if on_delta:
         body.pop("response_format")
     digest = fingerprint(body)
-    size = len(json.dumps(messages, ensure_ascii=False).encode()) + 128 + output_tokens
+    size = len(json.dumps(messages, ensure_ascii=False).encode()) + 128 + completions.output_budget(body)
     request = "generation/" + fingerprint(request_id)
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
@@ -107,10 +107,10 @@ def generate(
             or not plan["enabled"]
             or not plan["startsOn"] <= now.date().isoformat() <= plan["expiresOn"]
         ):
-            raise ValueError("机构的 DeepSeek 套餐尚未开通或已到期")
+            raise ValueError("机构的云端 AI 套餐尚未开通或已到期")
         if size + sum(usage(db, plan["id"])) > plan["tokenLimit"]:
-            raise ValueError("机构的 DeepSeek 套餐额度不足")
-        key = read_key()
+            raise ValueError("机构的云端 AI 套餐额度不足")
+        key = read_model_key()
         db.execute(
             """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance,feature,attributedActor)
                     VALUES(?,?,?,?,?,?,'pending',?,?,?)""",
@@ -129,7 +129,7 @@ def generate(
     status, reason, tokens, result = "uncertain", "provider_unavailable", 0, None
     remote_receipt = None
     try:
-        raw = deepseek.stream(key, body, on_delta, timeout=40) if on_delta else deepseek.send(key, body, timeout=40)
+        raw = completions.stream(key, body, on_delta, timeout=40) if on_delta else completions.send(key, body, timeout=40)
         remote_receipt = token_receipt.read(raw, size)
         if remote_receipt is None:
             raise ValueError("缺少有效用量")
@@ -179,7 +179,7 @@ def generate(
     if not receipt.rowcount:
         raise ValueError("本次用量已由运营方对账，请核对迟到回执后重新提交")
     if status != "ok":
-        raise ValueError("DeepSeek 未能完成本次回复，请稍后重试")
+        raise ValueError("云端模型未能完成本次回复，请稍后重试")
     return result
 
 

@@ -110,10 +110,10 @@ export function receiptLedger(ctx) {
       ['期间净入账', currency(totals.unknown ? null : totals.gross - totals.fee)],
     ]), table(ctx, {
       title: '实收流水', rows: visible, empty: '此时段尚无到账凭证。',
-      search: { placeholder: '搜索长者、账单或凭证号', value: (r) => [residentName(ctx, r.residentId), r.id, r.billId, ...r.bills.keys(), r.transactionId, r.merchantOrder].join(' ') },
+      search: { placeholder: '搜索长辈、账单或凭证号', value: (r) => [residentName(ctx, r.residentId), r.id, r.billId, ...r.bills.keys(), r.transactionId, r.merchantOrder].join(' ') },
       cols: [
         { label: '到账日期', view: (r) => r.date },
-        { label: '长者', view: (r) => residentAnchor(ctx, r.residentId) },
+        { label: '长辈', view: (r) => residentAnchor(ctx, r.residentId) },
         { label: '实收金额', view: (r) => named(currency(r.gross), tender(r)) },
         { label: '核销账单', view: (r) => currency(r.applied) },
         { label: '转入预缴', view: (r) => currency(r.advance) },

@@ -47,7 +47,7 @@ export async function previewSummary(ctx, resident, openDocument) {
       })
     ),
     node('label', 'field', [node('span', '', '核对后的档案摘要'), text]),
-    node('label', 'fx-agreement', [confirmed, '我已核对长者身份和上述记录，并确认保存此次摘要。']),
+    node('label', 'fx-agreement', [confirmed, '我已核对长辈身份和上述记录，并确认保存此次摘要。']),
     submit
   );
   form.addEventListener('submit', async (event) => {

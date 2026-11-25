@@ -101,7 +101,7 @@ def schedules(store, token, command):
             title=title, kind="meal" if meal else "patrol", weekdays=list(range(1, 8)),
             scope={"kind": "residents", "residentIds": people},
             startDate=day, endDate="", mealKind=meal, menu=menu[0] if menu else [],
-            enabled=True, note="核对实际用餐并记录例外。" if meal else "巡视长者，登记需要跟进的事项。",
+            enabled=True, note="核对实际用餐并记录例外。" if meal else "巡视长辈，登记需要跟进的事项。",
         )
         if menu:
             fields["weeklyMenus"] = {str(i): value for i, value in enumerate(menu, 1)}

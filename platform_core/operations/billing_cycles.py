@@ -84,7 +84,7 @@ def selected_period(resident, payload, today):
                 + "、".join(d.isoformat() for d in available)
             )
         if not dates:
-            raise ValueError("该长者在此账期没有入住记录")
+            raise ValueError("该长辈在此账期没有入住记录")
         chosen = available[0] if available else dates[0]
     if chosen.isoformat() > today:
         raise ValueError(f"尚未到本期账单日 {chosen.isoformat()}")

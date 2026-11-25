@@ -85,7 +85,7 @@ export function staffField(ctx, name, label, extra = {}) {
 export const residentField = (ctx, extra = {}) =>
   select(
     'residentId',
-    '长者',
+    '长辈',
     active(ctx).map((row) => ({
       value: row.id,
       label: residentLabel(ctx, row)

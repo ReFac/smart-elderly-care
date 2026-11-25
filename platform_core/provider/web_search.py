@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener
 
-from . import model_name
+from . import DEFAULT_MODEL
 from .deepseek import NoRedirect
 
 
@@ -105,7 +105,7 @@ def probe(key):
     models = _request(MODELS_URL, key).get("data")
     if not isinstance(models, list):
         raise WebSearchError("invalid_response")
-    model = model_name()
+    model = DEFAULT_MODEL
     if not any(isinstance(item, dict) and item.get("id") == model for item in models):
         raise WebSearchError("model_unavailable")
     return {"connected": True, "model": model}

@@ -56,7 +56,7 @@ export async function downloadDocument(ctx, source) {
 function documentView(ctx, source, data) {
   if (source.kind === 'referral') {
     const labels = {
-      residentName: '长者姓名',
+      residentName: '长辈姓名',
       destination: '接收单位',
       channel: '接收渠道',
       handoff: '交接类型',
@@ -95,7 +95,7 @@ function documentView(ctx, source, data) {
         facts([
           ['计划工单', String(metrics.scheduledTasks)],
           ['完成工单', String(metrics.completedTasks)],
-          ['实际服务长者', String(metrics.servedResidents) + ' 人'],
+          ['实际服务长辈', String(metrics.servedResidents) + ' 人'],
         ]),
       ),
     section(

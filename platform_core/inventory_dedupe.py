@@ -81,11 +81,11 @@ def _choices(items, proposed):
 
 def _relations(value, count):
     if not isinstance(value, dict) or not isinstance(value.get("matches"), list):
-        raise ValueError("DeepSeek 未提供可核对的候选关系")
+        raise ValueError("云端模型未提供可核对的候选关系")
     result = {}
     for item in value["matches"]:
         if not isinstance(item, dict):
-            raise ValueError("DeepSeek 候选关系格式无效")
+            raise ValueError("云端模型的候选关系格式无效")
         number, relation = item.get("candidate"), item.get("relation")
         if (
             type(number) is not int
@@ -93,10 +93,10 @@ def _relations(value, count):
             or relation not in ("equivalent", "related", "different")
             or number in result
         ):
-            raise ValueError("DeepSeek 候选关系超出目录范围")
+            raise ValueError("云端模型的候选关系超出目录范围")
         result[number] = relation
     if len(result) != count:
-        raise ValueError("DeepSeek 尚未核对全部候选品目")
+        raise ValueError("云端模型尚未核对全部候选品目")
     return [{"candidate": n, "relation": value} for n, value in result.items()]
 
 
@@ -184,7 +184,7 @@ def preview(store, token, payload):
                 continue
             blocked = _incompatible(proposed, item)
             if not blocked and relation == "related" and not exact:
-                blocked = "DeepSeek 判断为相关品目，请按实际产品分别登记"
+                blocked = "云端模型判断为相关品目，请按实际产品分别登记"
             match = dict(
                 id=item["id"],
                 **_description(item),

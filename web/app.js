@@ -2,6 +2,7 @@ import { openLinkedBedCard } from './features/med-rounds.js';
 import { chatLauncher, openChat, toggleChat, clearChat, checkChatUser } from './features/assistant-chat.js';
 import { hasNewNotice, quickDestinations, staffNotices, supplyOrders } from './features/assistant-actions.js';
 import { loginScreen } from './features/access.js';
+import { redeemPasswordReset } from './features/identity.js';
 import * as ui from './lib/ui.js';
 import { changePreview, confirmChange } from './lib/change-review.js';
 
@@ -21,6 +22,7 @@ import { pendingLeadCalls } from './features/leads.js';
 import { residentLabel, residentHref, staffLabel } from './features/people-labels.js';
 import { openDossier } from './features/dossier.js';
 import { canOpenPermissionRequests, openPermissionRequests, pendingPermissionRequests } from './features/permission-requests.js';
+import { colorModeControl, setColorModeAccount } from './lib/color-mode.js';
 
 const { el, icon, button, toast } = ui;
 
@@ -65,6 +67,7 @@ function signedOut() {
   closeMenu();
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   document.documentElement.removeAttribute('data-theme');
+  setColorModeAccount();
   document.title = '登录 · ' + (branding.brandName || '医养管理平台');
   root.replaceChildren(
     loginScreen(async (username, password) => {
@@ -78,7 +81,10 @@ function signedOut() {
       await readState();
       render();
       return true;
-    }, branding),
+    }, branding, async () => {
+      await readState();
+      render();
+    }),
   );
 }
 async function get(path) {
@@ -115,6 +121,7 @@ function applySnapshot(snapshot) {
   revision = snapshot.revision;
   branding = state.uiSettings;
   document.documentElement.dataset.theme = state.uiSettings.theme;
+  setColorModeAccount(state.user.id);
   const bucket = 'nh-alerts:' + state.user.id;
   if (!seenAlerts.size) {
     try {
@@ -143,13 +150,13 @@ function applySnapshot(snapshot) {
     try {
       sessionStorage.setItem(bucket, JSON.stringify([...seenAlerts].slice(-500)));
     } catch {}
-    toast('有 ' + trialAlerts.length + ' 位长者试住期满，床位已释放。请在待处理事项中确认或取消入住。');
+    toast('有 ' + trialAlerts.length + ' 位长辈试住期满，床位已释放。请在待处理事项中确认或取消入住。');
   } else if (roundsId && !seenAlerts.has(roundsId)) {
     seenAlerts.add(roundsId);
     try {
       sessionStorage.setItem(bucket, JSON.stringify([...seenAlerts].slice(-500)));
     } catch {}
-    toast(familyMessage ? '今日照护简报已送达，可在家属服务中查看。' : '有 ' + state.roundsNoticeCount + ' 位长者的巡查事项待跟进，请查看右上角铃铛。');
+    toast(familyMessage ? '今日照护简报已送达，可在家属服务中查看。' : '有 ' + state.roundsNoticeCount + ' 位长辈的巡查事项待跟进，请查看右上角铃铛。');
   }
 }
 
@@ -219,7 +226,7 @@ function getRoute() {
     return 'beds';
   }
   if (['residents', 'intake'].includes(original) && available('residents')) {
-    const knownTab = ['all', 'trials', 'renew', 'followups'].includes(tab);
+    const knownTab = ['all', 'notAdmitted', 'trials', 'renew', 'followups'].includes(tab);
     if (knownTab) selectTab('residents', tab);
     else if (original === 'intake') selectTab('residents', 'all');
     if (original === 'intake' || knownTab) {
@@ -411,7 +418,7 @@ function visibleGroups() {
 }
 
 function moduleLink([id, label, iconName]) {
-  if (id === 'family' && state.user.portalSelf) label = '长者服务';
+  if (id === 'family' && state.user.portalSelf) label = '长辈服务';
   const active = route === id;
   const link = el('a', 'nav-item' + (active ? ' active' : ''));
   link.href = '#' + id;
@@ -471,7 +478,7 @@ function searchDialog() {
   const content = el('div', 'search-dialog');
   const input = el('input', 'search-input');
   input.type = 'search';
-  input.placeholder = '搜索模块、长者姓名或档案号';
+  input.placeholder = '搜索模块、长辈姓名或档案号';
   input.setAttribute('aria-label', input.placeholder);
   const list = el('div', 'search-results');
   content.append(input, list);
@@ -495,7 +502,7 @@ function searchDialog() {
       keywords: r.id,
       href: residentHref(context(), r),
       icon: 'people',
-      meta: '长者档案 · ' + r.id,
+      meta: '长辈档案 · ' + r.id,
       open: () => profile(context(), r),
     })),
   ];
@@ -520,7 +527,7 @@ function searchDialog() {
         return b;
       }),
     );
-    if (!subset.length) list.append(ui.empty('没有找到匹配的模块或长者'));
+    if (!subset.length) list.append(ui.empty('没有找到匹配的模块或长辈'));
   }
   input.addEventListener('input', update);
   update();
@@ -681,6 +688,7 @@ function accountMenu() {
   }
   const dialog = detail('当前账号', info);
   info.append(
+    colorModeControl(),
     button(
       '个人中心',
       () => {
@@ -785,7 +793,7 @@ function contextBar() {
     icon('location', 14),
     el('span', '', info.group),
     icon('chevron', 11),
-    el('strong', '', route === 'family' && state.user.portalSelf ? '长者服务' : info.label),
+    el('strong', '', route === 'family' && state.user.portalSelf ? '长辈服务' : info.label),
   );
   const date = el('time', 'business-date');
   date.dateTime = state.today;
@@ -817,7 +825,7 @@ function render() {
   closeMenu();
   document.title =
     (route === 'family' && state.user.portalSelf
-      ? '长者服务'
+      ? '长辈服务'
       : routes.get(route)?.label || '找不到页面') +
     ' · ' +
     state.uiSettings.brandName;
@@ -853,7 +861,7 @@ function openLinkedResident() {
   const row = state.residents.find(person => person.id === id);
   if (!row) {
     history.replaceState(null, '', '#' + destination);
-    toast('该长者档案未开放或已失效');
+    toast('该长辈档案未开放或已失效');
     return;
   }
   if (destination === 'family' || document.querySelector('dialog[open][data-linked-resident]')) return;
@@ -879,9 +887,21 @@ function failed(error) {
   root.replaceChildren(section);
 }
 
+function openResetFromLocation() {
+  const reset = /^#reset=([A-Za-z0-9_-]{43})$/.exec(location.hash);
+  if (!reset) return false;
+  history.replaceState(null, '', '/?workspace=1');
+  signedOut();
+  redeemPasswordReset(reset[1], (username) => {
+    root.querySelector('input[name=username]').value = username;
+  });
+  return true;
+}
+
 async function load() {
   try {
     branding = await get('/api/branding');
+    if (openResetFromLocation()) return;
     const publicLanding = location.pathname === '/' && !location.hash && !location.search;
     if (await readState({ publicLanding })) render();
   } catch (error) {
@@ -905,6 +925,7 @@ document.addEventListener('click', (event) => {
 });
 
 window.addEventListener('hashchange', (event) => {
+  if (openResetFromLocation()) return;
   if (state) {
     const origin = residentOverlay;
     residentOverlay = null;

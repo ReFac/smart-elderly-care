@@ -10,6 +10,9 @@ def credential_env(folder):
         "NH_DEEPSEEK_KEY_FILE": "",
         "NH_PLATFORM_VAULT": str(Path(folder) / "isolated-platform.sqlite3"),
         "NH_PLATFORM_KEY_FILE": "",
+        "NH_CHAT_PROVIDER": "deepseek",
+        "NH_ASR_PROVIDER": "deepseek",
+        "NH_TTS_PROVIDER": "deepseek",
     }
 
 

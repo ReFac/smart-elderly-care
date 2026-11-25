@@ -32,7 +32,7 @@ def match_staff(state, day, campus_id=None, preferred=()):
     }
     cover = candidates.intersection(preferred)
     if not candidates:
-        raise ValueError("长者所在分院今天尚无排班，请指定照护人员。")
+        raise ValueError("长辈所在分院今天尚无排班，请指定照护人员。")
     if cover:
         candidates = cover
     outstanding = {person: 0 for person in candidates}
@@ -224,7 +224,7 @@ def complete_task(state, p, today, *, scheduled_meal=False):
     if task["status"] != "待执行" or task["date"] > today:
         raise ValueError("仅当日或逾期待执行工单可完成。")
     if p.get("bedId") and resident["bedId"] != p["bedId"]:
-        raise ValueError("床头卡与长者当前床位不符。")
+        raise ValueError("床头卡与长辈当前床位不符。")
     if "cardCode" in p:
         if (
             not p.get("bedId")

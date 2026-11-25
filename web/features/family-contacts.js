@@ -29,7 +29,7 @@ async function edit(ctx, resident, member = {}) {
   );
   const kind = picker('成员类别', kinds, member.kind || '子女', true);
   kind.control.name = 'kind';
-  const relation = picker('与长者的具体关系', [], member.relationship);
+  const relation = picker('与长辈的具体关系', [], member.relationship);
   relation.control.name = 'relationship';
   function updateRelations() {
     const options = catalog.choices.familyRelations[kind.control.value];

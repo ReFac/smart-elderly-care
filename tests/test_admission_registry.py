@@ -31,7 +31,7 @@ class AdmissionRegistryTests(unittest.TestCase):
             action, p, self.store.version(self.token)["revision"], self.token
         )
 
-    def register(self, name="测试同名长者", **p):
+    def register(self, name="测试同名长辈", **p):
         self.write("care.register", name=name, **p)
         return self.current()["residents"][-1]["id"]
 

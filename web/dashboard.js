@@ -52,7 +52,7 @@ function header(ctx) {
   if (ctx.available('inbox'))
     actions.append(button('预警与确认', () => ctx.go('inbox'), 'secondary', 'bell'));
   if (ctx.available('intake') && ctx.permitted('intake'))
-    actions.append(button('新建长者档案', () => inquiryForm(ctx), 'secondary', 'plus'));
+    actions.append(button('新建长辈档案', () => inquiryForm(ctx), 'secondary', 'plus'));
   return group('header', 'op-header', title, actions);
 }
 
@@ -64,7 +64,7 @@ function getMetrics(ctx, tasks) {
   if (ctx.available('residents')) {
     const active = s.residents.filter((p) => p.status === '在住').length;
     add(
-      '在住长者',
+      '在住长辈',
       active,
       '人',
       '本月入住 ' +
@@ -459,7 +459,7 @@ function workQueue(ctx) {
 function taskDetails(ctx, t) {
   const r = ctx.state.residents.find((r) => r.id === t.residentId);
   const fields = [
-    ['服务长者', residentLabel(ctx, r)],
+    ['服务长辈', residentLabel(ctx, r)],
     ['工单编号', t.id],
     ['计划时间', t.date + ' ' + t.time],
     ['责任人', staffLabel(ctx, t.assignee, t.assigneeId)],
@@ -515,7 +515,7 @@ function tasksPanel(ctx, tasks) {
   const head = group(
     'tr',
     '',
-    ...['服务项目', '服务长者', '计划时间', '责任人', '状态'].map((label, i) =>
+    ...['服务项目', '服务长辈', '计划时间', '责任人', '状态'].map((label, i) =>
       el('th', i === 3 ? 'op-assignee' : '', label)
     )
   );

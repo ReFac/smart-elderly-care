@@ -40,7 +40,7 @@ import {
 } from './shared.js';
 
 const basicFields = [
-  ['phone', '长者本人手机号'],
+  ['phone', '长辈本人手机号'],
   ['birthDate', '出生日期', 'date'],
   ['birthplace', '出生地'],
   ['nativePlace', '籍贯'],
@@ -58,7 +58,7 @@ const householdFields = [
 ];
 const relativeFields = [
   ['name', '亲属姓名', 'text', true],
-  ['relationship', '与长者关系', 'text', true],
+  ['relationship', '与长辈关系', 'text', true],
   ['phone', '联系电话', 'tel', true],
   ['idNumber', '居民身份证号'],
   ['address', '联系地址'],
@@ -106,7 +106,7 @@ async function relativeForm(ctx, resident, accountId, profile) {
   ctx.dialog({
     title: '完善亲属资料',
     content:location.element,
-    description: '请核对姓名、与长者的关系和联系方式。身份证号、住址与微信可稍后补充。',
+    description: '请核对姓名、与长辈的关系和联系方式。身份证号、住址与微信可稍后补充。',
     fields: inputs,
     onSubmit: (values) =>
       ctx.command('dossier.relative', {
@@ -148,7 +148,7 @@ function portalTable(ctx, scope, config) {
 function myFamily(ctx) {
   const me = ctx.state.user;
   const resident = (ctx.state.residents || []).find((r) => r.id === me.residentId);
-  if (!resident) return ctx.ui.empty('此账号尚未绑定有效长者，请联系机构。');
+  if (!resident) return ctx.ui.empty('此账号尚未绑定有效长辈，请联系机构。');
   const profile = (ctx.state.relativeProfiles || []).find((r) => r.accountId === me.id) || {};
   const body = node('article', 'fx-panel', [
     node('header', 'fx-toolbar', node('h2', '', '我的亲属资料')),
@@ -174,7 +174,7 @@ function myFamily(ctx) {
   const identity = node('section', 'family-identity', [
     node('span', 'family-mark', ctx.ui.icon('people', 25)),
     node('div', '', [
-      node('small', '', me.portalSelf ? '我的入住档案' : '绑定长者'),
+      node('small', '', me.portalSelf ? '我的入住档案' : '绑定长辈'),
       node('h2', '', residentLabel(ctx, resident))
     ]),
     node('span', 'family-institution', [
@@ -282,7 +282,7 @@ function myFamily(ctx) {
         : ctx.ui.empty('目前没有开通服务记录查阅，可在环境导览中参观院区。');
   return page(
     ctx,
-    me.portalSelf ? '长者服务' : '家属服务',
+    me.portalSelf ? '长辈服务' : '家属服务',
     '',
     me.portalSelf
       ? null
@@ -575,7 +575,7 @@ function registrationDetails(ctx, resident, profile, archived, stay) {
       contactBook(ctx, resident, profile, archived),
       disclosure('家庭情况', facts(displayed(householdFields, profile))),
       disclosure('费用来源', facts([['费用来源', profile.fundingSources?.join('、')], ...(profile.incomeSource ? [['旧版登记原文',profile.incomeSource]] : [])])),
-      disclosure('长者养老金收入', facts([['每月收入',displayAmount(profile.pensionBand,profile.pensionAmount)]])),
+      disclosure('长辈养老金收入', facts([['每月收入',displayAmount(profile.pensionBand,profile.pensionAmount)]])),
       showKin(ctx, resident, archived)
     );
   if (allowed(ctx,'finance')) {
@@ -678,7 +678,7 @@ function dossierViews(ctx, views, requested) {
   const key = 'resident-dossier-' + ++nextDossierPanel;
   const nav = node('div', 'resident-dossier-nav');
   nav.setAttribute('role', 'tablist');
-  nav.setAttribute('aria-label', '长者详细档案栏目');
+  nav.setAttribute('aria-label', '长辈详细档案栏目');
   nav.setAttribute('aria-orientation', 'vertical');
   const contents = node('div', 'resident-dossier-content');
   const entries = views.map(([id, title, icon, render]) => {
@@ -785,7 +785,7 @@ export function openDossier(ctx, resident, lifeEvent, initialSection) {
     sections,
     history,
   ]);
-  const dialog = ctx.detail('长者详细档案', body);
+  const dialog = ctx.detail('长辈详细档案', body);
   dialog.classList.add('resident-dossier-dialog');
   dialog.dataset.roundsResidentId = resident.id;
   return dialog;
@@ -796,10 +796,10 @@ export function renderDossier(route, ctx) {
   return page(
     ctx,
     '个人与医疗档案',
-    '查阅长者的登记资料、亲属联系方式和按日期归档的医疗记录。',
+    '查阅长辈的登记资料、亲属联系方式和按日期归档的医疗记录。',
     null,
     table(ctx, {
-      title: '长者名册',
+      title: '长辈名册',
       rows: ctx.state.residents || [],
       search: {
         placeholder: '搜索姓名或档案号',
@@ -807,7 +807,7 @@ export function renderDossier(route, ctx) {
       },
       cols: [
         {
-          label: '长者',
+          label: '长辈',
           view: (r) =>
             node('div', 'fx-person-cell', [
               node('span', 'fx-person-mark', ctx.ui.icon('people', 16)),

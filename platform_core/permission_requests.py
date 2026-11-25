@@ -313,10 +313,10 @@ def read(store, token, profile_id=None):
 
 def create(store, db, state, user, payload, now):
     if set(payload) != {"residentId", "approverId", "reason"}:
-        raise ValueError("请填写长者档案编号、审批人及申请原因")
+        raise ValueError("请填写长辈档案编号、审批人及申请原因")
     rid = payload["residentId"]
     if not isinstance(rid, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", rid):
-        raise ValueError("请填写正确的长者档案编号")
+        raise ValueError("请填写正确的长辈档案编号")
     reason = dossier.text(payload, "reason", 500, True)
     aid = payload["approverId"]
     if aid == user["id"]:
@@ -363,7 +363,7 @@ def create(store, db, state, user, payload, now):
             stamp(now + PENDING),
         ),
     )
-    return "已提交长者档案编辑权限申请", rid
+    return "已提交长辈档案编辑权限申请", rid
 
 
 def review(store, db, state, user, payload, now):
@@ -395,9 +395,9 @@ def review(store, db, state, user, payload, now):
         (decision, decided_at, expires_at, signed, note, evidence, row["id"]),
     )
     return (
-        "已实名签署批准长者档案编辑权限"
+        "已实名签署批准长辈档案编辑权限"
         if decision == "approve"
-        else "已实名签署驳回长者档案编辑权限"
+        else "已实名签署驳回长辈档案编辑权限"
     ), rid
 
 
@@ -412,7 +412,7 @@ def authorized_edit(store, db, state, user, row, now):
 
 def edit(store, db, state, user, payload, now):
     if set(payload) - {"requestId", *PROFILE_FIELDS}:
-        raise ValueError("此项授权仅可编辑长者登记资料")
+        raise ValueError("此项授权仅可编辑长辈登记资料")
     row = request_row(db, payload.get("requestId"))
     person = authorized_edit(store, db, state, user, row, now)
     details = {key: value for key, value in payload.items() if key in PROFILE_FIELDS}
@@ -439,4 +439,4 @@ def edit(store, db, state, user, payload, now):
     db.execute(
         "UPDATE permission_requests SET used_at=? WHERE id=?", (stamp(now), row["id"])
     )
-    return "已使用一次性授权更新长者登记资料", person["id"]
+    return "已使用一次性授权更新长辈登记资料", person["id"]

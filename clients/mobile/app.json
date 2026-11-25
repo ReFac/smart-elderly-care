@@ -11,7 +11,7 @@
       "bundleIdentifier": "cn.yihe.care",
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "用于拍摄并留存长者医疗文书原件。",
+        "NSCameraUsageDescription": "用于拍摄并留存长辈医疗文书原件。",
         "NSPhotoLibraryUsageDescription": "用于选择经授权归档的医疗文书照片。"
       }
     }

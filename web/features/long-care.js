@@ -31,7 +31,10 @@ function history(ctx, person, rows) {
   );
 }
 
-async function register(ctx, people, initial) {
+const currentResidents = ctx => (ctx.state.residents || []).filter((p) => ['在住', '未入住', '待入住', '新档案'].includes(p.status));
+
+export async function registerLongCare(ctx, people = currentResidents(ctx), initial) {
+  if (!people.length) return ctx.toast('当前没有可登记长护险的长辈');
   let regions;
   try {
     ({ regions } = await loadProfileChoices());
@@ -42,7 +45,7 @@ async function register(ctx, people, initial) {
   const catalog = ctx.state.longCareCatalog;
   const roster = node('select');
   roster.required = true;
-  roster.add(new Option('选择已建档的长者', ''));
+  roster.add(new Option('选择已建档的长辈', ''));
   for (const r of people) roster.add(new Option(residentLabel(ctx, r) + ' · ' + r.id, r.id));
   roster.value = initial || '';
   const stage = picker('办理事项', [], '', true);
@@ -96,7 +99,7 @@ async function register(ctx, people, initial) {
     fields: [],
     content: node('div', 'dossier-form', [
       group('经办资料', [
-        node('label', 'field', [node('span', '', '长者档案'), roster]),
+        node('label', 'field', [node('span', '', '长辈档案'), roster]),
         stage.element,
         day.element,
         ref.element,
@@ -146,7 +149,7 @@ async function register(ctx, people, initial) {
 
 export function longCare(ctx) {
   const people = ctx.state.residents || [];
-  const current = people.filter((p) => ['在住', '未入住', '待入住', '新档案'].includes(p.status));
+  const current = currentResidents(ctx);
   const histories = new Map();
   for (const e of ctx.state.longCareEvents || []) {
     if (!histories.has(e.residentId)) histories.set(e.residentId, []);
@@ -158,13 +161,13 @@ export function longCare(ctx) {
   return page(
     ctx,
     '长期护理保险',
-    '按长者跟踪参保、申请、评估、待遇与复评记录。',
-    current.length ? btn(ctx, '登记办理', () => register(ctx, current), 'primary') : null,
+    '按长辈跟踪参保、申请、评估、待遇与复评记录。',
+    current.length ? btn(ctx, '登记办理', () => registerLongCare(ctx, current), 'primary') : null,
     table(ctx, {
       title: '长护险经办台账',
       rows,
       search: {
-        placeholder: '搜索长者姓名、统筹地区或文书编号',
+        placeholder: '搜索长辈姓名、统筹地区或文书编号',
         value: (r) =>
           [
             r.person.name,
@@ -172,9 +175,9 @@ export function longCare(ctx) {
           ].join(' '),
       },
       filter: { label: '经办阶段', value: (r) => r.last.displayStatus },
-      empty: '尚无长护险经办记录。可选择已有长者档案，登记参保或补录已核定待遇。',
+      empty: '尚无长护险经办记录。可选择已有长辈档案，登记参保或补录已核定待遇。',
       cols: [
-        { label: '长者', view: (r) => named(residentAnchor(ctx, r.person), r.person.id) },
+        { label: '长辈', view: (r) => named(residentAnchor(ctx, r.person), r.person.id) },
         { label: '统筹地区', view: (r) => r.last.regionLabel },
         { label: '最新阶段', view: (r) => badge(ctx, r.last.displayStatus) },
         { label: '最近办理', view: (r) => r.last.date },
@@ -189,7 +192,7 @@ export function longCare(ctx) {
                 'ghost',
               ),
               current.includes(r.person)
-                ? btn(ctx, '继续办理', () => register(ctx, current, r.person.id), 'ghost')
+                ? btn(ctx, '继续办理', () => registerLongCare(ctx, current, r.person.id), 'ghost')
                 : null,
             ]),
         },

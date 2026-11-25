@@ -207,7 +207,7 @@ class ResidentHealthTests(TestCase):
         ):
             with self.assertRaises(ValueError):
                 attempt()
-        self.note("conversation", "长者补充昨日膝部疼痛")
+        self.note("conversation", "长辈补充昨日膝部疼痛")
         with self.assertRaisesRegex(ValueError, "资料已更新"):
             self.sign(draft)
         self.assertIsNone(self.view()["intro"])

@@ -13,7 +13,7 @@ function entryCard(ctx, row, openProof) {
   const receipt = node('article', 'ct-receipt', [
     heading,
     facts([
-      ['长者', residentAnchor(ctx, row.residentId)],
+      ['长辈', residentAnchor(ctx, row.residentId)],
       ['执行人', row.operator ? staffLabel(ctx, row.operator, row.operatorId) : '未登记'],
       ['执行记录', row.note || '未填'],
       ['执行时房间', row.roomLabel || '未登记'],
@@ -36,7 +36,7 @@ function groupCard(ctx, group, openProof, focusedIds) {
       .map(([id, name]) => (counts.get(name) > 1 ? name + '（' + id + '）' : name))
       .join('、');
   };
-  const residents = labels('residentId', 'resident', '长者未登记');
+  const residents = labels('residentId', 'resident', '长辈未登记');
   const staff = labels('operatorId', 'operator', '执行人未登记');
   const start = clock(group.start),
     end = clock(group.end);
@@ -125,7 +125,7 @@ export function careTimeline(ctx, scope, id = '', openProof) {
   const actions = choose();
   const search = node('input', 'fx-input');
   search.type = 'search';
-  search.placeholder = '搜索长者、执行人或项目';
+  search.placeholder = '搜索长辈、执行人或项目';
   search.maxLength = 64;
   search.setAttribute('aria-label', search.placeholder);
   const day = node('input', 'fx-input');

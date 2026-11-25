@@ -70,6 +70,7 @@ class Store:
         facility_policy=None,
         initial_data="demo",
         code_senders=None,
+        reset_link_senders=None,
         initial_owner_password=None,
     ):
         if initial_data not in ("demo", "empty"):
@@ -83,6 +84,7 @@ class Store:
         self.network_probes = BoundedSemaphore(4)
         self.public_submissions = lead_intake.PublicSubmissions()
         self.code_senders = dict(code_senders or {})
+        self.reset_link_senders = dict(reset_link_senders or {})
         self.facility_policy = facility_policy
         with closing(self.connect()) as db, db:
             db.execute("PRAGMA journal_mode=WAL")
@@ -156,7 +158,7 @@ class Store:
             ).fetchone()
         ):
             actor = {**actor, "familyServices": False, "portalScopes": []}
-        if self.facility_policy is not None:
+        if self.facility_policy is not None and not actor.get("registeredCustomer"):
             actor = {
                 **actor,
                 "facilityScope": campus_access.effective(
@@ -291,9 +293,9 @@ class Store:
                     if route not in data["uiSettings"]["hiddenRoutes"]
                 ],
             }
-            if user["kind"] == "family":
-                from .portal import SCOPES
+            from .portal import SCOPES, is_customer
 
+            if user["kind"] == "family" and not is_customer(user):
                 family_permissions = data["selfAccess"]["permissions"]
                 family_permissions.extend(
                     {"id": k, "label": SCOPES[k]} for k in user["portalScopes"]
@@ -316,7 +318,7 @@ class Store:
                     family_permissions.append(
                         {
                             "id": "familyServices",
-                            "label": "查看绑定长者已完成的照护服务",
+                            "label": "查看绑定长辈已完成的照护服务",
                         }
                     )
             data["handovers"] = [
@@ -505,7 +507,7 @@ class Store:
                 }
                 current = facility.scope(db, state, user, **region)
                 if record["residentId"] not in current["residentIds"]:
-                    raise FileNotFoundError("长者目前不在该简报的区域内")
+                    raise FileNotFoundError("长辈目前不在该简报的区域内")
             return handovers.visible(record, access.has(user, "clinical"))
 
     def photo(self, token, doc_id):
@@ -524,7 +526,7 @@ class Store:
             state = json.loads(db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0])
             campus_access.require_resident(db, user, resident_id, state)
             if not any(r["id"] == resident_id for r in state["residents"]):
-                raise FileNotFoundError("找不到长者档案")
+                raise FileNotFoundError("找不到长辈档案")
         return {"pageCount": pdf_original.pages(raw)}
 
     def voice_proposal(self, token, proposal_id):
@@ -804,7 +806,7 @@ class Store:
         from .operations import admission_finance
 
         if set(body) != {"action", "payload", "revision"} or not isinstance(body["payload"], dict):
-            raise ValueError("请选择长者档案、床位和入住日期")
+            raise ValueError("请选择长辈档案、床位和入住日期")
         action, payload = body["action"], body["payload"]
         entries = {"care.admit": residency.admit, "care.confirmStay": residency.confirm_stay}
         if not isinstance(action, str) or action not in entries:
@@ -1010,7 +1012,7 @@ class Store:
                 elif action == "ops.suggest":
                     suggestion = planning["artifacts"][0]
                     data["suggestions"].insert(0, suggestion)
-                    summary = "已生成待人工核对的 DeepSeek 建议"
+                    summary = "已生成待人工核对的云端建议"
                 elif domain in ("ops", "care"):
                     fields = dict(payload)
                     if action in ("care.inquire", "care.register", "ops.shift"):

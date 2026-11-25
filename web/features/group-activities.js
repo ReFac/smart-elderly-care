@@ -122,7 +122,7 @@ function activityEditor(ctx, roster, mode, pending) {
   submit.type = 'submit';
   form.append(node('p', 'group-area', [ctx.ui.icon('location', 16), area]), controls);
   if (participants) form.append(participants.element);
-  else form.append(node('p', 'fx-muted', '本次登记 ' + rows.length + ' 位候选长者。活动结束后，负责人将收到待确认提醒。'));
+  else form.append(node('p', 'fx-muted', '本次登记 ' + rows.length + ' 位候选长辈。活动结束后，负责人将收到待确认提醒。'));
   const dialog = ctx.detail(proposing ? '登记集体活动' : '确认活动参加情况', form);
   dialog.classList.add('group-dialog');
   form.append(error, node('footer', 'group-form-actions', [btn(ctx, '返回', () => dialog.close()), submit]));

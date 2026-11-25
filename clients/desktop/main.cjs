@@ -5,7 +5,7 @@ const { registerPaymentLinks } = require('./payment-links.cjs');
 const { registerSourceLinks } = require('./public-source.cjs');
 
 function workspaceUrl() {
-  const target = new URL(process.env.NH_APP_URL || 'http://127.0.0.1:8765');
+  const target = new URL(process.env.NH_APP_URL || 'http://localhost:8765');
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname);
   if (
     (target.protocol !== 'https:' && !(target.protocol === 'http:' && loopback)) ||

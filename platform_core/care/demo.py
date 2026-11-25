@@ -77,7 +77,7 @@ def seed(today: str) -> dict:
                 "admittedAt": entered,
                 "endDate": offset_date(today, 14 + n * 4),
                 "dischargedAt": "",
-                "summary": f"{ward}在住长者，日常照护由{STAFF[n % 4]}跟进。",
+                "summary": f"{ward}在住长辈，日常照护由{STAFF[n % 4]}跟进。",
                 "inquiryId": "",
             }
             state["residents"].append(resident)

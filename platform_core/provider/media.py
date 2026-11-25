@@ -1,4 +1,4 @@
-"""Paid DeepSeek OCR pages and ASR seconds, metered independently from chat tokens."""
+"""Paid OCR pages and ASR seconds, metered independently from chat tokens."""
 
 from contextlib import closing
 from hashlib import sha256
@@ -8,7 +8,7 @@ from uuid import uuid4
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from . import latest, local_time, read_key
+from . import audio_adapters, latest, local_time, read_key
 
 ENDPOINT = "https://api.deepseek.com/v1/tools/"
 UNITS = {"ocr": "页", "asr": "秒"}
@@ -43,8 +43,12 @@ def init(db):
         "CREATE INDEX IF NOT EXISTS media_lookup ON media_usage(kind,fingerprint,state)"
     )
     db.execute("""CREATE TABLE IF NOT EXISTS media_policy (
-        id INTEGER PRIMARY KEY CHECK (id=1), ocr INTEGER NOT NULL, asr INTEGER NOT NULL)""")
-    db.execute("INSERT OR IGNORE INTO media_policy VALUES(1,1,1)")
+        id INTEGER PRIMARY KEY CHECK (id=1), ocr INTEGER NOT NULL, asr INTEGER NOT NULL,
+        asr_unlimited INTEGER NOT NULL DEFAULT 0 CHECK (asr_unlimited IN (0,1)))""")
+    if "asr_unlimited" not in {r[1] for r in db.execute("PRAGMA table_info(media_policy)")}:
+        db.execute("""ALTER TABLE media_policy ADD COLUMN asr_unlimited INTEGER NOT NULL
+                   DEFAULT 0 CHECK (asr_unlimited IN (0,1))""")
+    db.execute("INSERT OR IGNORE INTO media_policy(id,ocr,asr) VALUES(1,1,1)")
 
 
 def amounts(db, plan, kind):
@@ -57,12 +61,20 @@ def amounts(db, plan, kind):
     quota = db.execute(
         "SELECT units FROM media_quota WHERE plan=? AND kind=?", (plan, kind)
     ).fetchone()
+    limit = quota[0] if quota else 0
+    if kind == "asr" and db.execute("SELECT asr_unlimited FROM media_policy WHERE id=1").fetchone()[0]:
+        limit = None
     return {
-        "limit": quota[0] if quota else 0,
+        "limit": limit,
         "used": used,
         "held": held,
         "unit": UNITS[kind],
     }
+
+
+def can_reserve(meter, units):
+    limit = meter["limit"]
+    return limit is None or meter["used"] + meter["held"] + units <= limit
 
 
 def grant(db, plan, kind, units):
@@ -72,6 +84,12 @@ def grant(db, plan, kind, units):
     if units < meter["used"] + meter["held"]:
         raise ValueError("额度不能低于实际使用和在途预留")
     db.execute("INSERT OR REPLACE INTO media_quota VALUES(?,?,?)", (plan, kind, units))
+    if kind == "asr":
+        db.execute("UPDATE media_policy SET asr_unlimited=0 WHERE id=1")
+
+
+def allow_unlimited_asr(db):
+    db.execute("UPDATE media_policy SET asr_unlimited=1 WHERE id=1")
 
 
 def overview(db):
@@ -89,7 +107,7 @@ def configure(db, user, p):
     if set(p) != set(UNITS) or not all(type(v) is bool for v in p.values()):
         raise ValueError("识别开关无效")
     db.execute("UPDATE media_policy SET ocr=?,asr=? WHERE id=1", (p["ocr"], p["asr"]))
-    return "更新 DeepSeek 识别开关，OCR {}、ASR {}".format(
+    return "更新识别开关，OCR {}、ASR {}".format(
         "启用" if p["ocr"] else "停用", "启用" if p["asr"] else "停用"
     )
 
@@ -160,6 +178,21 @@ def invoke(kind, raw, filename, mime, key):
         ) from None
 
 
+def invoke_asr(service, raw, filename, mime, key, duration_ms):
+    try:
+        return audio_adapters.transcribe(service, key, raw, filename, mime, duration_ms)
+    except HTTPError as e:
+        e.close()
+        raise MediaError(
+            f"语音服务返回 HTTP {e.code}，请联系平台运营方",
+            uncertain=e.code >= 500 or e.code == 408,
+        ) from None
+    except (OSError, HTTPException):
+        raise MediaError("识别连接中断，结果待平台对账；原件仍保留", uncertain=True) from None
+    except (ValueError, TypeError):
+        raise MediaError("识别回复格式未知，请平台核对渠道用量", uncertain=True) from None
+
+
 def audit_asr(db, actor, task, now, summary, scope):
     from .. import activity
 
@@ -200,6 +233,7 @@ def execute(
     reference="",
     upload=None,
     audit_scope=None,
+    duration_ms=None,
 ):
     """Persist the outbound reservation first. A crash or lost reply never causes an automatic re-send."""
     now = store.now()
@@ -235,12 +269,14 @@ def execute(
         ]:
             raise PermissionError("总管理员已停用该识别工具")
         meter = amounts(db, plan["id"], kind)
-        if meter["used"] + meter["held"] + reserve > meter["limit"]:
+        if not can_reserve(meter, reserve):
             raise ValueError("机构识别套餐剩余额度不足，请联系平台运营方")
         try:
-            key = read_key()
+            service = audio_adapters.options("asr") if kind == "asr" else None
+            key = service.key() if service else read_key()
         except (OSError, ValueError):
             raise MediaError("平台托管凭据不可用，请联系平台运营方") from None
+        label = audio_adapters.LABELS[service.provider] if service else "DeepSeek"
         call = uuid4().hex
         if kind == "asr":
             from .. import history
@@ -268,11 +304,16 @@ def execute(
                 actor,
                 reference,
                 now,
-                "保存语音原件，提交 DeepSeek 转写",
+                f"保存语音原件，提交 {label} 转写",
                 audit_scope,
             )
     try:
-        obj = invoke(kind, upload if upload is not None else raw, filename, mime, key)
+        audio = upload if upload is not None else raw
+        obj = (
+            invoke_asr(service, audio, filename, mime, key, duration_ms)
+            if service
+            else invoke(kind, audio, filename, mime, key)
+        )
         result, units, source_id = parse(obj)
         if kind == "asr":
             result["transcriptId"] = call
@@ -323,7 +364,7 @@ def execute(
                 actor,
                 reference,
                 store.now(),
-                "记录 DeepSeek 语音转写回执",
+                f"记录 {label} 语音转写回执",
                 audit_scope,
             )
     with closing(store.connect()) as db:

@@ -162,7 +162,7 @@ def tick(store, halt):
                         "UPDATE rounds_jobs SET attempts=attempts+1,retry_at=? WHERE resident=? AND day=? AND retry_at=?",
                         ((now + wait).isoformat(), job[0], job[1], lease),
                     )
-                LOG.error("一项长者巡查生成失败，将按退避间隔重试")
+                LOG.error("一项长辈巡查生成失败，将按退避间隔重试")
         if not halt.is_set():
             delivered = deliver_due(db, store.now, halt, business_state)
     return {"generated": completed, "delivered": delivered}

@@ -49,7 +49,7 @@ def lookup(state, collection, row_id):
 def get_resident(state, resident_id):
     record = lookup(state, "residents", resident_id)
     if record["status"] != "在住":
-        raise ValueError("该长者已退住。")
+        raise ValueError("该长辈已退住。")
     return record
 
 

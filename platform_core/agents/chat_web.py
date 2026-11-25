@@ -18,7 +18,7 @@ PRIVATE = re.compile(
     r"我的(?:父|母|爷爷|奶奶|病|家属|账户|账单)|我(?:爸|妈|家老人|患有|得了|确诊|被诊断|正在服用)|患者.{0,8}岁|"
     r"(?:发布|下发|创建|提交|发送).{0,16}(?:通知|任务|申请)|工单|账单|档案号|病历号|病房号|房间号|床位号|医嘱|病例编号|(?<!\d)\d{1,4}\s*(?:号房|床|病房|号楼|单元)|"
     r"身份证|银行卡|验证码|密码|密钥|手机号|邮箱地址|联系方式|家庭住址|微信号|"
-    r"上文|刚才|上一条|刚刚说|上面(?:的|提到)|这些长者|那位|该患者|忽略.{0,10}指令|"
+    r"上文|刚才|上一条|刚刚说|上面(?:的|提到)|这些(?:长辈|长者)|那位|该患者|忽略.{0,10}指令|"
     r"\b(?:our (?:home|facility|residents?|patients?|staff|inventory)|my (?:patient|mother|father|account)|"
     r"password|api[ _-]?key|token|medical record|patient id|email address|phone number|"
     r"previous (?:message|answer)|room\s*#?\d+|bed\s*#?\d+)\b|"

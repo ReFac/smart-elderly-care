@@ -28,7 +28,7 @@ NOTICES = {
     ),
     "securityIssue": (
         "押金凭证待核对",
-        "未能验证本长者的押金凭证，请核对入住收费凭证。",
+        "未能验证本长辈的押金凭证，请核对入住收费凭证。",
     ),
 }
 FAMILY_FIELDS = ("id", "billingDate", "date", "kind", "title", "message")

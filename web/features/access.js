@@ -1,7 +1,9 @@
 import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { backupPanel } from './backups.js';
 import { roundsSettings } from './rounds-desk.js';
-import { passwordFlow } from './identity.js';
+import { passwordFlow, sendPasswordReset } from './identity.js';
+import { staffResumeFields } from './staff-resume.js';
+import { passkeyButton, passkeySignIn } from './passkeys.js';
 import { openDossier } from './dossier.js';
 import { openEmployment } from './staff-employment.js';
 import { icon } from '../lib/ui.js';
@@ -11,6 +13,7 @@ import { capabilitySummary, draftPreview, grantPicker } from './access-grants.js
 import { trialSettings } from './trial-stays.js';
 import { providerUsage } from './provider-usage.js';
 import { platformUpdates } from './platform-updates.js';
+import { colorModeControl } from '../lib/color-mode.js';
 
 function inputField(label, name, value = '', options = {}) {
   const control = node('input');
@@ -116,13 +119,13 @@ function careFlowFigure() {
     <g fill="none" stroke="#8db4f6"><path d="m243 58 33-19h51"/><path d="m256 104 24-12h47"/><path d="m247 143 35 15h45"/></g>
     <g fill="#eabb6e"><circle cx="243" cy="58" r="3"/><circle cx="256" cy="104" r="3"/><circle cx="247" cy="143" r="3"/></g>
   </g>
-  <g fill="#edf2ff" font-size="17" font-family="sans-serif"><text x="342" y="45">长者档案</text><text x="342" y="98">照护工单</text><text x="342" y="164">执行留痕</text></g>`;
-  figure.setAttribute('aria-label', '照护流程：由长者档案形成照护工单，执行后留存记录。');
+  <g fill="#edf2ff" font-size="17" font-family="sans-serif"><text x="342" y="45">长辈档案</text><text x="342" y="98">照护工单</text><text x="342" y="164">执行留痕</text></g>`;
+  figure.setAttribute('aria-label', '照护流程：由长辈档案形成照护工单，执行后留存记录。');
   figure.append(svg);
   return figure;
 }
 
-export function loginScreen(onLogin, branding = {}) {
+export function loginScreen(onLogin, branding = {}, onPasskey = null) {
   const main = node('main', 'access-login');
   const hero = node('section', 'access-login-hero');
   const mark = node('img', 'access-logo');
@@ -187,20 +190,22 @@ export function loginScreen(onLogin, branding = {}) {
   visit.href = '/visit';
   const faq = node('a', 'access-visitor-link', [icon('info', 18), node('strong', '', '常见问题'), icon('chevron', 16)]);
   faq.href = '/faq';
-  panel.append(form, recover, help, visit, faq);
+  panel.append(form);
+  if (onPasskey) panel.append(passkeyButton('用通行密钥登录', () => passkeySignIn(onPasskey)));
+  panel.append(recover, help, visit, faq, colorModeControl());
   entry.append(panel);
   main.append(hero, entry);
   return main;
 }
 
-function editAccount(ctx, kind, target = null, defaultRole = '护工') {
+export function editAccount(ctx, kind, target = null, defaultRole = '护工') {
   const state = ctx.state;
   const family = kind === 'family';
   const form = node('form', 'access-form');
   const [nameRow, name] = inputField('姓名', 'displayName', target?.displayName || '', { max: 60 });
   const identity = node('div', 'access-field-pair', nameRow);
   form.append(identity);
-  let username, inviteChannel, inviteAddress, duties, resident, familyServices, portalIdentity;
+  let username, inviteAddress, duties, resident, familyServices, portalIdentity;
   const scopeControls = new Map();
   if (!target) {
     let row;
@@ -214,14 +219,13 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
     identity.append(row);
   }
   if (!target || target.activationPending) {
-    let row,channelRow;
-    [channelRow, inviteChannel] = selectField('本人验证渠道', [['email','邮箱'],['sms','手机']]);
-    [row, inviteAddress] = inputField('激活联系方式','destination','',{type:'email',max:254});
-    inviteAddress.required = !target;
-    if(target) inviteAddress.placeholder='如需更正首次邀请，请填写新地址';
-    const adapt = () => {inviteAddress.type=inviteChannel.value==='email'?'email':'tel';};
-    inviteChannel.onchange=adapt;
-    form.append(channelRow,row,node('p','fx-muted','请本人核对联系方式。创建后，由本人在登录页接收验证码并设置密码。未接通的渠道须待机构完成配置后使用。'));
+    let row;
+    [row, inviteAddress] = inputField('本人手机号', 'destination', '', {
+      type: 'tel', max: 18, autocomplete: 'tel', required: !target,
+      placeholder: target ? '仅更正首次邀请时填写' : '中国大陆号码可直接填写',
+    });
+    if (!target && !family) form.prepend(staffResumeFields(name, inviteAddress));
+    form.append(row, node('p', 'fx-muted', '本人通过登记的手机号验证身份并设置密码。邮箱可在开通后由本人验证添加。'));
   }
   if(target)
     identity.append(
@@ -234,25 +238,25 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
   if (family) {
     if (!target) {
       const options = state.residents.map((r) => [r.id, residentLabel(ctx, r) + ' · ' + r.id]);
-      options.unshift(['', '请选择已核验授权的长者']);
-      const [residentRow, select] = selectField('已获授权的长者', options);
+      options.unshift(['', '请选择已核验授权的长辈']);
+      const [residentRow, select] = selectField('已获授权的长辈', options);
       resident = select;
       resident.required = true;
       const [typeRow, typeControl] = selectField('使用人', [
         ['family', '已授权亲属'],
-        ['self', '长者本人'],
+        ['self', '长辈本人'],
       ]);
       portalIdentity = typeControl;
       form.append(
         typeRow,
         residentRow,
-        node('p', 'fx-muted', '请核对使用人身份、绑定长者和查阅授权。'),
+        node('p', 'fx-muted', '请核对使用人身份、绑定长辈和查阅授权。'),
       );
     } else {
       form.append(
         facts([
           [
-            '绑定长者',
+            '绑定长辈',
             residentLabel(ctx, target.residentId),
           ],
         ]),
@@ -267,7 +271,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
       ['medication', '查看已复核医嘱和给药时间'],
       ['medicationReport', '本人填写、查看及更正体检用药自报'],
       ['personalHealth', '查看本人的生活简报、时间线与健康简介'],
-      ['billingNotices', '查看绑定长者的缴费提醒'],
+      ['billingNotices', '查看绑定长辈的缴费提醒'],
     ].map(([key, label]) => {
       const control = node('input');
       control.type = 'checkbox';
@@ -293,7 +297,7 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
         node('div', 'access-family-grant', [
           node('label', 'access-check', [familyServices, node('span', '', '查看已完成的照护服务')]),
           ...scopeRows,
-          node('p', 'fx-muted', '每项授权只适用于此账号和绑定长者，可随时收回。'),
+          node('p', 'fx-muted', '每项授权只适用于此账号和绑定长辈，可随时收回。'),
         ]),
       ),
     );
@@ -339,9 +343,9 @@ function editAccount(ctx, kind, target = null, defaultRole = '护工') {
     const payload = { displayName: name.value };
     if (target) {
       payload.id = target.id;
-      if(target.activationPending && inviteAddress.value.trim()) payload.invitation={channel:inviteChannel.value,destination:inviteAddress.value.trim()};
+      if(target.activationPending && inviteAddress.value.trim()) payload.invitation={channel:'sms',destination:inviteAddress.value.trim()};
     }
-    else Object.assign(payload, { kind, username: username.value, invitation:{channel:inviteChannel.value,destination:inviteAddress.value.trim()} });
+    else Object.assign(payload, { kind, username: username.value, invitation:{channel:'sms',destination:inviteAddress.value.trim()} });
     if (!family)
       Object.assign(payload, { staffDuties:duties.read(), role: role.value, permissions: grants.read(), campusId: campus.value });
     else {
@@ -420,8 +424,31 @@ function roleTemplates(ctx) {
 function accounts(ctx) {
   const state = ctx.state;
   const isOwner = state.accessManagement.scope === 'institution';
-  const identityLabel = r => r.kind==='family' ? (r.portalSelf?'入住长者':'亲属') : (r.kind==='owner'?'Owner':'员工');
-  const boundPerson = r => state.residents.find(p=>p.id===r.residentId);
+  const residents = new Map(state.residents.map((person) => [person.id, person]));
+  const campuses = new Map((state.campusOptions || []).map((campus) => [campus.id, campus.name]));
+  const groups = { owner: [], staff: [], stay: [], registered: [] };
+  const groupOf = (account) => account.directoryGroup || (account.kind === 'family' ? 'stay' : account.kind);
+  const isCustomer = (account) => groupOf(account) === 'registered';
+  const boundPerson = (account) => residents.get(account.residentId);
+  const statusLabel = (account) => !account.enabled ? '已停用' : account.activationPending ? '待激活' : '已启用';
+  const searchIndex = new Map();
+  for (const account of state.accounts) {
+    groups[groupOf(account)]?.push(account);
+    searchIndex.set(account.id, [
+      account.displayName, account.username, account.role, ...(account.staffDuties || []),
+      boundPerson(account)?.name, state.residentRooms?.[account.residentId],
+      campuses.get(account.facilityScope?.campusIds?.[0]), account.directoryStay,
+    ].filter(Boolean).join(' '));
+  }
+  function editCustomer(account) {
+    const dialog = ctx.dialog({
+      title: '编辑注册顾客',
+      fields: [{ name: 'displayName', label: '姓名', value: account.displayName, required: true, maxLength: 60 }],
+      submitLabel: '保存姓名',
+      onSubmit: ({displayName}) => ctx.command('access.update', { id: account.id, displayName }),
+    });
+    dialog.dataset.managedAccountId = account.id;
+  }
   function showPermissions(account) {
     const grants =
       account.kind === 'staff'
@@ -449,10 +476,10 @@ function accounts(ctx) {
         badge(ctx, account.enabled ? '已启用' : '已停用', account.enabled ? 'green' : 'neutral'),
       ]),
       account.enabled ? null : node('p', 'fx-muted', '以下为账号恢复启用后的权限。'),
-      account.kind === 'family'
+      isCustomer(account) ? facts([['可用服务', '环境导览、常见问题、个人账号设置']]) : account.kind === 'family'
         ? facts([
             [
-              '绑定长者',
+              '绑定长辈',
               residentLabel(ctx, account.residentId),
             ],
             ['已完成照护服务', account.familyServices ? '可查阅近期服务日期和项目' : '未开通查阅'],
@@ -465,43 +492,35 @@ function accounts(ctx) {
         : null,
       account.kind==='staff' ? facts([['岗位职责',account.staffDuties.join('、') || '待登记']]) : null,
       isOwner && account.kind !== 'family' ? facts([['签名实名', account.signatureRealName || '待登记']]) : null,
-      account.kind==='family' && boundPerson(account) && ctx.available('dossier') ? link(ctx,'查看绑定长者档案',()=>openDossier(ctx,boundPerson(account))) : null,
+      boundPerson(account) && ctx.available('dossier') ? link(ctx,'查看绑定长辈档案',()=>openDossier(ctx,boundPerson(account))) : null,
       capabilitySummary(ctx, account),
       grants,
     ]);
     const dialog = ctx.detail('权限详情', body);
     dialog.dataset.managedAccountId = account.id;
   }
-  const management = page(
-    ctx,
-    '账号与权限',
-    isOwner
-      ? '管理机构账号、岗位授权及亲属绑定。'
-      : '可管理员工的现有权限和新分配的权限均限于你的业务授权。',
-    choose(
-      state.accessManagement.canBindFamily
-        ? btn(ctx, '绑定亲属或长者', () => editAccount(ctx, 'family'))
-        : null,
-      btn(ctx, '新增员工', () => editAccount(ctx, 'staff'), 'primary'),
-    ),
-    table(ctx, {
-      title: isOwner ? '机构账号' : '可管理员工',
-      rows: state.accounts,
+  function directory(title, rows, includeStayFilters) {
+    return table(ctx, {
+      title,
+      rows,
       empty: '没有符合条件的账号',
       search: {
-        placeholder: '搜索姓名、登录名、职责或绑定长者',
-        value: (r) => [r.displayName, r.username, r.role, ...(r.staffDuties||[]), boundPerson(r)?.name].join(' '),
+        placeholder: '搜索姓名、登录名、职责、绑定长辈或房号',
+        value: (r) => searchIndex.get(r.id),
       },
       filter: {
-        label: '账号筛选',
-        all: '全部账号',
-        options: [...(isOwner ? ['Owner','员工','入住长者','亲属'] : []), '已启用', '已停用', '待激活'],
-        matches: (r, key) => identityLabel(r) === key || (key==='待激活' && r.activationPending && r.enabled) || (r.enabled ? '已启用' : '已停用') === key,
+        label: '筛选账号或入住状态',
+        all: '全部状态',
+        options: [
+          '已启用', '已停用', '待激活',
+          ...(includeStayFilters ? ['正式在住', '试住中', '试住到期待确认', '未入住', '已退住', '档案不在名册'] : []),
+        ],
+        matches: (r, key) => statusLabel(r) === key || r.directoryStay === key,
       },
       cols: [
         { label: '姓名 / 登录名', view: (r) => named(staffLabel(ctx, r), r.username) },
         {
-          label: '岗位',
+          label: '身份 / 岗位',
           view: (r) =>
             node('div', 'access-account-roles', [
               node('span', r.kind === 'owner' ? 'access-role owner' : 'access-role', r.role),
@@ -512,36 +531,40 @@ function accounts(ctx) {
             ]),
         },
         {
-          label: '工作分院',
+          label: '绑定长辈 / 工作分院',
           view: (row) =>
-            row.kind === 'family'
-              ? (boundPerson(row) ? residentAnchor(ctx, boundPerson(row)) : '随绑定长者')
-              : (state.campusOptions || []).find((c) => c.id === row.facilityScope?.campusIds?.[0])?.name || '全机构',
+            groupOf(row) === 'stay'
+              ? node('div', 'access-account-roles', [
+                  boundPerson(row) ? residentAnchor(ctx, boundPerson(row)) : null,
+                  node('small', 'fx-muted', row.directoryStay || '档案不在名册'),
+                ])
+              : isCustomer(row) ? '—' : campuses.get(row.facilityScope?.campusIds?.[0]) || '全机构',
         },
         {
-          label: '工作台权限',
+          label: '可用权限',
           view: (r) =>
             link(
               ctx,
               r.kind === 'owner'
                 ? 'Owner'
-                : r.kind === 'family'
+                : isCustomer(r) ? '访客服务' : r.kind === 'family'
                   ? '门户权限'
                   : r.permissions.length + ' 项授权',
               () => showPermissions(r),
             ),
         },
         {
-          label: '状态',
-          view: (r) => badge(ctx, !r.enabled ? '已停用' : r.activationPending ? '待激活':'已启用', r.enabled ? (r.activationPending?'amber':'green') : 'neutral'),
+          label: '账号状态',
+          view: (r) => badge(ctx, statusLabel(r), r.enabled ? (r.activationPending ? 'amber' : 'green') : 'neutral'),
         },
         {
           label: '操作',
           align: 'end',
           view: (r) =>
             choose(
-              r.kind === 'owner' ? null : link(ctx, '编辑', () => editAccount(ctx, r.kind, r)),
+              r.kind === 'owner' ? null : link(ctx, '编辑', () => isCustomer(r) ? editCustomer(r) : editAccount(ctx, r.kind, r)),
               r.kind === 'staff' ? link(ctx, '合同与工资日', () => openEmployment(ctx, r)) : null,
+              r.kind !== 'owner' && r.enabled ? link(ctx, '发送重置链接', () => sendPasswordReset(r)) : null,
               isOwner && r.kind !== 'family' ? link(ctx, '签名实名', () => registerSignatureName(ctx, r)) : null,
 
               r.kind === 'owner'
@@ -550,7 +573,30 @@ function accounts(ctx) {
             ),
         },
       ],
-    }),
+    });
+  }
+  const categories = [
+    ['all', '全部账号', state.accounts, true],
+    ['staff', '员工', groups.staff],
+    ['stay', '入住相关', groups.stay, true],
+    ['registered', '注册顾客', groups.registered],
+    ['owner', 'Owner', groups.owner],
+  ];
+  const management = page(
+    ctx,
+    '账号与权限',
+    isOwner ? '管理员工、入住相关账号和独立注册顾客。' : '可管理员工的现有权限和新分配的权限均限于你的业务授权。',
+    choose(
+      state.accessManagement.canBindFamily
+        ? btn(ctx, '绑定亲属或长辈', () => editAccount(ctx, 'family'))
+        : null,
+      btn(ctx, '新增员工', () => editAccount(ctx, 'staff'), 'primary'),
+    ),
+    isOwner
+      ? tabs('access', categories.map(([key, label, rows, stay]) => [
+          key, `${label} (${rows.length})`, () => directory(label, rows, stay),
+        ]))
+      : directory('可管理员工', state.accounts, false),
     roleTemplates(ctx),
   );
   management.classList.add('access-management');
@@ -623,14 +669,15 @@ function settings(ctx) {
       node('strong', '', states[config.state] || '待配置'),
     ]),
     facts([
-      ['服务模型', config.model || 'deepseek-flash'],
+      ['服务商', { deepseek: 'DeepSeek', openai: 'OpenAI', anthropic: 'Anthropic', google: 'Google' }[config.modelProvider] || '—'],
+      ['服务模型', config.model || '—'],
       ['本期额度', String(config.tokenLimit || 0) + ' tokens'],
       ['已用 / 预留', String(config.tokensUsed || 0) + ' / ' + String(config.tokensReserved || 0)],
       ['助理朗读', `已计费 ${config.readAloud?.characters || 0} 字符，待核对 ${config.readAloud?.held || 0} 字符`],
       ['公开搜索', `已计费 ${config.webSearch?.calls || 0} 次，待核对 ${config.webSearch?.pending || 0} 次`],
       ['有效期至', config.expiresOn || '—'],
     ]),
-    btn(ctx, '查看 DeepSeek 用量', () => ctx.go('settings', 'deepseekUsage'), 'primary'),
+    btn(ctx, '查看 AI 用量', () => ctx.go('settings', 'deepseekUsage'), 'primary'),
     node('p', 'fx-muted', '云端规划按机构另购套餐启用。开通、续期与额度调整由平台运营方办理。'),
   ]);
   if (config.media) {
@@ -642,15 +689,17 @@ function settings(ctx) {
       check.type = 'checkbox';
       check.checked = meter.enabled;
       fields[kind] = check;
+      const usage = meter.limit === null ? `不限累计时长，已用 ${meter.used} ${meter.unit}`
+        : `已用 ${meter.used} / ${meter.limit} ${meter.unit}`;
       form.append(
         node('label', 'access-check', [check, title]),
-        node('small', 'fx-muted', `已用 ${meter.used} / ${meter.limit} ${meter.unit}，在途 ${meter.held} ${meter.unit}`),
+        node('small', 'fx-muted', `${usage}，在途 ${meter.held} ${meter.unit}`),
       );
     }
     saveForm(form, '保存识别开关', () =>
       ctx.command('access.mediaSettings', { ocr: fields.ocr.checked, asr: fields.asr.checked }),
     );
-    deep.append(section('DeepSeek 识别工具', form));
+    deep.append(section('文档与语音识别', form));
   }
   const result = page(
     ctx,
@@ -659,7 +708,7 @@ function settings(ctx) {
     null,
     tabs('settings', [
       ['general', '界面与 AI 套餐', () => node('div', 'access-settings-grid', [appearance, deep])],
-      ['deepseekUsage', 'DeepSeek 用量', () => providerUsage(ctx)],
+      ['deepseekUsage', 'AI 用量', () => providerUsage(ctx)],
       ['trials', '试住约定', () => trialSettings(ctx)],
       ['rounds', '定时巡查', () => roundsSettings(ctx)],
       ['backups', '备份与恢复', () => backupPanel(ctx)],

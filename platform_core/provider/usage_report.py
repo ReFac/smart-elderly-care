@@ -28,10 +28,11 @@ FEATURES = {
     "care.roundNarrative": "照护巡查 · 生活简报",
     "care.taskAsr": "照护工单 · 语音转写",
     "dossier.documentOcr": "医疗档案 · OCR",
+    "access.resumeOcr": "员工简历 · OCR",
     "dossier.visitOcr": "就诊资料 · OCR",
     "dossier.visitExtraction": "就诊资料 · 病例整理",
-    "dossier.healthIntroduction": "长者档案 · 健康简介",
-    "dossier.summary": "长者档案 · 健康摘要",
+    "dossier.healthIntroduction": "长辈档案 · 健康简介",
+    "dossier.summary": "长辈档案 · 健康摘要",
     "inventory.similarity": "物资品目 · 查重核对",
     "agent.routing": "智能协作 · 任务分派",
     "agent.voiceAsr": "智能协作 · 语音转写",
@@ -330,5 +331,5 @@ def read(store, token, query):
     with closing(store.connect()) as db, db:
         db.execute("BEGIN")
         if store.actor(db, token)["kind"] != "owner":
-            raise PermissionError("仅 Owner 可查看机构和员工的 DeepSeek 用量")
+            raise PermissionError("仅 Owner 可查看机构和员工的 AI 用量")
         return _report(db, *_parameters(query, store.now()))

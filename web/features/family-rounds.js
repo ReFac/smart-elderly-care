@@ -2,13 +2,13 @@ import { residentLabel } from './people-labels.js';
 import { node, choose, btn, badge, facts, named, disclosure, section } from './shared.js';
 
 const sharing = '站内简报包含当日照护工单数量、咳嗽观察是否提示增加，以及复核建议。';
-const methods = ['长者当面确认', '长者电话确认', '长者书面确认'];
+const methods = ['长辈当面确认', '长辈电话确认', '长辈书面确认'];
 
 function consent(ctx, resident, recipient) {
   const enabled = !recipient.allowed;
   const title = enabled ? '同意分享巡查简报' : '撤回简报分享';
   const fields = [
-    ['长者', residentLabel(ctx, resident)],
+    ['长辈', residentLabel(ctx, resident)],
     ['接收家属', recipient.name],
     ['站内简报', enabled ? '允许分享' : '撤回授权'],
   ];
@@ -36,7 +36,7 @@ function consent(ctx, resident, recipient) {
     );
   if (ctx.state.user.portalSelf) return submit();
   ctx.dialog({
-    title: '登记长者意愿',
+    title: '登记长辈意愿',
     description: residentLabel(ctx, resident) + ' → ' + recipient.name + ' · ' + title + '。' + sharing,
     fields: [
       {
@@ -48,7 +48,7 @@ function consent(ctx, resident, recipient) {
       },
       {
         name: 'evidence',
-        label: '长者意愿记录',
+        label: '长辈意愿记录',
         type: 'textarea',
         required: true,
         maxLength: 240,
@@ -64,7 +64,7 @@ export function familyRecipients(ctx, resident) {
     (r) => r.residentId === resident.id,
   );
   const box = node('div', 'fx-profile', [
-    node('p', 'fx-muted', sharing + '长者同意且家属订阅后，每天最多投递一次。'),
+    node('p', 'fx-muted', sharing + '长辈同意且家属订阅后，每天最多投递一次。'),
   ]);
   for (const recipient of recipients) {
     box.append(
@@ -73,7 +73,7 @@ export function familyRecipients(ctx, resident) {
           named(recipient.name, recipient.subscribed ? '家属已订阅' : '家属未订阅'),
           badge(
             ctx,
-            recipient.allowed ? '长者已同意' : '尚未授权',
+            recipient.allowed ? '长辈已同意' : '尚未授权',
             recipient.allowed ? 'green' : 'neutral',
           ),
         ]),
@@ -114,7 +114,7 @@ export function familyInbox(ctx, resident) {
           {
             title: subscribed ? '取消家属简报订阅' : '订阅每日巡查简报',
             fields: [
-              ['长者', residentLabel(ctx, resident)],
+              ['长辈', residentLabel(ctx, resident)],
               ['接收渠道', '本账号的站内收件箱'],
               ['订阅', subscribed ? '取消' : '开启'],
             ],
@@ -123,7 +123,7 @@ export function familyInbox(ctx, resident) {
       ),
     ]),
     node('p', 'fx-muted', [
-      allowed ? '长者已同意分享。' : '等待长者同意分享。',
+      allowed ? '长辈已同意分享。' : '等待长辈同意分享。',
       subscribed ? '本账号已订阅。' : '本账号尚未订阅。',
       '任一方撤回后，历史简报也会停止展示。',
     ]),
@@ -167,7 +167,7 @@ export function familyInbox(ctx, resident) {
               {
                 title: '将巡查简报标为已读',
                 fields: [
-                  ['长者', residentLabel(ctx, resident)],
+                  ['长辈', residentLabel(ctx, resident)],
                   ['简报日期', message.day],
                 ],
               },

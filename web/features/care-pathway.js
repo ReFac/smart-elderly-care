@@ -81,7 +81,7 @@ function showFollowup(ctx, r) {
     '筛查与随访记录',
     facts(
       [
-        ['长者', residentName(ctx, r.residentId)],
+        ['长辈', residentName(ctx, r.residentId)],
         ['项目', r.subject],
         ['筛查结果', r.finding],
         ['登记人', r.openedBy],
@@ -114,13 +114,13 @@ export function followups(ctx) {
     title: '筛查与随访',
     rows: byRecent(ctx.state.followups || []),
     search: {
-      placeholder: '搜索长者或项目',
+      placeholder: '搜索长辈或项目',
       value: (r) => residentName(ctx, r.residentId) + r.subject,
     },
     filter: status,
     action: btn(ctx, '登记筛查', () => createScreen(ctx)),
     cols: [
-      { label: '长者', view: (r) => residentAnchor(ctx, r.residentId) },
+      { label: '长辈', view: (r) => residentAnchor(ctx, r.residentId) },
       { label: '筛查项目', view: (r) => named(r.subject, r.finding) },
       { label: '跟进级别', view: (r) => r.priority || '待分级' },
       { label: '预约随访', view: (r) => named(r.dueDate || '待安排', staffLabel(ctx, r.assignee, r.assigneeId)) },
@@ -143,7 +143,7 @@ function createReferral(ctx, residentId) {
   }));
   const fields = residentId
     ? [select('assessmentId', '依据评估', assessmentChoices(ctx, residentId), { required: false })]
-    : [select('residentId', '长者', choices)];
+    : [select('residentId', '长辈', choices)];
   runForm(ctx, {
     title: '登记院外衔接',
     action: 'care.refer',
@@ -201,7 +201,7 @@ function showReferral(ctx, r) {
     'fx-profile',
     facts(
       [
-        ['长者', residentName(ctx, r.residentId)],
+        ['长辈', residentName(ctx, r.residentId)],
         ['接收单位', r.destination],
         ['类型', r.kind],
         ['接收渠道', r.channel],
@@ -291,11 +291,11 @@ export function referrals(ctx) {
     action: choose(openDocumentButton(ctx), btn(ctx, '登记院外衔接', () => createReferral(ctx))),
     filter: status,
     search: {
-      placeholder: '搜索长者或接收单位',
+      placeholder: '搜索长辈或接收单位',
       value: (r) => residentName(ctx, r.residentId) + r.destination,
     },
     cols: [
-      { label: '长者', view: (r) => residentAnchor(ctx, r.residentId) },
+      { label: '长辈', view: (r) => residentAnchor(ctx, r.residentId) },
       { label: '交接类型', view: (r) => r.kind },
       { label: '接收单位', view: (r) => named(r.destination, r.date) },
       { label: '状态', view: (r) => badge(ctx, r.status) },

@@ -136,7 +136,7 @@ _CAPABILITIES = [
         BADGE,
         "服务时段与定向录音",
         [1, 4, 7, 16, 18],
-        "绑定工牌、人员和长者的服务时段。保留开始、结束、知情授权与用途标识。",
+        "绑定工牌、人员和长辈的服务时段。保留开始、结束、知情授权与用途标识。",
         obj(
             {**EVENT, **SERVICE, "operation": choice("start", "stop"), "consentRef": ID}
         ),
@@ -295,7 +295,7 @@ _CAPABILITIES = [
         REPORT,
         "护理等级、服务配比与分配",
         [14],
-        "登记机构自定义护理等级、服务项与人员配比，支持长者到照护标准及护理员的匹配。",
+        "登记机构自定义护理等级、服务项与人员配比，支持长辈到照护标准及护理员的匹配。",
         obj(
             {
                 "facilityId": ID,
@@ -318,7 +318,7 @@ _CAPABILITIES = [
         REPORT,
         "机构批量导入模板",
         [15],
-        "领取指定版本的护理员、长者 Excel 表头模板。",
+        "领取指定版本的护理员、长辈 Excel 表头模板。",
         obj({"rosterType": choice("staff", "resident"), "templateVersion": ID}),
         JOB,
     ),
@@ -327,7 +327,7 @@ _CAPABILITIES = [
         REPORT,
         "人员导入、错误行、账号和工牌绑定",
         [15],
-        "校验导入表格，预览错误行。经确认后建立账号、绑定工牌并批量分配服务长者。",
+        "校验导入表格，预览错误行。经确认后建立账号、绑定工牌并批量分配服务长辈。",
         obj(
             {
                 "uploadRef": ID,
@@ -349,7 +349,7 @@ _CAPABILITIES = [
         REPORT,
         "护理员日报与月度汇总",
         [4, 5, 9, 13, 17, 18, 19],
-        "预留定时汇总与人工取件入口，按人统计服务长者数量、服务与录音时长，按时间列风险，可生成 PDF。",
+        "预留定时汇总与人工取件入口，按人统计服务长辈数量、服务与录音时长，按时间列风险，可生成 PDF。",
         obj(
             {
                 "staffId": ID,
@@ -363,9 +363,9 @@ _CAPABILITIES = [
     entry(
         "badge.resident-daily",
         REPORT,
-        "长者日报、摘要与风险标记",
+        "长辈日报、摘要与风险标记",
         [4, 9, 17, 18, 20],
-        "按长者汇总服务次数、时长、护理员和用药饮食情绪异常，生成可供授权分享的 PDF。",
+        "按长辈汇总服务次数、时长、护理员和用药饮食情绪异常，生成可供授权分享的 PDF。",
         obj({"residentId": ID, "date": DATE, "format": choice("pdf", "json")}),
         JOB,
     ),
@@ -389,7 +389,7 @@ _CAPABILITIES = [
     entry(
         "badge.resident-history",
         REPORT,
-        "长者历史时间轴与退住导出",
+        "长辈历史时间轴与退住导出",
         [9, 17, 18, 21],
         "按人和日期关联服务记录、授权录音、日报。按范围翻页或生成交付档案。",
         obj(
@@ -403,7 +403,7 @@ _CAPABILITIES = [
         REPORT,
         "服务明细与计划执行对照 Excel",
         [2, 4, 8, 16, 18, 22],
-        "按周、月、自定义日期、长者及护理员筛选时长、风险和计划频次，保留实际时段、未完成、部分完成、计划外服务及人工修订。",
+        "按周、月、自定义日期、长辈及护理员筛选时长、风险和计划频次，保留实际时段、未完成、部分完成、计划外服务及人工修订。",
         obj(
             {**PERIOD, "format": choice("xlsx")},
             {"residentId": ID, "staffId": ID, "includeAmendments": BOOL},
@@ -494,7 +494,7 @@ _CAPABILITIES = [
         MODEL,
         "语音输入与流式转写",
         [],
-        "流式分片及中间文本接口预留。DeepSeek 整段转写已连接 Agent 工作台（POST /api/agent/voice/transcriptions）及护理工单（POST /api/media/asr/{taskId}）。",
+        "健康助理（POST /api/agent/voice/transcriptions）和护理工单（POST /api/media/asr/{taskId}）经由平台配置的供应商进行整段转写。保留流式分片及中间文本接口。",
         obj(
             {"requestId": ID, "audioRef": ID, "locale": TEXT},
             {"sequence": INT, "isFinal": BOOL},
@@ -520,7 +520,7 @@ _CAPABILITIES = [
         MODEL,
         "医学文档 OCR",
         [],
-        "工牌外部适配端口预留。长者档案已通过 dossier.ocr 接入 DeepSeek，原件和转录供人工核对。",
+        "工牌外部适配端口预留。长辈档案已通过 dossier.ocr 接入 DeepSeek，原件和转录供人工核对。",
         obj({"documentId": ID, "requestId": ID, "imageRef": ID}),
         obj({"text": TEXT, "pages": array(obj({"page": INT, "text": TEXT}))}),
     ),

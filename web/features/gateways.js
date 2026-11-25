@@ -49,7 +49,7 @@ function simulate(ctx) {
     title: '登记模拟信号',
     action: 'gw.ingest',
     description:
-      '模拟设备上报一次观测。系统记录当时房间内的在住长者，护士现场复核后再记入相应档案。',
+      '模拟设备上报一次观测。系统记录当时房间内的在住长辈，护士现场复核后再记入相应档案。',
     fields: [
       select('source', '设备来源', choices(sources)),
       select('signal', '检测信号', choices(signals)),
@@ -87,7 +87,7 @@ function review(ctx, row) {
       row.room +
       ' · ' +
       signals[row.signal] +
-      '。请核对现场信息。已核实事件将追加到所选长者的历史档案。',
+      '。请核对现场信息。已核实事件将追加到所选长辈的历史档案。',
     fields: [
       select(
         'decision',
@@ -96,7 +96,7 @@ function review(ctx, row) {
       ),
       select(
         'residentId',
-        '现场核实的长者',
+        '现场核实的长辈',
         [{ value: '', label: '请选择，误报或无法核实可留空' }, ...names],
         { required: false },
       ),
@@ -128,7 +128,7 @@ function inspectAlert(ctx, row) {
       ]),
       node('p', '', entry.observation || '设备未附观测摘要'),
       facts([
-        ['设备提示的长者', row.residentHint ? residentName(ctx, row.residentHint) : '待现场核实'],
+        ['设备提示的长辈', row.residentHint ? residentName(ctx, row.residentHint) : '待现场核实'],
         ['证据编号', entry.evidenceRef],
         ['源事件编号', entry.eventId],
       ]),
@@ -140,12 +140,12 @@ function inspectAlert(ctx, row) {
       node('time', '', pending ? '待处理' : stamp(row.reviewedAt)),
     ]),
     pending
-      ? node('p', '', '护士核实房间和长者后，可填写现场情况。')
+      ? node('p', '', '护士核实房间和长辈后，可填写现场情况。')
       : node('p', '', row.reviewNote),
     pending
       ? btn(ctx, '填写复核结论', () => review(ctx, row), 'primary')
       : facts([
-          ['确认长者', residentName(ctx, row.residentId)],
+          ['确认长辈', residentName(ctx, row.residentId)],
           ['复核人账号', row.reviewedBy],
         ]),
   ]);
@@ -222,7 +222,7 @@ async function confirmProposal(ctx, row, trigger) {
       badge(ctx, '待确认', 'amber'),
     ]),
     facts([
-      ['服务长者', residentName(ctx, row.residentId)],
+      ['服务长辈', residentName(ctx, row.residentId)],
       ['申请时房间', row.room],
       ['申请人', row.requester],
       ['申请时间', stamp(row.createdAt)],

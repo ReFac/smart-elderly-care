@@ -28,9 +28,9 @@ def locate(db, state, user, rid):
     campus_access.require_resident(db, user, rid, state)
     person = next((r for r in state["residents"] if r["id"] == rid), None)
     if not person:
-        raise FileNotFoundError("未找到长者")
+        raise FileNotFoundError("未找到长辈")
     if person["status"] != "在住":
-        raise ValueError("仅在住长者可使用巡查档案")
+        raise ValueError("仅在住长辈可使用巡查档案")
     return current_stay(state, person)
 
 
@@ -233,7 +233,7 @@ def make_report(db, state, person, now, actor, prepared, comment="", *, clinical
         db,
         now,
         "rounds.generate",
-        "生成长者巡查摘要",
+        "生成长辈巡查摘要",
         actor,
         state,
         person["id"],

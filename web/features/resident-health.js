@@ -5,7 +5,7 @@ const titles = { intro: '填写健康简介', addition: '补充健康情况', co
 const hints = {
   intro: '用一两句话说明已知的疾病或身体情况，保留病史或自述的来历。',
   addition: '写下新了解的健康情况。这段补充会随健康简介一同保留。',
-  conversation: '只记录与这位长者本人交谈时说起的健康情况，并注明哪些是长者自述。',
+  conversation: '只记录与这位长辈本人交谈时说起的健康情况，并注明哪些是长辈自述。',
 };
 
 function entry(ctx, row) {
@@ -68,7 +68,7 @@ export function healthProfile(ctx, person, {compact = false} = {}) {
       fields: [
         field('day', kind === 'conversation' ? '交谈日期' : '记录日期',
           { type: 'date', value: today(ctx), max: today(ctx) }),
-        memo('text', kind === 'conversation' ? '长者自述与谈话记录' : '健康情况', true, {
+        memo('text', kind === 'conversation' ? '长辈自述与谈话记录' : '健康情况', true, {
           maxLength: 1600, value: kind === 'intro' ? data.intro?.text || '' : '',
         }),
       ],
@@ -83,7 +83,7 @@ export function healthProfile(ctx, person, {compact = false} = {}) {
     const choice = await ctx.confirmChange({
       title: '整理本人的健康简介', target: name, confirmLabel: '生成草稿',
       fields: [['读取范围', '此人的登记介绍、本人健康谈话、已核对的就诊记录和病史'],
-        ['提交至 DeepSeek', '发送该档案的健康摘录，用于撰写最多三条健康要点。']],
+        ['发送范围', '仅向机构配置的云端模型发送该档案的健康摘录，用于撰写最多三条健康要点。']],
     });
     if (!choice || !panel.isConnected) return;
     button.disabled = true;

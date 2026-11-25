@@ -114,7 +114,7 @@ def draft(db, state, actor, receiver, resident_id, today):
     access.require(actor, "care")
     allowed = shared_residents(db, state, actor, receiver)
     if resident_id and resident_id not in allowed:
-        raise PermissionError("所选长者超出双方可交接的在住范围")
+        raise PermissionError("所选长辈超出双方可交接的在住范围")
     names = {r["id"]: r["name"] for r in state["residents"] if r["id"] in allowed}
     aliases = {
         name
@@ -201,7 +201,7 @@ def create(db, state, payload, actor, now, policy=None):
         "draftStamp",
     }:
         raise ValueError("交班表单含有未知字段")
-    resident_id = text_field(payload.get("residentId"), "长者编号", limit=100)
+    resident_id = text_field(payload.get("residentId"), "长辈编号", limit=100)
     if resident_id:
         get_resident(state, resident_id)
     receiver = None
@@ -226,7 +226,7 @@ def create(db, state, payload, actor, now, policy=None):
         if not resident_id or resident_id not in shared_residents(
             db, state, actor, receiver
         ):
-            raise PermissionError("请选择双方有权交接的在住长者")
+            raise PermissionError("请选择双方有权交接的在住长辈")
     counts = (
         generated["snapshot"]
         if generated

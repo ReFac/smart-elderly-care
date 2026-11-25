@@ -188,7 +188,7 @@ def _save_event(db, state, user, payload, now):
         db, state, user, p["campusId"], p["roomId"], p["day"]
     )
     if not people:
-        raise ValueError("所选区域及日期没有可登记的在院长者")
+        raise ValueError("所选区域及日期没有可登记的在院长辈")
     scope = sha256(json.dumps(sorted(r["id"] for r in rooms)).encode()).hexdigest()
     duplicate = db.execute(
         """SELECT 1 FROM daily_life_events
@@ -280,7 +280,7 @@ def confirm(db, state, user, p, now):
     _staff(user, "care.groupConfirm")
     now = now.astimezone(LOCAL)
     if not isinstance(p, dict) or p.get("confirmed") is not True:
-        raise ValueError("请确认实际参加本次活动的长者名单")
+        raise ValueError("请确认实际参加本次活动的长辈名单")
     ids = p.get("residentIds")
     if (
         not isinstance(ids, list)
@@ -322,7 +322,7 @@ def confirm(db, state, user, p, now):
         or intake.keys() - selected
         or (intake and e["kind"] not in MEALS)
     ):
-        raise ValueError("仅可为参加本餐的长者填写实际进食情况")
+        raise ValueError("仅可为参加本餐的长辈填写实际进食情况")
     intake = {
         rid: text_field(intake.get(rid), "个人实际进食", limit=300) for rid in selected
     }
@@ -347,7 +347,7 @@ def confirm(db, state, user, p, now):
             (e["day"], e["kind"], json.dumps(ids)),
         ).fetchone()
     ):
-        raise ValueError("名单中已有长者签认了当天这顿饭，请对照个人记录并排除重复者")
+        raise ValueError("名单中已有长辈签认了当天这顿饭，请对照个人记录并排除重复者")
     _save_attendance(db, user, now, event_id, e["kind"], e["day"], intake)
     cancel_duplicate_meals(state, event_id, e["kind"], e["day"], selected, now)
     return f"已核对{e['kind']}实际参加 {len(ids)} 人，排除 {len(guests) - len(ids)} 人"

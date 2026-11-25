@@ -7,7 +7,7 @@ const personName = (ctx, row) => residentLabel(ctx, row.residentId);
 function show(ctx, row) {
   const target = personName(ctx, row);
   const details = facts([
-    ['长者', target],
+    ['长辈', target],
     ['未入住原因', row.reason],
     ['回访人员', staffLabel(ctx, row.assignee, row.assigneeId)],
     ['派发人', staffLabel(ctx, row.assignedByName, row.assignedBy)],
@@ -73,7 +73,7 @@ export function trialFollowups(ctx) {
       matches: (r, choice) => choice === '待我回访' ? mine(ctx, r) : r.status === choice,
     },
     cols: [
-      { label: '长者', view: r => named(residentAnchor(ctx, r.residentId), r.reason) },
+      { label: '长辈', view: r => named(residentAnchor(ctx, r.residentId), r.reason) },
       { label: '回访人员', view: r => staffLabel(ctx, r.assignee, r.assigneeId) },
       { label: '计划回访日', view: r => r.dueDate },
       { label: '进度', view: r => badge(ctx, r.status, r.report ? 'green' : 'amber') },

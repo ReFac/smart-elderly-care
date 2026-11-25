@@ -39,7 +39,7 @@ class CampusTests(unittest.TestCase):
             bedCount=1,
         )
         self.east_bed = self.store.snapshot(self.owner)["data"]["beds"][-1]["id"]
-        self.cmd(self.owner, "care.register", campusId=self.east, name="分院长者")
+        self.cmd(self.owner, "care.register", campusId=self.east, name="分院长辈")
         self.rid = self.store.snapshot(self.owner)["data"]["residents"][-1]["id"]
         self.cmd(self.owner, "care.admit", bedId=self.east_bed, residentId=self.rid)
         self.staff, self.employee = self.create("east-nurse", self.east)
@@ -164,7 +164,7 @@ class CampusTests(unittest.TestCase):
 
     def test_room_search_preserves_both_charts_for_identically_named_residents(self):
         for rid in ("r001", "r002"):
-            self.cmd(self.owner, "dossier.profile", residentId=rid, name="同名陈长者")
+            self.cmd(self.owner, "dossier.profile", residentId=rid, name="同名陈长辈")
         reopened = Store(self.store.path)
         results = reopened.facility_resource(self.owner, "search", q="同名陈")[
             "results"
@@ -173,8 +173,8 @@ class CampusTests(unittest.TestCase):
         self.assertCountEqual(
             results[0]["matchedResidents"],
             [
-                {"id": "r001", "name": "同名陈长者", "bedLabel": "101-01"},
-                {"id": "r002", "name": "同名陈长者", "bedLabel": "101-02"},
+                {"id": "r001", "name": "同名陈长辈", "bedLabel": "101-01"},
+                {"id": "r002", "name": "同名陈长辈", "bedLabel": "101-02"},
             ],
         )
 
@@ -374,7 +374,7 @@ class CampusTests(unittest.TestCase):
             buildingId=self.building,
             name="护理楼",
         )
-        updated = self.store.facility_resource(self.staff, "search", q="分院长者")[
+        updated = self.store.facility_resource(self.staff, "search", q="分院长辈")[
             "results"
         ][0]
         self.assertEqual(initial["roomId"], updated["roomId"])

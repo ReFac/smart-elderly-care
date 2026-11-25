@@ -216,7 +216,7 @@ def quote_bill(state, payload, today):
     cycle = billing_cycles.selected_period(resident, payload, today)
     resident_bills = (b for b in state["bills"] if b["residentId"] == resident["id"])
     if billing_cycles.billed(resident_bills, cycle):
-        raise ValueError("该长者本账期已有账单")
+        raise ValueError("该长辈本账期已有账单")
     begin, end = parse_day(cycle["startDate"]), parse_day(cycle["endDate"])
     days = (end - begin).days + 1
     parts, bed_total, care_total, leave = charge_segments(

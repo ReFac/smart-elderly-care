@@ -73,7 +73,7 @@ def inspect(db, revision, action, actor, rid):
         return
     if domain == "档案与床位":
         if not meta:
-            raise ValueError("操作未关联长者档案")
+            raise ValueError("操作未关联长辈档案")
         occupied = [
             r[0]
             for r in db.execute(
@@ -112,7 +112,7 @@ def inspect(db, revision, action, actor, rid):
         checks.append("已逐项核对分项合计、实收与待缴余额")
     elif domain == "收款核销":
         if not meta:
-            raise ValueError("收款凭证缺少对应长者档案")
+            raise ValueError("收款凭证缺少对应长辈档案")
         bills = {}
 
         def owned(collection):
@@ -148,7 +148,7 @@ def inspect(db, revision, action, actor, rid):
                     row, "depositAmount"
                 ) != money(row, "amount"):
                     raise ValueError("到账凭证的账单核销与转预交金额不符")
-        checks.append("已核对长者账单余额、预交结余及本次渠道凭证关系")
+        checks.append("已核对长辈账单余额、预交结余及本次渠道凭证关系")
     elif domain == "长护险":
         from ..long_care import ALLOWED, STAGES
 
@@ -231,7 +231,7 @@ def inspect(db, revision, action, actor, rid):
             # Self-service relative updates may refer to the signed-in portal account.
             if action != "dossier.relative" or actor.get("kind") != "family":
                 raise ValueError("操作未关联业务档案")
-        checks.append("已核对经办记录与长者档案的关联")
+        checks.append("已核对经办记录与长辈档案的关联")
     db.execute(
         "INSERT INTO history_agent_checks VALUES(?,?,?)",
         (revision, domain, json.dumps(checks, ensure_ascii=False)),

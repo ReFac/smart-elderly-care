@@ -3,7 +3,7 @@ import { openMedicationRound } from './med-rounds.js';
 import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import {
   allocate, billingSchedule, bindContractFields, contractFields, historicInquiries,
-  isTrial, register, registry, statusLabel,
+  isTrial, labelBedStay, register, registry, statusLabel,
 } from './admission.js';
 import { goToRoom, roomsPage } from './rooms.js';
 import { roomTypeLabel } from './room-vector.js';
@@ -150,7 +150,7 @@ export function profile(ctx, row, lifeEvent) {
   if (lifeEvent) return openDossier(ctx, row, lifeEvent);
   const basic = [
     ['年龄 / 性别', [row.age == null ? '' : row.age + ' 岁', row.gender].filter(Boolean).join(' · ')],
-    ['床位', row.bedId ? bedName(ctx, row.bedId) : '未分配'],
+    ['床位', row.bedId ? labelBedStay(bedName(ctx, row.bedId), row) : '未分配'],
     ['入住日期', row.admittedAt],
     ['联系方式', row.contact],
   ].filter(([, value]) => value);
@@ -161,13 +161,13 @@ export function profile(ctx, row, lifeEvent) {
     row.status === '在住' && hasGrant(ctx, 'care', 'clinical')
       ? residentInsights(ctx, row.id, {compact: true}) : null,
   ]);
-  const dialog = ctx.detail('长者简易档案', summary);
+  const dialog = ctx.detail('长辈简易档案', summary);
   const head = dialog.querySelector('.dialog-head');
   const open = btn(ctx, '打开详细档案', () => {
     const live = ctx.current?.() || ctx;
     const resident = live.state.residents.find(person => person.id === row.id);
     if (resident) openDossier(live, resident);
-    else ctx.toast('该长者档案未开放或已失效');
+    else ctx.toast('该长辈档案未开放或已失效');
   }, 'primary');
   open.classList.add('resident-brief-open');
   head.insertBefore(open, head.lastElementChild);
@@ -229,7 +229,7 @@ export function residencyDetails(ctx, row) {
   if (hasGrant(ctx, 'residents', 'intake', 'care')) {
     const stay = [
       ['入住日期', row.admittedAt],
-      ['床位', row.bedId ? bedName(ctx, row.bedId) : '未分配'],
+      ['床位', row.bedId ? labelBedStay(bedName(ctx, row.bedId), row) : '未分配'],
       ...(row.admittedAt ? [
         ['入住方式', row.stayType === 'trial' ? '试住' : '正式入住'],
         ...(row.formalizedAt ? [['转正日期', row.formalizedAt]] : []),
@@ -323,9 +323,9 @@ function renewalSection(ctx, open) {
     title: '续住提醒',
     rows,
     empty: '当前没有需要核对的续住事项。',
-    search: { placeholder: '搜索长者姓名', value: (r) => residentLabel(ctx, r) },
+    search: { placeholder: '搜索长辈姓名', value: (r) => residentLabel(ctx, r) },
     cols: [
-      { label: '长者', view: (r) => residentAnchor(ctx, r) },
+      { label: '长辈', view: (r) => residentAnchor(ctx, r) },
       { label: '合同到期', view: (r) => r.endDate || '无期限' },
       { label: '提醒原因', view: (r) => named(
         renewalReasons[r.renewalReminder.reason], r.renewalReminder.at,
@@ -347,10 +347,7 @@ export function residents(ctx) {
     ? disclosure('试住回访', trialFollowups(ctx), rows.filter(r => r.status === '待回访').length) : null;
   if (followups) followups.open = showFollowups;
   const renewal = renewalSection(ctx, view === 'renew');
-  const actions = choose(
-    canAct(ctx, 'care.admit') ? btn(ctx, '办理试住', () => allocate(ctx, null, null, 'trial')) : null,
-    canAct(ctx, 'care.register') ? btn(ctx, '新建长者档案', () => register(ctx), 'primary') : null,
-  );
+  const actions = canAct(ctx, 'care.register') ? btn(ctx, '新建长辈档案', () => register(ctx), 'primary') : null;
   const list = registry(ctx, {
     workbenchStatus: view || 'pending',
     onStatusChange: status => selectTab('residents', status),
@@ -359,7 +356,7 @@ export function residents(ctx) {
     ctx,
     '入住管理',
     '',
-    actions.childElementCount ? actions : null,
+    actions,
     node('div', 'fx-profile', [
       view === 'renew' ? renewal : null,
       view === 'followups' ? followups : null,
@@ -447,7 +444,7 @@ function allBeds(ctx) {
   const search = node('input', 'fx-input');
   search.type = 'search';
   search.maxLength = 64;
-  search.placeholder = '搜索长者姓名、房号或床号';
+  search.placeholder = '搜索长辈姓名、房号或床号';
   search.setAttribute('aria-label', search.placeholder);
   search.value = view.query;
   const building = node('select', 'fx-input');
@@ -572,10 +569,9 @@ function allBeds(ctx) {
     const available = bed.status === '空闲';
     const canAdmit = available && canAct(ctx, 'care.admit');
     const button = node('button', 'fx-bed ' + (available ? 'available' : 'occupied'), [
-      node('strong', '', bed.label),
+      node('strong', '', labelBedStay(bed.label, person)),
       node('span', '', person ? residentLabel(ctx, person) : available ? '空闲床位' : '已入住'),
-      node('small', '', person && isTrial(person) ? ['试住中', person.level].filter(Boolean).join(' · ')
-        : person?.level || (canAdmit ? '可办理入住' : bed.status)),
+      node('small', '', person?.level || (canAdmit ? '可办理入住' : bed.status)),
     ]);
     button.type = 'button';
     button.disabled = !person && !canAdmit;

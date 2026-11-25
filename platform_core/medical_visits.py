@@ -50,7 +50,7 @@ def init(db):
             NOT EXISTS(SELECT 1 FROM dossier_visit_records WHERE id=new.visit_id AND resident_id=new.resident_id
                 AND json_extract(metadata,'$.parentVisitId') IS NULL)
             OR NOT EXISTS(SELECT 1 FROM dossier_documents WHERE id=new.document_id AND resident_id=new.resident_id)
-        BEGIN SELECT RAISE(ABORT,'文书与原就诊病例必须属于同一位长者'); END""")
+        BEGIN SELECT RAISE(ABORT,'文书与原就诊病例必须属于同一位长辈'); END""")
     for table in ("dossier_visit_originals", "dossier_visit_records", "dossier_visit_documents"):
         for op in ("UPDATE", "DELETE"):
             db.execute(f"""CREATE TRIGGER IF NOT EXISTS {table}_no_{op} BEFORE {op}
@@ -92,7 +92,7 @@ def _attachments(items, mode):
         or len(items) > MAX_FILES
         or (mode == "ai" and not items)
     ):
-        raise ValueError("一次只能整理同一位长者的一组就诊资料，最多 12 份")
+        raise ValueError("一次只能整理同一位长辈的一组就诊资料，最多 12 份")
     files, seen, size = [], set(), 0
     for item in items:
         if not isinstance(item, dict) or item.keys() != {
@@ -142,7 +142,7 @@ def _root_visit(db, rid, visit_id):
         (visit_id, rid),
     ).fetchone()
     if not row:
-        raise FileNotFoundError("找不到属于这位长者的原就诊记录")
+        raise FileNotFoundError("找不到属于这位长辈的原就诊记录")
     return json.loads(row[0])
 
 
@@ -165,7 +165,7 @@ def _attach_document(db, rid, visit_id, document_id, actor, now):
     if not db.execute(
         "SELECT 1 FROM dossier_documents WHERE id=? AND resident_id=?", (document_id, rid)
     ).fetchone():
-        raise FileNotFoundError("找不到属于这位长者的医疗文书")
+        raise FileNotFoundError("找不到属于这位长辈的医疗文书")
     current = db.execute(
         "SELECT visit_id FROM dossier_visit_documents WHERE document_id=?", (document_id,)
     ).fetchone()
@@ -280,7 +280,7 @@ def preview(store, token, rid, p):
         raise ValueError("请核对本组就诊资料")
     mode = p.get("mode")
     if mode not in ("ai", "manual") or (mode == "ai" and p.get("consent") is not True):
-        raise ValueError("请确认将一位长者同一次就诊的资料提交 DeepSeek 整理")
+        raise ValueError("请确认将一位长辈同一次就诊的原件提交识别，识别文字交由机构的云端模型整理")
     request = dossier.text(p, "requestId", 100, True)
     if not re.fullmatch(r"[a-zA-Z0-9._-]{1,100}", request):
         raise ValueError("就诊请求编号无效")
@@ -307,7 +307,7 @@ def preview(store, token, rid, p):
         db.execute("BEGIN IMMEDIATE")
         actor, name, revision = _session(store, db, token, rid)
         if type(p.get("revision")) is not int or p["revision"] != revision:
-            raise Conflict("档案已更新，请重新核对所选长者后继续")
+            raise Conflict("档案已更新，请重新核对所选长辈后继续")
         draft = _stage(
             db,
             rid,
@@ -327,7 +327,7 @@ def preview(store, token, rid, p):
         def authorize(db, session):
             user, current_name, _ = _session(store, db, session, rid)
             if user["id"] != actor["id"] or current_name != name:
-                raise PermissionError("经办人或长者身份发生变化，请重新核对")
+                raise PermissionError("经办人或长辈身份发生变化，请重新核对")
             return user
 
         result = {
@@ -355,7 +355,7 @@ def preview(store, token, rid, p):
         db.execute("BEGIN")
         actor, current_name, revision = _session(store, db, token, rid)
         if current_name != name:
-            raise ValueError("长者姓名已更新，请重新核对本组资料")
+            raise ValueError("长辈姓名已更新，请重新核对本组资料")
         ready = db.execute(
             "SELECT result FROM dossier_visit_drafts WHERE id=? AND actor=?",
             (did, actor["id"]),
@@ -387,7 +387,7 @@ def confirm(db, state, p, user, now):
     person = _authorize(state, db, user, rid)
     result = json.loads(draft["result"])
     if person["name"] != draft["resident_name"] or result["identityConflict"]:
-        raise ValueError("就诊资料与所选长者或就诊时间不一致，请重新分组")
+        raise ValueError("就诊资料与所选长辈或就诊时间不一致，请重新分组")
     attachments = json.loads(draft["attachments"])
     parent_id = result.get("parentVisitId", "")
     fixed_date = result.get("fixedDate", "")
@@ -433,7 +433,7 @@ def confirm(db, state, p, user, now):
     return (
         "已签认补充资料并关联原就诊病例"
         if parent_id
-        else "已将本次就诊病例签认并归入长者档案"
+        else "已将本次就诊病例签认并归入长辈档案"
     )
 
 

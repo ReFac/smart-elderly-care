@@ -5,7 +5,7 @@ import json
 from uuid import uuid4
 
 from .. import access, history, provider, rounds
-from . import deepseek, token_receipt
+from . import completions, deepseek, token_receipt
 
 CHECKS = {
     "past_due": "先核对已过计划时刻的工单，确认有无漏记或仍需跟进。",
@@ -90,7 +90,7 @@ def generate(store, token, rid, data, *, transport=None):
         or set(data) - {"reportId", "confirmed", "revision", "comment"}
         or data.get("confirmed") is not True
     ):
-        raise ValueError("请确认将核对类别发送至 DeepSeek 并使用机构额度")
+        raise ValueError("请确认将核对类别发送至机构的云端模型并使用机构额度")
     comment = history.comment_text(data.get("comment", ""))
     now = store.now()
     with closing(store.connect()) as db, db:
@@ -120,10 +120,10 @@ def generate(store, token, rid, data, *, transport=None):
             "stream": False,
         }
         plan = provider.latest(db)
-        hold = len(json.dumps(body["messages"]).encode()) + body["max_tokens"] + 128
+        hold = len(json.dumps(body["messages"]).encode()) + completions.output_budget(body) + 128
         if sum(provider.usage(db, plan["id"])) + hold > plan["tokenLimit"]:
             raise ValueError("本期套餐可用额度不足")
-        key = provider.read_key()
+        key = provider.read_model_key()
         request = "rounds/" + uuid4().hex
         db.execute(
             """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance,feature)
@@ -147,14 +147,14 @@ def generate(store, token, rid, data, *, transport=None):
             db,
             now,
             "rounds.prioritize",
-            "确认 DeepSeek 对照护核对项排序",
+            "确认云端模型对照护核对项排序",
             actor,
             state,
             rid,
             comment,
         )
     result = deepseek.complete(
-        transport or deepseek.send, key, body, codes, allowance=hold
+        transport or completions.send, key, body, codes, allowance=hold
     )
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
@@ -194,9 +194,9 @@ def generate(store, token, rid, data, *, transport=None):
             db,
             store.now(),
             "rounds.priorityResult",
-            "DeepSeek 核对项排序已生成"
+            "云端核对项排序已生成"
             if result.status == "ok"
-            else "DeepSeek 核对项排序未完成",
+            else "云端核对项排序未完成",
             rounds.AGENT,
             state,
             rid,

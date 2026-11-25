@@ -357,7 +357,7 @@ class ChatTests(unittest.TestCase):
         cases = [
             ("入住管理在哪里？", "residents", None),
             ("在哪里办理老人入住？", "residents", "all"),
-            ("哪里办理试住？", "residents", "trials"),
+            ("哪里办理试住？", "residents", "notAdmitted"),
             ("我的试住回访入口在哪里？", "residents", "followups"),
             ("试住默认价在哪里修改？", "settings", "trials"),
             ("在哪里核算月付账单？", "billing", "due"),

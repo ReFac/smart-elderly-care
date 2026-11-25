@@ -18,10 +18,10 @@ def cite_records(source, label, rows, value):
 def care_review(state, payload, today):
     resident = get_resident(state, payload)
     if resident["status"] != "在住":
-        raise ValueError("照护建议仅适用于在住长者")
+        raise ValueError("照护建议仅适用于在住长辈")
     rid = resident["id"]
     descriptions = [f"档案护理等级为{resident['level']}。"]
-    evidence = [cite_records("residents", "长者档案", [resident], resident["level"])]
+    evidence = [cite_records("residents", "长辈档案", [resident], resident["level"])]
     assessments = [
         a
         for a in state.get("assessments", [])
@@ -65,7 +65,7 @@ def care_review(state, payload, today):
 def care_suggestion(state, payload, today):
     resident = get_resident(state, payload)
     if resident["status"] != "在住":
-        raise ValueError("照护建议仅适用于在住长者")
+        raise ValueError("照护建议仅适用于在住长辈")
     return draft(state, resident, today, cite_records)
 
 

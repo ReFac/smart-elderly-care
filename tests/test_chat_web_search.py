@@ -11,7 +11,7 @@ from urllib.error import URLError
 
 from platform_core import provider
 from platform_core.agents import chat, chat_scope
-from platform_core.provider import deepseek, web_search
+from platform_core.provider import connection, deepseek, web_search
 from platform_core.store import Conflict, Store, TIMEZONE
 
 
@@ -121,6 +121,26 @@ class NetworkChatTests(unittest.TestCase):
         self.search.assert_called_once()
         self.classify.assert_called_once()
         self.assertEqual(self.store.version(self.token)["revision"], 0)
+
+    def test_alternate_model_keeps_the_search_provider_credential_separate(self):
+        with (
+            patch.dict("os.environ", {
+                "NH_CHAT_PROVIDER": "openai", "NH_CHAT_MODEL": "openai-fixture", "OPENAI_API_KEY": "different-fixture",
+            }),
+            patch.object(connection, "json_request", side_effect=[
+                self.response(json.dumps({"query": self.topic}, ensure_ascii=False)),
+                self.response(self.answer),
+            ]) as remote,
+        ):
+            result = chat.reply(self.store, self.token, {
+                "requestId": "separate-keys", "text": "河南长期护理保险公开政策有哪些？", "webSearch": True,
+            })
+        self.assertTrue(result["messages"][-1]["webSearched"])
+        self.search.assert_called_once_with("unit-test-credential", self.topic)
+        self.classify.assert_not_called()
+        self.assertEqual(remote.call_count, 2)
+        for call in remote.call_args_list:
+            self.assertEqual(call.args[2]["Authorization"], "Bearer different-fixture")
 
     def test_business_actions_private_names_and_internal_identifiers_do_not_search(
         self,

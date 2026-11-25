@@ -1,4 +1,4 @@
-"""DeepSeek Chat Completions usage, independent of the response's business validity."""
+"""Normalized chat completion usage, independent of the response's business validity."""
 
 from dataclasses import dataclass
 
@@ -53,6 +53,8 @@ def read(response, limit):
     )
     if "prompt_cache_hit_tokens" not in fields:
         cached = alternative
+    if "prompt_cache_miss_tokens" not in fields and cached is not None and prompt is not None and cached <= prompt:
+        uncached = prompt - cached
     input_limit = prompt if prompt is not None else total - (output or 0)
     split_total = (cached or 0) + (uncached or 0)
     if (

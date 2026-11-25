@@ -1,7 +1,9 @@
 import { residentLabel, staffLabel } from './people-labels.js';
 import { groups } from '../lib/navigation.js';
+import { colorModeControl } from '../lib/color-mode.js';
 import { openEmployment } from './staff-employment.js';
 import { bindFlow, passwordFlow } from './identity.js';
+import { passkeyButton, passkeySettings } from './passkeys.js';
 import { canAct, node, page } from './shared.js';
 import { canOpenPermissionRequests, openPermissionRequests } from './permission-requests.js';
 
@@ -16,7 +18,7 @@ function identity(ctx) {
   ];
   if (user.kind === 'family') {
     const resident = residents.find((r) => r.id === user.residentId);
-    if (resident) details.push(['绑定长者', residentLabel(ctx, resident)]);
+    if (resident) details.push(['绑定长辈', residentLabel(ctx, resident)]);
   } else if (ctx.state.signatureRealName || canAct(ctx, 'permissionRequest.review')) {
     details.push(['签名实名', ctx.state.signatureRealName || '待 Owner 登记']);
   }
@@ -36,6 +38,7 @@ function identity(ctx) {
   if (canAct(ctx, passwordAction))
     card.append(ctx.ui.button('修改密码', () => passwordFlow({username:user.username, locked:true}), 'secondary', 'shield'));
   card.append(ctx.ui.button('验证联系方式',()=>bindFlow(ctx),'secondary'));
+  card.append(passkeyButton('通行密钥（Passkey）', passkeySettings));
   if (user.kind === 'staff')
     card.append(ctx.ui.button('我的劳动合同与工资日', () => openEmployment(ctx, user), 'secondary'));
   const channels=(ctx.state.identityContacts||[]).map(c=>c.masked+(c.verified?'（已核实）':'（待激活）'));
@@ -51,7 +54,7 @@ function moduleLinks(ctx, allowed) {
       if (id === 'account' || !allowed.has(id)) continue;
       const anchor = node('a', 'personal-module-link', [
         ctx.ui.icon(icon, 17),
-        node('span', '', id === 'family' && ctx.state.user.portalSelf ? '长者服务' : label),
+        node('span', '', id === 'family' && ctx.state.user.portalSelf ? '长辈服务' : label),
         ctx.ui.icon('chevron', 13),
       ]);
       anchor.href = '#' + id;
@@ -98,7 +101,7 @@ export function accountCenter(ctx) {
     ctx,
     '个人中心',
     '',
-    null,
+    colorModeControl(),
     identity(ctx),
     node('div', 'personal-layout', [moduleLinks(ctx, new Set(routes)), grants]),
   );

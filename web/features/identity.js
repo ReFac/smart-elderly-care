@@ -4,7 +4,7 @@ import { node } from './shared.js';
 const names = { email: '邮箱', sms: '手机' };
 const labels = (items) => items.map((key) => [key, names[key]]);
 
-async function api(path, body) {
+export async function api(path, body) {
   const response = await fetch(
     '/api/auth/' + path,
     body === undefined
@@ -20,7 +20,7 @@ async function api(path, body) {
   return result;
 }
 
-function wizard(title) {
+export function wizard(title) {
   const form = node('form', 'access-form');
   const dialog = detail(title, form);
   const error = node('p', 'form-error');
@@ -54,7 +54,7 @@ function wizard(title) {
   return { step, message, dialog };
 }
 
-function field(name, title, type, opts = {}) {
+export function field(name, title, type, opts = {}) {
   const input = node(type === 'select' ? 'select' : 'input');
   input.name = name;
   input.required = true;
@@ -98,7 +98,7 @@ export async function passwordFlow({ username = '', locked = false } = {}) {
       async (v) => {
         const { challenge } = await api('code', { ...v, purpose: 'password' });
         view.step(
-          '如账号已登记此渠道，请在 10 分钟内输入收到的验证码。确认后，原有登录会话将结束。',
+          '如账号已登记此渠道，请在 10 分钟内输入收到的验证码。确认后，原有登录会话和通行密钥将失效。',
           [
             field('code', '8 位验证码', 'text'),
             field('newPassword', '新密码（10 至 128 字符）', 'password'),
@@ -122,6 +122,35 @@ export async function passwordFlow({ username = '', locked = false } = {}) {
   } catch (e) {
     view.message(e.message);
   }
+}
+
+export function sendPasswordReset(account) {
+  const view = wizard('发送密码重置链接');
+  view.step(
+    '将链接发给 ' + account.displayName + '（' + account.username + '）。账号本人通过链接设置新密码，链接在 10 分钟内有效。',
+    [],
+    '确认发送',
+    async () => {
+      const result = await api('reset-link/send', { id: account.id });
+      view.message('已发送至' + names[result.channel] + ' ' + result.masked + '。');
+    },
+  );
+}
+
+export function redeemPasswordReset(token, setUsername) {
+  const view = wizard('设置新密码');
+  view.step(
+    '请输入本人用于登录的新密码。保存后，原有登录会话和通行密钥将失效。',
+    [field('newPassword', '新密码（10 至 128 字符）', 'password'),
+     field('repeat', '确认新密码', 'password')],
+    '确认设置密码',
+    async ({ newPassword, repeat }) => {
+      if (newPassword !== repeat) throw Error('两次输入的新密码不一致');
+      const { username } = await api('reset-link/redeem', { token, newPassword });
+      setUsername(username);
+      view.message('密码已设置。你的登录名是 ' + username + '。关闭此窗口即可使用新密码登录。');
+    },
+  );
 }
 
 export function bindFlow(ctx) {

@@ -70,7 +70,7 @@ def verify_proposal(store, db, token, user, command, payload):
     if area and (
         route != "care" or payload.get("residentId") not in area["residentIds"]
     ):
-        raise PermissionError("请选择本次对话区域中的长者")
+        raise PermissionError("请选择本次对话区域中的长辈")
 
 
 def source_reference(state, payload, user):

@@ -127,6 +127,18 @@ class AccountPermissions(unittest.TestCase):
                 self.owner,
             )
 
+    def test_legacy_resident_role_keeps_portal_scope_and_uses_new_label(self):
+        resident_id = self.state["residents"][0]["id"]
+        token, resident = self.create(
+            "resident-portal", kind="family", residentId=resident_id,
+            portalSelf=True, portalScopes=["personalHealth"],
+        )
+        self.db.execute("UPDATE accounts SET role=? WHERE id=?", ("入住长者", resident["id"]))
+        public = access.authenticate(self.db, token)
+        self.assertTrue(public["portalSelf"])
+        self.assertEqual(public["role"], "入住长辈")
+        self.assertEqual(public["portalScopes"], ["personalHealth"])
+
     def test_employee_cannot_promote_self_or_read_unrelated_fields(self):
         _, staff = self.create()
         with self.assertRaises(PermissionError):

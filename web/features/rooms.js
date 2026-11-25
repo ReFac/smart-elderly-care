@@ -4,7 +4,7 @@ import { roomTasks } from './agent-runs.js';
 import { careTimeline, scopedHistoryButton } from './care-timeline.js';
 import { active, canAct, node, page } from './shared.js';
 import { admit, profile } from './residency.js';
-import { isTrial } from './admission.js';
+import { labelBedStay } from './admission.js';
 import { chooseAdmin, editRoom, editLayout } from './room-admin.js';
 import { roomVector, drawRooms } from './room-vector.js';
 import { openFacilityTour } from './room-tour.js';
@@ -44,9 +44,9 @@ function scopedAgent(ctx, place, label) {
 function searchBox(ctx, openRoom, campusId) {
   const search = node('input', '');
   search.type = 'search';
-  search.placeholder = '搜索长者姓名或房号';
+  search.placeholder = '搜索长辈姓名或房号';
   search.maxLength = 64;
-  search.setAttribute('aria-label', '搜索长者姓名或房号');
+  search.setAttribute('aria-label', '搜索长辈姓名或房号');
   const matches = node('div', 'room-matches');
   matches.hidden = true;
   const form = node('form', 'room-search', [
@@ -75,7 +75,7 @@ function searchBox(ctx, openRoom, campusId) {
       const result = await lookup(ctx, '/search', { q: term, limit: 12, campusId });
       if (ticket !== generation || !form.isConnected) return;
       const list = node('div', 'room-matches-list');
-      if (!result.results.length) list.append(statusText('没有匹配的长者或房间'));
+      if (!result.results.length) list.append(statusText('没有匹配的长辈或房间'));
       for (const room of result.results) {
         const text = room.matchedNames.length ? room.matchedNames.join('、') : room.roomType || '房间';
         const entry = button(
@@ -98,8 +98,8 @@ function searchBox(ctx, openRoom, campusId) {
           const person = ctx.state.residents.find(r => r.id === hit.id);
           if (!person) return null;
           const anchor = residentAnchor(ctx, person);
-          anchor.title = '打开长者档案 · ' + hit.bedLabel;
-          return node('div', 'room-direct-profile', [anchor, node('small', '', ' · ' + hit.bedLabel)]);
+          anchor.title = '打开长辈档案 · ' + hit.bedLabel;
+          return node('div', 'room-direct-profile', [anchor, node('small', '', ' · ' + labelBedStay(hit.bedLabel, person))]);
         });
         list.append(node('div', 'room-match-row', [entry, ...people]));
       }
@@ -276,7 +276,7 @@ function roomDetails(ctx, room, canRead, highlighted, openTour) {
     const body = [
       ctx.ui.icon('bed', 18),
       node('span', '', [
-        node('small', '', bed.label + ' 床' + (resident && isTrial(resident) ? ' · 试住中' : '')),
+        node('small', '', labelBedStay(bed.label + ' 床', resident)),
         node('strong', '', name)
       ]),
       resident || allocatable ? ctx.ui.icon('chevron', 14) : null,
@@ -347,7 +347,7 @@ export function roomsPage(ctx, embedded=false) {
   const root = embedded ? node('section','room-page',[controls,stage]) : page(
     ctx,
     '房间工作台',
-    '选择分院、楼栋和楼层，可通过平面图、房号或长者姓名定位房间。',
+    '选择分院、楼栋和楼层，可通过平面图、房号或长辈姓名定位房间。',
     controls,
     stage
   );

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>DeepSeek 用量界面检查</title>
+  <title>AI 用量界面检查</title>
   <link rel="stylesheet" href="../../web/style.css">
   <link rel="stylesheet" href="../../web/features.css">
   <link rel="stylesheet" href="../../web/access.css">
@@ -93,7 +93,7 @@
 
     try {
       render();
-      click('查看 DeepSeek 用量');
+      click('查看 AI 用量');
       await wait(() => text().includes('18,430'), '套餐入口和已用 Token');
       verify(text().includes('1 次模型调用缺少缓存细项') && text().includes('11,800'), '已知与缺失回执并存');
       click('按员工');

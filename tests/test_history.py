@@ -79,7 +79,7 @@ class ChangeHistory(unittest.TestCase):
             "dossier.profile",
             residentId=self.rid,
             name=self.name,
-            comment="长者核对常住地址",
+            comment="长辈核对常住地址",
             address="甲路",
         )
         b = self.do(
@@ -90,7 +90,7 @@ class ChangeHistory(unittest.TestCase):
             ("dossier_profiles", "basic/address", "甲路"),
             tuple(first["changes"][0][k] for k in ("collection", "field", "after")),
         )
-        self.assertEqual(first["comment"], "长者核对常住地址")
+        self.assertEqual(first["comment"], "长辈核对常住地址")
         self.assertTrue(first["undoable"])
         undone = self.undo(a)
         self.assertEqual(self.store.history_change(self.owner, a)["undoneBy"], undone)

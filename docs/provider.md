@@ -1,6 +1,6 @@
 # 平台托管的 AI 套餐
 
-机构按套餐使用 DeepSeek 对话、业务建议、长者巡查和经办复核。运营方核验收款后发放模型 token、OCR 页数及 ASR 秒数。[识别工具](media.md)
+机构按套餐使用云端对话、业务建议、长辈巡查和经办复核。套餐计量包括模型 token、OCR 页数、ASR 录音秒数和朗读字符数。[识别与语音服务](media.md)
 
 ## 谁可以做什么
 
@@ -13,10 +13,23 @@
 
 对外销售采用平台托管服务。每个客户对应独立机构数据库，客户使用浏览器、Electron 或手机入口。供应商密钥在平台后端，机构客户端只持有受限的登录会话。将整个后端、数据库管理员权限及密钥交由客户控制的私有化部署，应另行实施平台托管的计量网关。
 
+## 选择服务商
+
+平台运营方在服务进程环境中设置 `NH_CHAT_PROVIDER` 并重启服务。切换适用于健康助理、业务摘要、巡查、工单建议和相关文字整理。同一进程使用一个对话配置。Owner 在「机构设置」查看当前服务商、模型和套餐用量。
+
+| `NH_CHAT_PROVIDER` | `NH_CHAT_MODEL` | 服务端凭据变量 | 参考 |
+| --- | --- | --- | --- |
+| `deepseek`（默认） | 固定 `deepseek-flash` | `DEEPSEEK_API_KEY`、运维密库或私有密钥文件 | [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) |
+| `openai` | 由运营方填写可用的 Chat Completions 模型 ID | `OPENAI_API_KEY` | [OpenAI API](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) |
+| `anthropic` | 由运营方填写可用的 Claude 模型 ID | `ANTHROPIC_API_KEY` | [Anthropic Messages](https://platform.claude.com/docs/en/api/messages/create) |
+| `google` | 由运营方填写可用的 Gemini 模型 ID | `GEMINI_API_KEY`，或 `GOOGLE_API_KEY` | [Google Gemini 兼容接口](https://aistudio.google.com/docs/openai) |
+
+切换前用拟真测试资料核对所选模型的工具调用、结构化输出、增量文本和最终用量回执。部分业务使用较小的可见输出预算。Gemini 推理型号使用最低推理级别，套餐同时预留推理额度。Claude 使用提示指定 JSON，平台校验各业务所需字段。工具参数、权限检查、可打开页面和写入确认均由平台校验。OCR 和公开网页检索各自使用 DeepSeek。ASR 与朗读可以独立选择 DeepSeek、OpenAI 或 HTTP 兼容服务。[识别与语音服务](media.md)
+
 ## 开通与对账
 
 1. 启动机构工作台，确定该机构实际使用的 SQLite 文件。
-2. 平台运维人员可用 `python3 manage_secrets.py set-deepseek` 将供应商凭据写入独立加密运维库，或在服务环境中注入 `DEEPSEEK_API_KEY`。POSIX 主机也可以用 `NH_DEEPSEEK_KEY_FILE` 指定服务账号所有、权限为 0600 的普通文件。如需在本机持久保存凭据，执行 `python3 manage_secrets.py set-deepseek` 写入独立的 SQLCipher 运维密库。旧版平台凭据迁移与独立恢复材料见[加密存储与恢复](storage.md)。文字推理统一使用平台设置的 `deepseek-flash`。
+2. 平台运维人员可用 `python3 manage_secrets.py set-deepseek` 将 DeepSeek 凭据写入独立加密运维库，也可在服务环境注入 `DEEPSEEK_API_KEY`。POSIX 主机可以用 `NH_DEEPSEEK_KEY_FILE` 指定服务账号所有、权限为 0600 的普通文件。凭据迁移与独立恢复材料见 [加密存储与恢复](storage.md)。
 3. 运营方核实付款及约定的服务期后，在该机构数据库上执行开通命令。下例的额度与日期均为示例，以实际订单为准。
 
 ```bash
@@ -32,7 +45,7 @@ python3 manage_plan.py --db .local/workspace.sqlite3 unsettled
 python3 manage_plan.py --db .local/workspace.sqlite3 reconcile --actor ACCOUNT_ID --request REQUEST_ID --tokens CONFIRMED_USAGE
 ```
 
-`disable` 停止本期的新请求。并发调用在发送前通过 SQLite 写事务预留额度，服务端在网络等待期间释放数据库写锁。成功响应按供应商返回的 `usage.total_tokens` 结算，未用的预留额度返还。已明确拒绝的请求释放预留。超时、用量缺失和发送阶段意外重启时保留相应额度。运营方可用 `unsettled` 获取账号、请求编号、时间和预留值，再根据供应商账单用 `reconcile` 录入实际用量。
+`disable` 停止本期的新请求。并发调用在发送前通过 SQLite 写事务预留额度，服务端在网络等待期间释放数据库写锁。成功响应按供应商确认的 token 总量结算，未用的预留额度返还。已明确拒绝的请求释放预留。超时、用量缺失和发送阶段意外重启时保留相应额度。运营方可用 `unsettled` 获取账号、请求编号、时间和预留值，再根据供应商账单用 `reconcile` 录入实际用量。
 
 若运营方已结算而供应商随后才返回不同用量，`unsettled` 会以 `late_receipt` 列出原结算、供应商总量及差额。按原请求号用 `reconcile --tokens` 输入对账确认的**实际总量**。系统保留原结算，另存本次调整。补扣差额在核对前预留，退款差额在核对后释放；同一张迟到回执重复送达只产生一次调整。迟到答复不会写入对话或业务建议。
 
@@ -56,11 +69,11 @@ python3 manage_plan.py --db .local/workspace.sqlite3 search-reconcile --actor AC
 
 ## 会传给模型的内容
 
-院内对话发送用户本轮的相关问题、当前账号可见的必要业务资料和最近 5 轮已完成问答范围内的有效上下文。界面可回看已存历史。物资与财务简报使用已授权的品目、数量、金额等指标；照护巡查发送当日计划、完成、待办和逾期数量。临床岗位和定时巡查另行生成临床提示，只使用风险登记和体征待复核的标志、已核对的咳嗽时段统计。普通护工的调用仅使用护理进度，二者独立生成和展示。长者姓名、具体工单的经办人和病历原文不进入巡查提示。语音使用 DeepSeek ASR，文书原件使用单独的 OCR 办理流程。
+院内对话发送用户本轮的相关问题、当前账号可见的必要业务资料和最近 5 轮已完成问答范围内的有效上下文。界面可回看已存历史。物资与财务简报使用已授权的品目、数量、金额等指标。照护巡查发送当日计划、完成、待办和逾期数量。临床岗位和定时巡查另行生成临床提示，只使用风险登记和体征待复核的标志、已核对的咳嗽时段统计。普通护工的调用仅使用护理进度，二者独立生成和展示。长辈姓名、具体工单的经办人和病历原文不进入巡查提示。文书原件使用独立的 OCR 办理流程。[识别与语音服务](media.md)
 
-关键业务操作提交时，同一数据库事务核对数据约束并保存凭据。后台将业务类别和校验项目送至 DeepSeek 撰写复核说明。经办人可以在「最近改动」查看独立的云端回执。历史记录和归档老人保留原版本。用量不足、服务超时或无效回复会显示当前状态；自动巡查和复核留在队列等待可用的云服务。
+关键业务操作提交时，同一数据库事务核对数据约束并保存凭据。后台将业务类别和校验项目送至机构配置的云端模型撰写复核说明。经办人可以在「最近改动」查看独立的云端回执。历史记录和归档老人保留原版本。用量不足、服务超时或无效回复会显示当前状态。自动巡查和复核留在队列等待可用的云服务。
 
-使用 DeepSeek Chat Completions JSON 输出与非思考模式。截至 2026-11-24，官方 `deepseek-flash` 对应 DeepSeek-V4.1-Flash-1017。平台在聊天请求中显式传入该别名，后续版本以供应商模型表为准。[官方模型表](https://api-docs.deepseek.com/quick_start/pricing/) · [Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) · [JSON 输出](https://api-docs.deepseek.com/guides/json_mode/) · [思考模式开关](https://api-docs.deepseek.com/guides/thinking_mode/)
+默认 DeepSeek 使用 JSON 输出与非思考模式。截至 2026-11-24，官方 `deepseek-flash` 对应 DeepSeek-V4.1-Flash-1017。平台在聊天请求中显式传入该别名，后续版本以供应商模型表为准。[官方模型表](https://api-docs.deepseek.com/quick_start/pricing/) · [Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) · [JSON 输出](https://api-docs.deepseek.com/guides/json_mode/) · [思考模式开关](https://api-docs.deepseek.com/guides/thinking_mode/)
 
 ## 验收
 
@@ -72,6 +85,6 @@ python3 -W error::ResourceWarning -m unittest discover -s tests -p test_provider
 
 ## 按功能与人员查看用量
 
-Owner 在「机构设置 → DeepSeek 用量」可按北京时间、功能和经办账号查看汇总与调用明细。自动巡查单列为机构自动任务。涉及员工操作的识别、生成与复核归到发起人。每个云端请求只登记一次，待核对和已确认的用量分别展示。
+Owner 在「机构设置 → AI 用量」可按北京时间、功能和经办账号查看汇总与调用明细。自动巡查单列为机构自动任务。涉及员工操作的识别、生成与复核归到发起人。每个云端请求只登记一次，待核对和已确认的用量分别展示。
 
-输入 Token 按 DeepSeek 回执拆分为缓存命中和未命中，输出 Token 单列。历史回执缺少拆分时仍保留总量并注明缺失。OCR 按页、ASR 按秒、朗读按计费字符、独立搜索按计费次数查看。[DeepSeek 回执字段](https://api-docs.deepseek.com/api/create-chat-completion/)
+输入 token 按供应商回执拆分为缓存命中和未命中，输出 token 单列。回执缺少拆分时保留总量并注明缺失。OCR 按页、ASR 按秒、朗读按计费字符、独立搜索按计费次数查看。

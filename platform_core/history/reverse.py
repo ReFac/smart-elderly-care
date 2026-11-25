@@ -160,7 +160,7 @@ def apply_inverse(db, actor, action, changes, revision, write):
                 obj.get("executionBedId")
                 and person.get("bedId") != obj["executionBedId"]
             ):
-                raise UndoConflict("长者入住或床位已改变，请核对当前照护记录")
+                raise UndoConflict("长辈入住或床位已改变，请核对当前照护记录")
             if related(db, state, collection, identity, confirmed):
                 raise UndoConflict("此工单已有后续引用，请从业务记录更正")
             if action == "gw.confirm" and obj.get("voiceProposalId") != confirmed:

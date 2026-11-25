@@ -30,7 +30,7 @@ def writable(state, resident_id):
 
 def require_ai_eligible(state, resident_id):
     if lookup(state, "residents", resident_id)["status"] != "在住":
-        raise ValueError("仅在住长者可使用档案 AI 处理。")
+        raise ValueError("仅在住长辈可使用档案 AI 处理。")
 
 
 def init(db):

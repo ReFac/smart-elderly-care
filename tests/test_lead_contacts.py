@@ -166,7 +166,7 @@ class LeadContactTests(unittest.TestCase):
         lid = self.view()["leadContacts"][0]["id"]
         self.book(lid, "callback")
         self.state["residents"] = [{"id": "resident", "status": "在住", "contact": ""}]
-        self.account("family", "入住长者", self.a, "resident")
+        self.account("family", "入住长辈", self.a, "resident")
         self.assertTrue(self.view()["leadContacts"][0]["callbackExempt"])
         with self.assertRaises(ValueError):
             self.call(lid)
@@ -192,7 +192,7 @@ class LeadContactTests(unittest.TestCase):
             {
                 "id": "r1",
                 "status": "在住",
-                "contact": "长者本人联系电话：+86 138-0000-0001",
+                "contact": "长辈本人联系电话：+86 138-0000-0001",
             },
             {"id": "r2", "status": "在住", "contact": ""},
         ]
@@ -241,7 +241,7 @@ class LeadContactTests(unittest.TestCase):
             {
                 "id": "r3",
                 "status": "在住",
-                "contact": "长者本人：13800000003；家属: 13800000004",
+                "contact": "长辈本人：13800000003；家属: 13800000004",
             },
         ]
         for index in range(1, 5):

@@ -10,7 +10,7 @@
 python3 server.py --public-origin https://care.your-institution.example
 ```
 
-请将示例域名替换为机构实际地址。通过设备浏览器打开机构地址，先验证机构登录、长者档案和确认队列能正常使用，再分别配置三端。外部源模式下，服务使用 Secure、HttpOnly 会话 Cookie。客户端不会直接调用 DeepSeek、OCR 或设备网关。
+请将示例域名替换为机构实际地址。通过设备浏览器打开机构地址，先验证机构登录、长辈档案和确认队列能正常使用，再分别配置三端。外部源模式下，服务使用 Secure、HttpOnly 会话 Cookie。客户端不会直接调用 DeepSeek、OCR 或设备网关。
 
 ## PC 桌面
 

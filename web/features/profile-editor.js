@@ -22,7 +22,7 @@ export async function editResident(ctx, resident, profile, delegated) {
       ]));
     }
     const name = textControl('姓名', value.name, 'text', { required: true, maxLength: 60 });
-    const phone = textControl('长者本人手机号（选填）', value.phone, 'tel', {
+    const phone = textControl('长辈本人手机号（选填）', value.phone, 'tel', {
       maxLength: 40,
       autocomplete: 'off',
     });
@@ -95,10 +95,10 @@ export async function editResident(ctx, resident, profile, delegated) {
       });
       form.append(group('费用来源（可多选）', [checks]));
       pension = moneyChoice(choices, '养老金月收入', value, 'pensionBand', 'pensionAmount');
-      form.append(group('长者养老金收入', [pension.element]));
+      form.append(group('长辈养老金收入', [pension.element]));
     }
     ctx.dialog({
-      title: '编辑长者登记资料',
+      title: '编辑长辈登记资料',
       description: delegated?.description,
       fields: [],
       content: form,
@@ -124,7 +124,7 @@ export async function editResident(ctx, resident, profile, delegated) {
         const details = [];
         const names = {
           name: '姓名',
-          phone: '长者本人手机号',
+          phone: '长辈本人手机号',
           birthDate: '出生日期',
           age: '登记年龄',
           birthRegion: '出生地',

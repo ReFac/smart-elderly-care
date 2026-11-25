@@ -160,7 +160,7 @@ export function monthlyPanel(ctx) {
                         view: (t) => t.date,
                       },
                       {
-                        label: '长者',
+                        label: '长辈',
                         view: (t) => residentAnchor(ctx, t.residentId),
                       },
                       {

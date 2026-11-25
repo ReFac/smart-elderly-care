@@ -921,3 +921,29 @@
   .usage-summary { grid-template-columns: 1fr; }
   .usage-ledger-header { align-items: start; flex-direction: column; }
 }
+.access-resume {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+}
+
+.access-resume > summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.access-resume[open] > :not(summary) {
+  margin-block: 0.75rem;
+}
+
+.access-resume-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.access-resume > :empty,
+.access-resume-actions > :empty:not(button):not(input) {
+  display: none;
+}

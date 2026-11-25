@@ -175,6 +175,43 @@ class MediaTests(unittest.TestCase):
         with closing(self.store.connect()) as db:
             self.assertEqual(media.amounts(db, self.plan, "asr")["used"], 2)
 
+    def test_unlimited_asr_transcribes_after_cap_while_preserving_usage(self):
+        self.grant()
+        with patch.object(media, "invoke", return_value=self.reply) as invoke, patch.object(
+            provider, "configured", return_value=True
+        ):
+            self.call()
+            self.raw = sample_wav(16002)
+            self.assertEqual(self.store.snapshot(self.worker)["data"]["assistantVoice"]["state"], "exhausted")
+            with self.assertRaisesRegex(ValueError, "剩余额度不足"):
+                self.call()
+            invoke.assert_called_once()
+            with closing(self.store.connect()) as db, db:
+                media.grant(db, self.plan, "ocr", 6)
+                media.allow_unlimited_asr(db)
+            self.assertEqual(self.store.snapshot(self.worker)["data"]["assistantVoice"]["state"], "available")
+            self.assertEqual(self.call()["text"], self.reply["text"])
+            self.assertEqual(invoke.call_count, 2)
+
+        with closing(self.store.connect()) as db, db:
+            self.assertEqual(media.amounts(db, self.plan, "asr"), {"limit": None, "used": 4, "held": 0, "unit": "秒"})
+            self.assertEqual(media.amounts(db, self.plan, "ocr")["limit"], 6)
+            with self.assertRaisesRegex(ValueError, "不能低于"):
+                media.grant(db, self.plan, "asr", 3)
+            self.assertIsNone(media.amounts(db, self.plan, "asr")["limit"])
+            media.grant(db, self.plan, "asr", 4)
+            self.assertEqual(media.amounts(db, self.plan, "asr")["limit"], 4)
+
+    def test_unlimited_asr_persists_when_operator_renews_plan(self):
+        self.grant()
+        with closing(self.store.connect()) as db, db:
+            media.allow_unlimited_asr(db)
+            renewal = datetime.fromisoformat("2029-01-02T12:00:00+08:00")
+            provider.grant(db, "测试机构续期", 100, "2029-12-31", renewal)
+            plan = provider.latest(db)["id"]
+            self.assertNotEqual(plan, self.plan)
+            self.assertIsNone(media.amounts(db, plan, "asr")["limit"])
+
     def test_uncertain_delivery_holds_allowance_until_operator_reconciles(self):
         self.grant()
         with patch.object(

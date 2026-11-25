@@ -12,7 +12,7 @@ def base():
         "residents": [
             dict(
                 id="R1",
-                name="示例长者",
+                name="示例长辈",
                 status="在住",
                 bedId="B1",
                 level="半失能",

@@ -145,6 +145,11 @@ export function openFacilityTour(ctx, scope = {}, label = '') {
 }
 
 export function tourPage(ctx) {
+  if (ctx.state.user.registeredCustomer) {
+    const entry = node('a', 'btn btn-primary', '打开 3D 环境导览');
+    entry.href = '/roomtour';
+    return page(ctx, '环境导览', '浏览机构对外开放的 3D 示范场景。', entry);
+  }
   const manage =
     canAct(ctx, 'facility.setScene') && ctx.available('rooms')
       ? ctx.ui.button('前往楼层平面图', () => ctx.go('beds','plan'), 'secondary', 'building')

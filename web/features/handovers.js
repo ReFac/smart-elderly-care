@@ -57,7 +57,7 @@ async function create(ctx, button) {
       const selected = form.elements.residentId.value;
       const target = form.elements.assigneeId.value;
       if (!target || !selected) {
-        feedback.textContent = '请选择接班人，并选择本人当班照护或一位长者。';
+        feedback.textContent = '请选择接班人，并选择本人当班照护或一位长辈。';
         return;
       }
       const request = ++version;
@@ -206,7 +206,7 @@ export function handovers(ctx) {
     rows,
     action: btn(ctx, '登记交班', (event) => create(ctx, event.currentTarget)),
     search: {
-      placeholder: '搜索长者、交接人员或要点',
+      placeholder: '搜索长辈、交接人员或要点',
       value: (r) =>
         [subject(ctx, r), r.senderName, r.assignee, r.note, r.receiptNote, r.withdrawReason].join(
           ' '

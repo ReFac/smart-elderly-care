@@ -1,4 +1,4 @@
-"""长者扩展档案、亲属自助和不可替换的医疗照片。写操作由 Store 的事务包裹。"""
+"""长辈扩展档案、亲属自助和不可替换的医疗照片。写操作由 Store 的事务包裹。"""
 
 import base64
 import binascii
@@ -139,7 +139,7 @@ def edit_profile(db, state, p, user, today, *, temporary=False):
     if "phone" in p and basic["phone"]:
         normalized = profile_fields.phone_number(basic["phone"], mobile=True)
         if not normalized:
-            raise ValueError("请核对长者本人手机号；境外号码请填写国家区号")
+            raise ValueError("请核对长辈本人手机号；境外号码请填写国家区号")
         basic["phone"] = normalized
     if set(p) & HOUSEHOLD.keys():
         access.require(user, "relatives")
@@ -172,7 +172,7 @@ def edit_profile(db, state, p, user, today, *, temporary=False):
                DO UPDATE SET basic=excluded.basic,household=excluded.household""",
         (resident["id"], pack(basic), pack(household)),
     )
-    return f"更新长者档案 {resident['id']} 的登记资料"
+    return f"更新长辈档案 {resident['id']} 的登记资料"
 
 
 def masked(number):
@@ -207,12 +207,13 @@ def edit_relative(db, state, p, user, today):
         if (
             not subject
             or subject["kind"] != "family"
+            or not subject["residentId"]
             or subject.get("portalSelf")
             or not subject["enabled"]
         ):
             raise ValueError("请选择有效的已绑定亲属账号")
         if p.get("residentId", subject["residentId"]) != subject["residentId"]:
-            raise ValueError("亲属绑定与长者档案不一致")
+            raise ValueError("亲属绑定与长辈档案不一致")
     else:
         raise PermissionError("亲属资料由本人或 Owner 维护")
     resident = lookup(state, "residents", subject["residentId"])
@@ -248,7 +249,7 @@ def edit_relative(db, state, p, user, today):
                DO UPDATE SET details=excluded.details,resident_id=excluded.resident_id""",
         (subject["id"], resident["id"], pack(values)),
     )
-    return f"更新长者 {resident['id']} 的亲属联系档案"
+    return f"更新长辈 {resident['id']} 的亲属联系档案"
 
 
 def png_dimensions(raw):
@@ -376,7 +377,7 @@ def archive_document(db, state, p, user, today, *, return_id=False):
     ).fetchall()
     if match:
         if all(row[1] == fingerprint for row in match):
-            message = f"确认长者 {rid} 的文书已存档，沿用原概括"
+            message = f"确认长辈 {rid} 的文书已存档，沿用原概括"
             return (message, match[0][0]) if return_id else message
         raise ValueError("该请求编号或原图已存档，请查看已有概括")
     summary = {
@@ -419,9 +420,9 @@ def archive_document(db, state, p, user, today, *, return_id=False):
         ),
     )
     message = (
-        f"为长者 {rid} 留存医疗原件，等待识别"
+        f"为长辈 {rid} 留存医疗原件，等待识别"
         if staging
-        else f"为长者 {rid} 存档医疗文书并保存概括"
+        else f"为长辈 {rid} 存档医疗文书并保存概括"
     )
     return (message, did) if return_id else message
 
@@ -452,7 +453,7 @@ def review_document(db, state, p, user, today):
         raise ValueError("请逐页核对全部原件")
     resident = lookup(state, "residents", p["residentId"])
     if text(p, "verifiedName", 60, True) != resident["name"]:
-        raise ValueError("请核对原件姓名与当前长者")
+        raise ValueError("请核对原件姓名与当前长辈")
     facts = text(p, "sourceFacts", 8000, True)
     pending = text(p, "pending", 2000)
     changes = p["changes"]
@@ -561,7 +562,7 @@ def review_document(db, state, p, user, today):
         )
         if "allergies" in recorded:
             refresh_medication_warnings(state, resident)
-    return f"核对长者 {resident['id']} 的文书概括" + (
+    return f"核对长辈 {resident['id']} 的文书概括" + (
         "并回填" + "、".join(document_ocr.FIELDS[k] for k in recorded)
         if recorded
         else ""

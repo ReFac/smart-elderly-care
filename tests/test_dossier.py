@@ -55,7 +55,7 @@ class DossierTest(unittest.TestCase):
         dossier.init(self.db)
         self.state = {
             "residents": [
-                {"id": "r1", "name": "演示长者", "age": 71},
+                {"id": "r1", "name": "演示长辈", "age": 71},
                 {"id": "r2", "name": "另一个案"},
             ]
         }

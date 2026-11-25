@@ -1,4 +1,4 @@
-"""接待、床位分配、床头卡与长者档案。"""
+"""接待、床位分配、床头卡与长辈档案。"""
 
 from .clinical import refresh_medication_warnings
 from .records import (
@@ -103,7 +103,7 @@ def move(state, resident, today, kind, old_bed=None, new_bed=None):
 
 
 def inquire(state, p, today):
-    name = required_field(p, "name", "意向长者姓名")
+    name = required_field(p, "name", "意向长辈姓名")
     append_record(
         state,
         "inquiries",
@@ -124,7 +124,7 @@ def register(state, p, today):
         raise ValueError("该历史咨询已关联档案。")
     name = text_field(
         p.get("name") or (inquiry and inquiry["name"]),
-        "长者姓名",
+        "长辈姓名",
         required=True,
         limit=60,
     )
@@ -191,7 +191,7 @@ def date_archive(state, p, today):
 def file_archive(state, p, today):
     person = lookup(state, "residents", p.get("residentId"))
     if person["status"] != "未入住":
-        raise ValueError("请从未入住档案封存历史资料；在住长者须先办理退住。")
+        raise ValueError("请从未入住档案封存历史资料；在住长辈须先办理退住。")
     day = iso_date(p.get("archiveDate"), "原退住或归档日期")
     if not offset_date(today, -365) < day <= today:
         raise ValueError("归档日期须在最近 365 天内。")
@@ -242,11 +242,11 @@ def admit(state, p, today, *, preview=False):
         "trialPrice",
         "admittedAt",
     } - admission_finance.TERMS:
-        raise ValueError("请先建立长者档案，办理入住时只选择已有未入住档案。")
+        raise ValueError("请先建立长辈档案，办理入住时只选择已有未入住档案。")
     resident = lookup(state, "residents", p["residentId"])
     if resident["status"] != "未入住" or resident.get("bedId"):
         raise ValueError(
-            "请选择未入住档案。在住长者请转床，归档老人再次入住须建立本次档案。"
+            "请选择未入住档案。在住长辈请转床，归档老人再次入住须建立本次档案。"
         )
     bed = vacant_bed(state, p.get("bedId"))
     arrival = admission_finance.admission_date(p, today)
@@ -322,7 +322,7 @@ def confirm_stay(state, p, today, *, preview=False):
         "bedId",
         "admittedAt",
     } - admission_finance.TERMS:
-        raise ValueError("请从长者档案确认试住转正式入住。")
+        raise ValueError("请从长辈档案确认试住转正式入住。")
     resident = undecided_trial(state, p["residentId"])
     new_bed = current = None
     if resident.get("bedId"):
@@ -415,7 +415,7 @@ def renew(state, p, today):
 
     resident = get_resident(state, p.get("residentId"))
     if resident.get("stayType") == "trial":
-        raise ValueError("试住长者请在转正式时确定合同期限。")
+        raise ValueError("试住长辈请在转正式时确定合同期限。")
     if not resident.get("endDate"):
         raise ValueError("当前合同为无期限，无需续住。")
     if p.get("endDate") == "":

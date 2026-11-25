@@ -58,7 +58,7 @@ export function recordCash(ctx, { bill, residentId } = {}) {
   const dialog = ctx.dialog({
     title: bill ? '登记收款' : '登记预缴金',
     description: (target ? residentName(ctx, target) + ' · ' : '') + (bill
-      ? '待缴 ' + money(bill.balance) + '。请核实已实际收款，超出部分存入长者账户。'
+      ? '待缴 ' + money(bill.balance) + '。请核实已实际收款，超出部分存入长辈账户。'
       : '到账后优先冲抵已有欠款，结余用于以后账期。'),
     content: preview,
     fields: [

@@ -194,13 +194,13 @@ def preflight(db, state, user, payload):
         raise PermissionError("此范围或岗位未授权所选专员")
     if resident:
         if not any(s.key == "care" for s in specs) or scope not in ("auto", "care"):
-            raise PermissionError("指定长者的任务需要照护权限")
+            raise PermissionError("指定长辈的任务需要照护权限")
         if resolved and resident not in resolved["residentIds"]:
-            raise PermissionError("该长者当前不在所选区域")
+            raise PermissionError("该长辈当前不在所选区域")
         if not any(
             r["id"] == resident and r["status"] == "在住" for r in state["residents"]
         ):
-            raise ValueError("请选择有效的在住长者")
+            raise ValueError("请选择有效的在住长辈")
     return {
         "prior": None,
         "args": args,

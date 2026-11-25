@@ -28,16 +28,17 @@ class Page:
 # The model may name a page in prose. Only this application-owned directory supplies a route or tab.
 PAGES = (
     Page("overview", "运营总览", ("院务总览", "运营首页")),
-    Page("residents", "入住管理", ("长者档案", "老人档案", "档案名册", "入住名册")),
+    Page("residents", "入住管理", ("长辈档案", "老人档案", "档案名册", "入住名册")),
     Page(
         "residents",
         "办理老人入住",
-        ("长者入住", "老人入住", "办理入住", "登记入住", "办理入院", "分配床位"),
+        ("长辈入住", "老人入住", "办理入住", "登记入住", "办理入院", "分配床位"),
         "all",
         "intake",
     ),
     Page("residents", "到期续住", ("续住", "续签入住", "到期续租"), "renew", "intake"),
-    Page("residents", "试住", ("试住管理", "试住入住", "试住转正式"), "trials"),
+    Page("residents", "办理试住", ("试住入住", "开始试住"), "notAdmitted", "intake"),
+    Page("residents", "试住", ("试住管理", "试住转正式", "试住记录"), "trials"),
     Page("residents", "试住回访", (), "followups"),
     Page("beds", "床位管理", ("病房管理", "床位")),
     Page("beds", "全部床位", ("床位列表", "床位名册"), "all"),
@@ -45,7 +46,7 @@ PAGES = (
     Page("beds", "楼层平面图", ("平面图", "房间工作台"), "plan"),
     Page("beds", "编辑矢量平面图", ("平面图设置", "矢量平面图", "编辑平面图"), "plan", "facility.manage", (("edit", "layout"),)),
     Page("dossier", "个人与医疗档案", ("个人档案", "医疗档案", "医疗存档", "医疗资料", "过去诊疗记录", "会诊记录")),
-    Page("assessments", "能力评估", ("长者评估", "老人评估")),
+    Page("assessments", "能力评估", ("长辈评估", "老人评估")),
     Page("assessments", "评估记录", (), "assess"),
     Page("assessments", "等级判定", ("护理等级", "评估结果"), "grading", "care"),
     Page("assessments", "照护计划", (), "plans"),
@@ -80,7 +81,8 @@ PAGES = (
     Page("leads", "意向客户", ("来电登记", "意向客服", "咨询回访")),
     Page("leads", "接待时间表", ("来访排班", "接待排班表", "参观排班", "来访预约"), "schedule"),
     Page("shifts", "人员排班", ("员工排班", "排班表", "排班")),
-    Page("reports", "统计报送", ("民政报送", "统计报表")),
+    Page("reports", "统计报送", ("统计报表",)),
+    Page("reports", "民政报送", (), "drafts", "reports"),
     Page("inbox", "预警与确认", ("预警与人工确认", "预警中心")),
     Page("inbox", "全员通知", ("全院通知",), "notices"),
     Page("inbox", "设备预警", ("跌倒预警",), "alerts", "alerts"),
@@ -99,14 +101,14 @@ PAGES = (
     ),
     Page("settings", "机构设置", ("系统设置",)),
     Page("settings", "界面与 AI 套餐", ("AI 套餐", "界面设置"), "general"),
-    Page("settings", "DeepSeek 用量", ("模型用量", "API 用量", "Token 用量", "缓存命中率"), "deepseekUsage"),
+    Page("settings", "AI 用量", ("DeepSeek 用量", "模型用量", "API 用量", "Token 用量", "缓存命中率"), "deepseekUsage"),
     Page("settings", "定时巡查", ("巡查设置",), "rounds"),
     Page("settings", "试住约定", ("试住设置", "试住默认价", "试住默认天数"), "trials"),
     Page("settings", "备份与恢复", ("备份", "快照", "恢复备份"), "backups"),
     Page("settings", "平台更新", ("自动更新", "检查更新", "更新设置", "升级前备份", "软件更新", "版本更新"), "platformUpdates"),
     Page("account", "个人中心", ("我的账户", "我的账号")),
     Page("tour", "环境导览", ("院内环境", "养老院环境", "院区环境", "全景导览")),
-    Page("family", "家属服务", ("长者服务", "照护消息", "家属消息", "家属推送")),
+    Page("family", "家属服务", ("长辈服务", "照护消息", "家属消息", "家属推送")),
     Page("faq", "常见问题", ("FAQ", "faq", "帮助中心", "使用指南")),
 )
 
@@ -186,7 +188,8 @@ def directory(pages):
     names = {p.route: p.title for p in pages if not p.tab}
     content = {title: [] for title in names.values()}
     notes = {
-        ("residents", "trials"): "入住管理的「试住」筛选（在同一张名册办理试住、转正式、离院和试住回访）",
+        ("residents", "notAdmitted"): "入住管理的「待入住」筛选（在对应长辈右侧选择「办理试住」）",
+        ("residents", "trials"): "入住管理的「试住」筛选（在同一张名册查看试住记录、办理转正或离院）",
         (
             "longCare",
             "",
@@ -194,7 +197,7 @@ def directory(pages):
         (
             "residents",
             "all",
-        ): "入住管理名册（点击「办理老人入住」打开名册，再选择已有长者档案办理）",
+        ): "入住管理名册（点击「办理老人入住」打开名册，再选择已有长辈档案办理）",
         (
             "settings",
             "backups",
@@ -208,6 +211,7 @@ def directory(pages):
 
 
 def named(text, pages):
+    text = text.replace("长者", "长辈")
     hits = []
     for page in pages:
         for label in (page.title, *page.aliases):

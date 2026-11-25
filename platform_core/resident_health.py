@@ -145,7 +145,7 @@ def _basis(rid, sources):
 
 def draft(store, token, rid, payload):
     if payload != {"consent": True} or payload.get("consent") is not True:
-        raise ValueError("请确认发送这位长者的健康资料摘录至 DeepSeek")
+        raise ValueError("请确认发送这位长辈的健康资料摘录至机构的云端模型")
 
     def scope(db):
         user = store.actor(db, token)
@@ -207,7 +207,7 @@ def draft(store, token, rid, payload):
 
 def command(db, state, user, action, p, now):
     if p.get("confirmed") is not True:
-        raise ValueError("请核对这位长者的健康记录并确认保存")
+        raise ValueError("请核对这位长辈的健康记录并确认保存")
     rid = p.get("residentId")
     person = _context(db, state, user, rid, writing=True)
     today = now.date().isoformat()
@@ -236,7 +236,7 @@ def command(db, state, user, action, p, now):
             (p["draftId"], user["id"], rid),
         ).fetchone()
         if not item:
-            raise ValueError("这份草稿不属于当前经办人或这位长者")
+            raise ValueError("这份草稿不属于当前经办人或这位长辈")
         points = json.loads(item[2])
         indexes = p["selected"]
         if (
@@ -247,7 +247,7 @@ def command(db, state, user, action, p, now):
         ):
             raise ValueError("请勾选已核对的健康要点")
         if _basis(rid, evidence.collect(db, person)) != item[1]:
-            raise ValueError("这位长者的健康资料已更新，请重新核对")
+            raise ValueError("这位长辈的健康资料已更新，请重新核对")
         refs = [points[i] for i in indexes]
         text = "\n".join(r["text"] for r in refs)
         kind, day, request = "ai", today, "draft/" + item[0]
@@ -286,5 +286,5 @@ def command(db, state, user, action, p, now):
         "ai": "已签认 AI 健康简介",
         "intro": "已填写健康简介",
         "addition": "已补充健康简介",
-        "conversation": "已记录长者本人的健康谈话",
+        "conversation": "已记录长辈本人的健康谈话",
     }[kind]

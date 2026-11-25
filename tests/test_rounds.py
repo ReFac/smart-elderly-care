@@ -372,7 +372,7 @@ class RoundsTests(unittest.TestCase):
             residentId="r001",
             accountId=account["id"],
             enabled=True,
-            method="长者当面确认",
+            method="长辈当面确认",
             evidence="测试环境确认分享",
         )
         action(family, "family.subscribe", residentId="r001", enabled=True)
@@ -466,7 +466,7 @@ class RoundsTests(unittest.TestCase):
             restore_plan.attach(db, incoming, self.store)
             blockers = restore_plan.describe(db)["blockers"]
         self.assertIn("已核对咳嗽时段观测", blockers)
-        self.assertIn("已生成的长者巡查简报", blockers)
+        self.assertIn("已生成的长辈巡查简报", blockers)
 
     def test_daily_life_describes_confirmed_meals_and_observations_without_inventing_normality(
         self,

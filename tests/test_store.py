@@ -42,11 +42,11 @@ class WorkspaceTransactions(unittest.TestCase):
 
     def test_restart_preserves_state_and_audit_and_refreshes_business_day(self):
         before = self.store.snapshot(self.token)
-        self.execute("care.inquire", {"name": "走查长者"}, before["revision"])
+        self.execute("care.inquire", {"name": "走查长辈"}, before["revision"])
         tomorrow = self.date + timedelta(days=1)
         reopened = Store(self.path, lambda: tomorrow).snapshot(self.token)
         self.assertEqual(reopened["today"], "2026-11-25")
-        self.assertEqual(reopened["data"]["inquiries"][-1]["name"], "走查长者")
+        self.assertEqual(reopened["data"]["inquiries"][-1]["name"], "走查长辈")
         self.assertEqual(len(reopened["data"]["tasks"]), len(before["data"]["tasks"]))
         self.assertEqual(reopened["audit"][0]["action"], "care.inquire")
         self.assertEqual(reopened["audit"][0]["revision"], reopened["revision"])

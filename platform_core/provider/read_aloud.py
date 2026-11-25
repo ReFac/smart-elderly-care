@@ -1,4 +1,4 @@
-"""Read an authenticated speaker's saved assistant reply with DeepSeek TTS."""
+"""Read an authenticated speaker's saved assistant reply with configured TTS."""
 
 from contextlib import closing
 from hashlib import sha256
@@ -9,11 +9,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener
 from uuid import uuid4
 
-from . import deepseek, latest, local_time, read_key
+from . import audio_adapters, deepseek, latest, local_time, read_key
 from .media import ENDPOINT
 
 CHUNK = 600
-MAX_AUDIO = 20 * 1024 * 1024
 
 
 def synthesize(key, text):
@@ -30,18 +29,7 @@ def synthesize(key, text):
         },
     )
     with build_opener(deepseek.NoRedirect()).open(req, timeout=90) as res:
-        audio = res.read(MAX_AUDIO + 1)
-        if (
-            len(audio) > MAX_AUDIO
-            or len(audio) < 44
-            or audio[:4] != b"RIFF"
-            or audio[8:12] != b"WAVE"
-        ):
-            raise ValueError("云端朗读未返回完整音频")
-        size = int.from_bytes(audio[4:8], "little")
-        if size not in (0, 0xFFFFFFFF) and size + 8 > len(audio):
-            raise ValueError("云端朗读音频传输中断")
-        return audio
+        return audio_adapters.wave_bytes(res)
 
 
 def listen(store, token, payload, *, transport=None):
@@ -103,9 +91,10 @@ def listen(store, token, payload, *, transport=None):
         ):
             raise chat.Unavailable("机构云端套餐未启用，暂时无法朗读")
         try:
-            key = read_key()
+            service = audio_adapters.options("tts")
+            key = service.key() if service else read_key()
         except (OSError, ValueError):
-            raise chat.Unavailable("机构尚未配置 DeepSeek 朗读服务") from None
+            raise chat.Unavailable("机构朗读服务配置不可用") from None
         signature = [uid, request, part, piece]
         if progressive:
             signature.append(piece_key)
@@ -131,7 +120,10 @@ def listen(store, token, payload, *, transport=None):
             (ref, plan["id"], uid, fingerprint, int(now.timestamp()), units, request),
         )
     try:
-        raw = (transport or synthesize)(key, piece)
+        if service and transport is None:
+            raw = audio_adapters.synthesize(service, key, piece)
+        else:
+            raw = (transport or synthesize)(key, piece)
         status = "complete"
     except HTTPError as err:
         status = "rejected" if err.code in deepseek.REJECTED_HTTP else "uncertain"
@@ -144,7 +136,7 @@ def listen(store, token, payload, *, transport=None):
             (status, units if status == "complete" else 0, ref),
         )
     if status != "complete":
-        raise chat.Unavailable("DeepSeek 暂未返回可播放的朗读音频")
+        raise chat.Unavailable("朗读服务暂未返回可播放的音频")
     with closing(store.connect()) as db, db:
         authorized(db)
     return raw

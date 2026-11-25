@@ -7,7 +7,7 @@ import json
 import secrets
 import unicodedata
 
-from . import facility
+from . import facility, portal
 from .profile_fields import phone_number
 
 
@@ -75,11 +75,12 @@ def links(db, state, phones):
             if phone not in phones:
                 continue
             if kind == "family":
+                is_self = portal.is_self_role(role)
                 add(
                     number,
                     rid,
-                    "本人" if role == "入住长者" else "家属",
-                    "" if role == "入住长者" else name,
+                    "本人" if is_self else "家属",
+                    "" if is_self else name,
                 )
             elif kind in ("staff", "owner"):
                 result[campus or facility.HOME_CAMPUS, phone].add(

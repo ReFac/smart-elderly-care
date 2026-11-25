@@ -399,7 +399,7 @@ def command(db, state, user, action, payload, now):
     if chosen["kind"] == "residents":
         active = {p["id"] for p in _roster(db, state, rooms)}
         if not set(chosen["residentIds"]) <= active | old_members:
-            raise ValueError("新加入定时名单的长者须已分床入住")
+            raise ValueError("新加入定时名单的长辈须已分床入住")
     config["boundary"] = {
         key: sorted(allowed)
         for key, allowed in (

@@ -1,7 +1,9 @@
 """Server-side grants for the single-institution workspace and its read models."""
 
+from .portal import is_customer
+
 PERMISSIONS = {
-    "residents": "查阅长者基本档案",
+    "residents": "查阅长辈基本档案",
     "intake": "意向客户、接待、入住和床位管理",
     "care": "评估、照护和工单执行",
     "care.groupConfirm": "核对集体活动参加名单并签认",
@@ -14,7 +16,7 @@ PERMISSIONS = {
     "medical": "查阅医疗文档原件",
     "medical.write": "登记医疗照片与概括",
     "relatives": "查看授权亲属资料",
-    "family.share": "代录长者对每日巡查简报的分享意愿",
+    "family.share": "代录长辈对每日巡查简报的分享意愿",
     "inventory": "库存与领用",
     "finance": "财务、收款与结算",
     "longCare": "长护险参保、评估和待遇经办",
@@ -28,7 +30,7 @@ PERMISSIONS = {
     "voice.confirm": "确认或退回语音变更",
     "audit": "查阅已授权业务的操作日志",
     "staff.manage": "在本人业务权限内管理员工账号",
-    "permissions.approve": "实名签署长者档案临时权限申请",
+    "permissions.approve": "实名签署长辈档案临时权限申请",
 }
 PRESETS = {
     "院长": [
@@ -243,6 +245,8 @@ DEFAULT_UI = {
 def has(user, permission):
     from . import campus_access
 
+    if user and is_customer(user):
+        return False
     if (
         user
         and campus_access.bound(user)
@@ -277,6 +281,8 @@ def has_agent_domain(user):
 
 
 def resolve_routes(user):
+    if is_customer(user):
+        return ["tour", "faq", "account"]
     if user["kind"] == "family":
         return ["family", "tour", "faq", "account"]
     routes = [
@@ -310,6 +316,8 @@ def authorize(user, action, payload, state):
         raise PermissionError("请先登录")
     if not isinstance(action, str) or not isinstance(payload, dict):
         raise ValueError("业务操作格式无效")
+    if is_customer(user) and action != "account.changePassword":
+        raise PermissionError("注册顾客可使用环境导览、常见问题及个人账号设置")
     if action == "ops.finishSupplyOrder":
         if user["kind"] not in ("owner", "staff"):
             raise PermissionError("仅在岗员工可以办理")
@@ -412,6 +420,8 @@ def authorize(user, action, payload, state):
 
 
 def allowed_actions(user):
+    if is_customer(user):
+        return ["account.changePassword"]
     actions = [
         action for action, permission in ACTION_GRANTS.items() if has(user, permission)
     ]
@@ -545,7 +555,7 @@ def visible_data(state, user):
         data["residents"] = [
             select_fields(r, ("id", "name"))
             for r in state["residents"]
-            if r["id"] == user["residentId"]
+            if user["residentId"] and r["id"] == user["residentId"]
         ]
         return data
     for key, grant in COLLECTION_GRANTS.items():

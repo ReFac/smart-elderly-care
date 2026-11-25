@@ -148,7 +148,7 @@ function groupGrid(rows, group, setFilter) {
     ['朗读字符', row => format(row.ttsCharacters), true],
     ['搜索次数', row => format(row.searchCalls), true],
   ];
-  return tableGrid(cells, rows, 'DeepSeek ' + names[group] + '用量汇总');
+  return tableGrid(cells, rows, 'AI ' + names[group] + '用量汇总');
 }
 
 function time(at) {
@@ -168,7 +168,7 @@ function recordsGrid(records) {
     ['缓存命中', row => detailValue(row.cacheHitTokens, row.cacheHitTokens == null && row.unit === 'tokens'), true],
     ['缓存未命中', row => detailValue(row.cacheMissTokens, row.cacheMissTokens == null && row.unit === 'tokens'), true],
     ['输出 Token', row => detailValue(row.outputTokens, row.outputTokens == null && row.unit === 'tokens'), true],
-  ], records, 'DeepSeek 调用明细');
+  ], records, 'AI 调用明细');
 }
 
 function warning(totals) {
@@ -186,7 +186,7 @@ function warning(totals) {
 }
 
 export function providerUsage(ctx) {
-  if (ctx.state.user?.kind !== 'owner') return ctx.ui.empty('DeepSeek 用量仅 Owner 可查看');
+  if (ctx.state.user?.kind !== 'owner') return ctx.ui.empty('AI 用量仅 Owner 可查看');
   const owner = ctx.state.user.id;
   const currentDay = today(ctx);
   const monthStart = currentDay.slice(0, 7) + '-01';
@@ -285,7 +285,7 @@ export function providerUsage(ctx) {
   async function load(page = 1) {
     const requested = ++generation;
     const params = new URLSearchParams({ ...criteria, page: String(page) });
-    status.textContent = '正在读取 DeepSeek 用量…';
+    status.textContent = '正在读取 AI 用量…';
     output.setAttribute('aria-busy', 'true');
     for (const input of [features, actors]) input.disabled = true;
     if (page === 1) output.replaceChildren();
@@ -302,7 +302,7 @@ export function providerUsage(ctx) {
       if (requested !== generation || !root.isConnected) return;
       status.textContent = '';
       output.replaceChildren(node('div', 'usage-notice', [
-        node('p', '', error.message || '暂时无法读取 DeepSeek 用量。'),
+        node('p', '', error.message || '暂时无法读取 AI 用量。'),
         ctx.ui.button('重试', () => load(page), 'secondary'),
       ]));
     } finally {

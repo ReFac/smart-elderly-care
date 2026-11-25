@@ -3,6 +3,7 @@ import {
   node,
   btn,
   badge,
+  facts,
   field,
   money,
   named,
@@ -22,6 +23,7 @@ import { admissionFinance, admissionFinanceFields } from './admission-fees.js';
 const statuses = { 未入住: '未入住', 在住: '在住', 已退住: '归档老人' };
 export const isTrial = (row) => ['在住', '试住到期待确认'].includes(row.status) && row.stayType === 'trial';
 export const statusLabel = (row) => isTrial(row) && row.bedId ? '试住中' : statuses[row.status] || row.status;
+export const labelBedStay = (label, row) => row?.bedId && isTrial(row) ? label + ' · 试住中' : label;
 const archived = (row) => row.status === '已退住';
 
 const stayTypes = [
@@ -88,7 +90,7 @@ export function register(ctx, inquiry) {
   const oldest = new Date(day + 'T00:00:00Z');
   oldest.setUTCDate(oldest.getUTCDate() - 364);
   const dialog = ctx.dialog({
-    title: '新建长者档案',
+    title: '新建长辈档案',
     content: notify,
     fields: [
       field('name', '姓名', { value: inquiry?.name || '', maxLength: 60 }),
@@ -133,7 +135,7 @@ export function register(ctx, inquiry) {
       const same = matching(payload.name);
       if (same.length) payload.acknowledgeArchive = true;
       return ctx.command('care.register', payload, {
-        title: same.length ? '核实与归档老人的身份并建立独立档案' : '建立长者档案',
+        title: same.length ? '核实与归档老人的身份并建立独立档案' : '建立长辈档案',
         target: payload.name,
         fields: [
           ['类别', v.kind === 'archive' ? '归档老人，保管 365 天' : '未入住，建档后可分床'],
@@ -173,7 +175,7 @@ function bedLabel(ctx, id) {
 
 export function allocate(ctx, person, targetBed, stayType = 'formal') {
   if (!person) {
-    ctx.detail('选择长者档案', registry(ctx, { bed: targetBed, stayType }));
+    ctx.detail('选择长辈档案', registry(ctx, { bed: targetBed, stayType }));
     return;
   }
   if (archived(person)) {
@@ -237,7 +239,7 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
             ['床位变动', '确认后立即释放原床位并登记新床位。'],
           ]
         : [
-            ['长者档案', residentLabel(ctx, person) + ' · ' + person.id],
+            ['长辈档案', residentLabel(ctx, person) + ' · ' + person.id],
             ['入住方式', payload.stayType === 'trial' ? '试住' : '正式入住'],
             ['入住床位', bedLabel(ctx, payload.bedId)],
             ['照护等级', payload.level],
@@ -265,6 +267,8 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
     finance.mount(dialog);
     const form = dialog.querySelector('form');
     const controls = form.elements;
+    const heading = dialog.querySelector('.dialog-head h2');
+    const submit = form.querySelector('button[type=submit]');
     const hint = node('small', 'fx-muted', '遇短月时按当月最后一天出账。');
     controls.billingDay.closest('label').append(hint);
     const dates = node('small', 'fx-muted');
@@ -272,6 +276,10 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
     controls.trialDays.closest('label').append(dates);
     const sync = () => {
       const trial = controls.stayType.value === 'trial';
+      const title = trial ? '办理试住' : '从档案办理入住';
+      heading.textContent = title;
+      dialog.setAttribute('aria-label', title);
+      submit.textContent = trial ? '核对试住' : '核对入住';
       for (const input of [controls.trialDays, controls.trialPrice])
         input.closest('label').hidden = input.disabled = !trial;
       for (const input of [controls.billingDay, controls.contractTerm, controls.endDate]) {
@@ -289,7 +297,7 @@ export function allocate(ctx, person, targetBed, stayType = 'formal') {
 
 const registryFilters = [
   ['pending', '待办理', r => r.status === '未入住' || isTrial(r)],
-  ['not-admitted', '待入住', r => r.status === '未入住'],
+  ['notAdmitted', '待入住', r => r.status === '未入住'],
   ['trials', '试住', isTrial],
   ['trial-expired', '试住期满待确认', r => isTrial(r) && !r.bedId],
   ['in-house', '正式在住', r => r.status === '在住' && !isTrial(r)],
@@ -305,10 +313,50 @@ function stayArrangement(ctx, row) {
       [row.admittedAt, row.trialEndsAt].filter(Boolean).join(' 至 '),
       row.trialPrice == null ? '' : money(row.trialPrice),
     ].filter(Boolean).join(' · ');
-    return named(row.bedId ? bed : '试住床位已释放', term);
+    return named(row.bedId ? labelBedStay(bed, row) : '试住床位已释放', term);
   }
   if (row.dischargedAt) return named(row.dischargedAt, '退住归档');
   return row.admittedAt ? named(bed, row.admittedAt + ' 入住') : bed;
+}
+
+function showTrial(ctx, row) {
+  const active = isTrial(row);
+  const recorded = active || row.trialEndsAt || row.trialDays;
+  const state = active ? (row.bedId ? '试住中' : '期满待确认')
+    : row.formalizedAt ? '已转正式入住' : '试住已结束';
+  const details = recorded ? facts([
+    ['状态', state],
+    ['试住开始日', row.admittedAt],
+    ['约定结束日', row.trialEndsAt],
+    ...(row.trialDays ? [['试住时长', trialLength(row.trialDays)]] : []),
+    ...(row.trialPrice == null ? [] : [['一次性试住费', money(row.trialPrice)]]),
+    ...(active ? [['床位', row.bedId ? labelBedStay(bedLabel(ctx, row.bedId), row) : '试住床位已释放']] : []),
+    ...(row.formalizedAt ? [['正式入住生效日', row.formalizedAt]] : []),
+  ]) : ctx.ui.empty('该长辈暂无试住记录。');
+  ctx.detail('试住记录', node('div', 'fx-profile', [
+    node('strong', '', residentLabel(ctx, row)), details,
+  ]));
+}
+
+function registryActions(ctx, row, { bed, stayType, workbench }) {
+  const trial = isTrial(row);
+  const pending = row.status === '未入住' && !row.bedId;
+  const canAdmit = pending && canAct(ctx, 'care.admit');
+  return choose(
+    workbench && (pending || trial || row.trialEndsAt || row.trialDays)
+      ? btn(ctx, '试住', () => showTrial(ctx, row), 'ghost') : null,
+    canAdmit ? btn(ctx, workbench || stayType === 'formal' ? '办理入住' : '办理试住',
+      () => allocate(ctx, row, bed, workbench ? 'formal' : stayType), 'ghost') : null,
+    workbench && canAdmit ? btn(ctx, '办理试住', () => allocate(ctx, row, bed, 'trial'), 'ghost') : null,
+    trial && canAct(ctx, 'care.confirmStay') ? btn(ctx, workbench ? '办理入住' : '确认入住',
+      () => confirmStay(ctx, row, bed), 'ghost') : null,
+    trial && canAct(ctx, 'care.endTrial') ? btn(ctx, '取消入住', () => endTrial(ctx, row), 'ghost') : null,
+    row.status === '在住' && row.bedId && (!trial || bed) && canAct(ctx, 'care.transfer')
+      ? btn(ctx, '转床', () => allocate(ctx, row, bed), 'ghost') : null,
+    !bed && !trial && row.status === '在住' && row.admissionStatus && canAct(ctx, 'ops.pay')
+      ? btn(ctx, '入住交费', () => admissionPayment(ctx, row.id), 'ghost') : null,
+    btn(ctx, '查看档案', () => profile(ctx, row), 'ghost'),
+  );
 }
 
 export function registry(ctx, { bed = null, stayType = 'formal', workbenchStatus, onStatusChange } = {}) {
@@ -353,11 +401,11 @@ export function registry(ctx, { bed = null, stayType = 'formal', workbenchStatus
           ? '没有找到匹配档案，可尝试姓名中的一个字。'
           : workbench ? '当前没有该状态的入住档案。'
           : all
-            ? '暂无长者档案。'
+            ? '暂无长辈档案。'
             : '暂无待入住档案，可新建档案或查看下方全部档案。',
         cols: [
           {
-            label: '长者',
+            label: '长辈',
             view: (r) =>
               node('div', 'fx-named', [node('strong', '', residentAnchor(ctx, r)), node('small', '', r.id)]),
           },
@@ -373,24 +421,7 @@ export function registry(ctx, { bed = null, stayType = 'formal', workbenchStatus
           {
             label: '操作',
             align: 'end',
-            view: (r) =>
-              choose(
-                !bed && !isTrial(r) && r.status === '在住' && r.admissionStatus && canAct(ctx, 'ops.pay')
-                  ? btn(ctx, '入住交费', () => admissionPayment(ctx, r.id), 'ghost') : null,
-                isTrial(r) && canAct(ctx, 'care.confirmStay')
-                  ? btn(ctx, '确认入住', () => confirmStay(ctx, r, bed), 'ghost') : null,
-                isTrial(r) && canAct(ctx, 'care.endTrial')
-                  ? btn(ctx, '取消入住', () => endTrial(ctx, r), 'ghost') : null,
-                !archived(r) && (!isTrial(r) || (bed && r.bedId)) && canAct(ctx, r.status === '在住' ? 'care.transfer' : 'care.admit')
-                  ? btn(
-                      ctx,
-                      r.status === '在住' ? '转床' : stayType === 'trial' ? '办理试住' : '办理入住',
-                      () => allocate(ctx, r, bed, stayType),
-                      'ghost'
-                    )
-                  : null,
-                btn(ctx, '查看档案', () => profile(ctx, r), 'ghost')
-              ),
+            view: (r) => registryActions(ctx, r, { bed, stayType, workbench }),
           },
         ],
       })

@@ -7,7 +7,7 @@ from . import access
 from .care.records import lookup
 from .dossier import text
 
-CONSENT_METHODS = ("长者当面确认", "长者电话确认", "长者书面确认")
+CONSENT_METHODS = ("长辈当面确认", "长辈电话确认", "长辈书面确认")
 CARE_FIELDS = ("planned", "completed", "pending", "overdue")
 
 
@@ -42,7 +42,7 @@ def _recipient(db, rid, aid):
             (aid, rid),
         ).fetchone()
     ):
-        raise PermissionError("请选择与这位长者绑定的有效家属账号")
+        raise PermissionError("请选择与这位长辈绑定的有效家属账号")
 
 
 def _preference(db, rid, aid):
@@ -55,18 +55,18 @@ def _preference(db, rid, aid):
 def _set_consent(db, rid, aid, p, user, timestamp):
     if user["kind"] == "family":
         if not user["portalSelf"] or user["residentId"] != rid:
-            raise PermissionError("只可设置本人的长者授权")
-        method, evidence = "长者本人账号确认", ""
+            raise PermissionError("只可设置本人的长辈授权")
+        method, evidence = "长辈本人账号确认", ""
     else:
         access.require(user, "family.share")
         access.require(user, "relatives")
-        method = text(p, "method", 30, required=True)
+        method = text(p, "method", 30, required=True).replace("长者", "长辈")
         if method not in CONSENT_METHODS:
-            raise ValueError("请选择长者确认意愿的方式")
+            raise ValueError("请选择长辈确认意愿的方式")
         evidence = text(p, "evidence", 240, required=True)
     allowed = p.get("enabled")
     if type(allowed) is not bool:
-        raise ValueError("请确认长者分享意愿")
+        raise ValueError("请确认长辈分享意愿")
     db.execute(
         """INSERT INTO family_round_preferences(resident_id,account_id,allowed,method,evidence,actor_id,decided_at)
            VALUES(?,?,?,?,?,?,?) ON CONFLICT(resident_id,account_id) DO UPDATE SET
@@ -84,9 +84,9 @@ def apply(db, state, action, p, user, now):
         and p.get("enabled") is True
         and lookup(state, "residents", rid)["status"] != "在住"
     ):
-        raise ValueError("仅在住长者可启用每日巡查分享")
+        raise ValueError("仅在住长辈可启用每日巡查分享")
     if user["kind"] == "family" and user["residentId"] != rid:
-        raise PermissionError("仅可管理本人绑定的长者")
+        raise PermissionError("仅可管理本人绑定的长辈")
     lookup(state, "residents", rid)
     timestamp = now.isoformat(timespec="seconds")
     if action == "family.consent":
@@ -210,7 +210,7 @@ def project(db, data, user):
             "residentId": rid,
             "name": name,
             "allowed": bool(allowed),
-            "method": method or "",
+            "method": (method or "").replace("长者", "长辈"),
             "decidedAt": decided or "",
             "subscribed": bool(subscribed),
             **({"evidence": evidence or ""} if user["kind"] != "family" else {}),

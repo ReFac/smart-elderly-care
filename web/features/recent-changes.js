@@ -7,7 +7,7 @@ import { actionTitle, fieldLabel } from '../lib/change-review.js';
 
 const collections = {
   tasks: '照护工单',
-  residents: '长者',
+  residents: '长辈',
   beds: '床位',
   inquiries: '接待记录',
   assessments: '能力评估',
@@ -66,7 +66,7 @@ function displayField(ctx, collection, key, value, embedded) {
   const display =
     match?.name || match?.label || match?.title || match?.displayName || renderValue(value);
   let label = fieldLabel(key);
-  if (key === 'name' && ['inquiries', 'residents'].includes(collection)) label = '长者姓名';
+  if (key === 'name' && ['inquiries', 'residents'].includes(collection)) label = '长辈姓名';
   if (key === 'note' && collection === 'inquiries') label = '入住需求';
   const text = node('span', '', display);
   if (match) text.title = String(value);
@@ -177,7 +177,7 @@ function inspector(ctx, change, embedded, undo) {
   if (!embedded) {
     const person = ctx.state.residents?.find((row) => row.id === change.residentId);
     if (person && ctx.available('dossier'))
-      footer.append(btn(ctx, '打开长者档案', () => openDossier(ctx, person)));
+      footer.append(btn(ctx, '打开长辈档案', () => openDossier(ctx, person)));
     if (change.roomId && ctx.available('rooms'))
       footer.append(btn(ctx, '定位到房间', () => goToRoom(ctx, change.roomId)));
     if (change.rollbackPointId && ctx.available('settings'))
@@ -222,13 +222,13 @@ export function recentChanges(ctx, { residentId, onUndo } = {}) {
   for (const person of ctx.state.accounts || []) actors.set(person.id, staffLabel(ctx, person));
   const byUser = optionPicker('操作人', [['', '全部操作人'], ...actors], scope.actorId);
   const byPerson = embedded ? null : optionPicker(
-    '长者',
-    [['', '全部长者'], ...(ctx.state.residents || []).map((r) => [r.id, residentLabel(ctx, r)])],
+    '长辈',
+    [['', '全部长辈'], ...(ctx.state.residents || []).map((r) => [r.id, residentLabel(ctx, r)])],
     scope.residentId,
   );
   const roomInput = node('input', 'fx-input');
   roomInput.type = 'search';
-  roomInput.placeholder = '输入房号或长者姓名';
+  roomInput.placeholder = '输入房号或长辈姓名';
   roomInput.setAttribute('aria-label', '查找房间');
   const roomLabel = node('span', 'history-scope');
   const matches = node('div', 'history-room-results');
@@ -286,7 +286,7 @@ export function recentChanges(ctx, { residentId, onUndo } = {}) {
     node('summary', '', [ctx.ui.icon('search', 16), '筛选记录']),
     node('div', 'history-filter-fields', [
       wrap('操作人', byUser),
-      byPerson ? wrap('长者', byPerson) : null,
+      byPerson ? wrap('长辈', byPerson) : null,
       wrap('变更日期', dayInput),
       ...(ctx.available('rooms')
         ? [node('div', 'history-room-search', [wrap('房间', roomInput), matches])]
@@ -445,7 +445,7 @@ export function recentChanges(ctx, { residentId, onUndo } = {}) {
   const screen = embedded ? node('div', 'history-embedded', [
     node('header', 'history-embedded-heading', [
       node('h3', '', '最近改动'),
-      node('p', 'fx-muted', '当前长者 · 最近 60 天'),
+      node('p', 'fx-muted', '当前长辈 · 最近 60 天'),
     ]),
     toolbar,
     split,

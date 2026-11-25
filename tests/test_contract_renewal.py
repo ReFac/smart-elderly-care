@@ -17,7 +17,7 @@ class ContractRenewalTests(TestCase):
         self.store = Store(Path(root.name) / "renewal.sqlite3", initial_owner_password="renewal-fixture-only",
                            now=lambda: self.now)
         self.owner, _ = self.store.login("owner", "renewal-fixture-only")
-        self.command("care.register", name="自动续住验收长者")
+        self.command("care.register", name="自动续住验收长辈")
         self.rid = self.state()["residents"][-1]["id"]
         self.bed = next(b["id"] for b in self.state()["beds"] if b["status"] == "空闲")
 

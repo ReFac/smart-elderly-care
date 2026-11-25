@@ -10,7 +10,7 @@ function sourceLink(url, label) {
 }
 
 function historyRow(ctx, row) {
-  const author = row.bySelf ? '长者本人' : staffLabel(ctx, { displayName: row.actorName, role: row.actorRole });
+  const author = row.bySelf ? '长辈本人' : staffLabel(ctx, { displayName: row.actorName, role: row.actorRole });
   return node('article', 'fx-time-row', [node('time', '', row.day), node('div', 'fx-named', [
     node('strong', '', row.name || row.rawName),
     node('span', '', row.name ? ['本人填报「' + row.rawName + '」 · ', sourceLink(row.url, row.source)] : '药名待核对'),
@@ -121,7 +121,7 @@ function reportForm(ctx, residentId, endpoint, revision, row, refresh) {
     const first = catalogChoices.querySelector('button, a') || liveChoices.querySelector('button, a');
     if (event.key === 'ArrowDown' && first) { event.preventDefault(); first.focus(); }
   });
-  form.append(node('p', 'fx-muted', '按长者本人陈述填写。用药自报仅用于病史记录，给药仍须执行已复核医嘱。'),
+  form.append(node('p', 'fx-muted', '按长辈本人陈述填写。用药自报仅用于病史记录，给药仍须执行已复核医嘱。'),
     node('label', 'field', [node('span', '', '自报日期'), day]),
     node('label', 'field', [node('span', '', '本人填报的药名'), raw]),
     choose(live, node('label', 'access-check', [automatic, '联网自动补全'])),
@@ -175,11 +175,11 @@ export function renderMedicationReports(ctx, residentId) {
 
 export function openExamMedications(ctx) {
   const options = residentField(ctx).options;
-  if (!options.length) { ctx.toast('当前没有可选的在住长者'); return; }
+  if (!options.length) { ctx.toast('当前没有可选的在住长辈'); return; }
   const select = node('select');
-  select.add(new Option('请选择本次体检的长者', ''));
+  select.add(new Option('请选择本次体检的长辈', ''));
   options.forEach(option => select.add(new Option(option.label, option.value)));
   const chart = node('div', 'fx-profile');
   select.onchange = () => chart.replaceChildren(...(select.value ? [renderMedicationReports(ctx, select.value)] : []));
-  ctx.detail('体检用药自报', node('div', 'fx-profile', [node('label', 'field', [node('span', '', '体检长者'), select]), chart]));
+  ctx.detail('体检用药自报', node('div', 'fx-profile', [node('label', 'field', [node('span', '', '体检长辈'), select]), chart]));
 }

@@ -135,7 +135,7 @@ class RoundService:
                 revision, state = workspace(db)
                 person = locate(db, state, user, path.split("/")[-2])
                 if not active(person):
-                    raise ValueError("仅可为有床位的在住长者执行巡查")
+                    raise ValueError("仅可为有床位的在住长辈执行巡查")
                 clinical = access.has(user, "clinical")
                 data, digest, unchanged = report_source(
                     db, state, person, now, clinical=clinical
@@ -166,7 +166,7 @@ class RoundService:
             else:
                 person = locate(db, state, user, path.split("/")[-2])
                 if not active(person):
-                    raise ValueError("仅可为有床位的在住长者执行巡查")
+                    raise ValueError("仅可为有床位的在住长辈执行巡查")
                 if action == "generate":
                     check_fields(body, ())
                     changed = make_report(
@@ -193,7 +193,7 @@ class RoundService:
                                       DO UPDATE SET mode=excluded.mode""",
                             (person["id"], selected),
                         )
-                    summary = "调整长者巡查生成方式"
+                    summary = "调整长辈巡查生成方式"
                 elif action == "observations":
                     access.require(user, "clinical")
                     history.watch(db, "rounds.observations")

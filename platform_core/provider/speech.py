@@ -9,7 +9,7 @@ import zlib
 
 from .. import access
 from ..care.records import lookup
-from . import media
+from . import audio_adapters, media
 
 
 # Ogg uses a non-reflected CRC-32 without initial/final XOR. The standard library
@@ -25,6 +25,11 @@ def fix_page_checksum(data, start, end):
 
 
 def audio_spec(raw):
+    filename, mime, ms, upload = audio_details(raw)
+    return filename, mime, (ms + 999) // 1000, upload
+
+
+def audio_details(raw):
     if not isinstance(raw, bytes) or not 1 <= len(raw) <= 8 * 1024 * 1024:
         raise ValueError("录音大小须在 8 MiB 以内")
     if raw.startswith(b"RIFF"):
@@ -48,10 +53,10 @@ def audio_spec(raw):
                 with wave.open(safe, "wb") as output:
                     output.setparams(source.getparams())
                     output.writeframes(pcm)
-                seconds = (n + rate - 1) // rate
+                ms = (n * 1000 + rate - 1) // rate
         except (wave.Error, EOFError):
             raise ValueError("无法读取 WAV 音频") from None
-        return "speech.wav", "audio/wav", seconds, safe.getvalue()
+        return "speech.wav", "audio/wav", ms, safe.getvalue()
     offset = 0
     stream = preskip = last = None
     eos = tags_done = False
@@ -103,12 +108,12 @@ def audio_spec(raw):
     samples = last - preskip if eos else 0
     if not tags_done or not 0 < samples <= 120 * 48000:
         raise ValueError("录音时长须在 120 秒以内")
-    return "speech.ogg", "audio/ogg", (samples + 47999) // 48000, bytes(upload)
+    return "speech.ogg", "audio/ogg", (samples + 47) // 48, bytes(upload)
 
 
 def recognize(store, token, task_id, raw, consent):
     if consent is not True:
-        raise ValueError("请确认提交这段录音给 DeepSeek 转写")
+        raise ValueError("请确认由机构配置的语音服务转写这段录音")
 
     def authorize(db, session):
         from ..campus_access import require_resident
@@ -151,10 +156,17 @@ def agent_capability(db, now):
         status = "disabled"
     else:
         allowance = media.amounts(db, plan["id"], "asr")
-        if allowance["used"] + allowance["held"] >= allowance["limit"]:
+        if not media.can_reserve(allowance, 1):
             status = "exhausted"
-        elif not configured():
-            status = "unconfigured"
+        else:
+            try:
+                service = audio_adapters.options("asr")
+                if service:
+                    service.key()
+                elif not configured():
+                    status = "unconfigured"
+            except (OSError, ValueError):
+                status = "unconfigured"
     return {
         "path": "/api/agent/voice/transcriptions",
         "method": "POST",
@@ -162,6 +174,7 @@ def agent_capability(db, now):
         "state": status,
         "maxSeconds": 120,
         "requiresConsent": True,
+        "provider": audio_adapters.LABELS.get(audio_adapters.selected("asr"), "机构语音服务"),
     }
 
 
@@ -250,7 +263,7 @@ def recognize_agent(store, token, selected, raw, consent, *, conversation=False)
     from ..agents import region
 
     if consent is not True:
-        raise ValueError("请确认提交这段录音给 DeepSeek 转写")
+        raise ValueError("请确认由机构配置的语音服务转写这段录音")
     selected = region.selection(selected) if selected is not None else None
     context = chat_voice_context if conversation else agent_context
     with closing(store.connect()) as db:
@@ -311,7 +324,7 @@ def require_chat_receipt(db, user, selected, receipt):
 
 
 def transcribe(store, token, reference, raw, authorize, audit_scope=None, *, feature):
-    filename, mime, seconds, upload = audio_spec(raw)
+    filename, mime, duration_ms, upload = audio_details(raw)
 
     def parse(obj):
         words = obj["text"]
@@ -334,7 +347,7 @@ def transcribe(store, token, reference, raw, authorize, audit_scope=None, *, fea
         token,
         "asr",
         raw,
-        seconds,
+        (duration_ms + 999) // 1000,
         filename,
         mime,
         authorize,
@@ -343,7 +356,8 @@ def transcribe(store, token, reference, raw, authorize, audit_scope=None, *, fea
         reference=reference,
         upload=upload,
         audit_scope=audit_scope,
+        duration_ms=duration_ms,
     )
     if not result["text"]:
-        raise ValueError("DeepSeek 未识别到可用语音，请重新录制或手工录入")
+        raise ValueError("语音服务未识别到可用语音，请重新录制或手工录入")
     return result

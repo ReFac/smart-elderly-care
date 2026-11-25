@@ -47,7 +47,7 @@ def schedule_followup(state, p, today):
         target
         and lookup(state, "assessments", target)["residentId"] != row["residentId"]
     ):
-        raise ValueError("评估记录与当前长者不符。")
+        raise ValueError("评估记录与当前长辈不符。")
     row.update(
         priority=risk,
         basis=required_field(p, "basis", "分级依据"),
@@ -96,7 +96,7 @@ def refer(state, p, today):
         assessment_id
         and lookup(state, "assessments", assessment_id)["residentId"] != person["id"]
     ):
-        raise ValueError("交接所引评估与长者不符。")
+        raise ValueError("交接所引评估与长辈不符。")
     state.setdefault("referrals", [])
     append_record(
         state,
@@ -153,7 +153,7 @@ def referral_consent(state, p, today):
         operator=required_field(p, "operator", "登记人"),
     )
     ref.setdefault("consents", []).append(entry)
-    return f"已记录长者本人{decision}向{ref['destination']}共享交接资料"
+    return f"已记录长辈本人{decision}向{ref['destination']}共享交接资料"
 
 
 def export_referral(state, p, today):
@@ -161,7 +161,7 @@ def export_referral(state, p, today):
     ref = lookup(state, "referrals", p.get("referralId"))
     consents = ref.get("consents", [])
     if not consents or consents[-1]["decision"] != "同意":
-        raise ValueError("请先登记长者对本次接收单位与共享范围的有效授权。")
+        raise ValueError("请先登记长辈对本次接收单位与共享范围的有效授权。")
     consent = consents[-1]
     operator = required_field(p, "operator", "导出人")
     try:

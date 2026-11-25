@@ -1,3 +1,7 @@
+import { colorModeControl } from './lib/color-mode.js';
+
+document.querySelector('.staff-link').before(colorModeControl());
+
 const visit = document.querySelector('#visit-form');
 const callback = document.querySelector('#callback-form');
 const dialog = document.querySelector('#callback');

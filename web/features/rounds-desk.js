@@ -52,13 +52,13 @@ export function roundsSettings(ctx) {
         node('div', 'rounds-form-grid', [
           labeled('巡查状态', enabled),
           labeled('巡查间隔（分钟）', interval),
-          labeled('长者默认生成方式', mode),
+          labeled('长辈默认生成方式', mode),
           labeled('每日站内提醒时间（北京时间）', notify),
         ]),
         node(
           'p',
           'fx-muted',
-          '巡查服务在后台运行。每位长者可在档案内单独选择生成方式；家属的站内简报还需取得长者授权和家属订阅。',
+          '巡查服务在后台运行。每位长辈可在档案内单独选择生成方式；家属的站内简报还需取得长辈授权和家属订阅。',
         ),
         save,
       ]);
@@ -173,7 +173,7 @@ export function roundsInbox(ctx) {
                 'ghost',
               ),
             ]),
-          '当前授权范围内暂无巡查提醒。到达机构设置的提醒时间后，有待跟进事项的长者会出现在这里。',
+          '当前授权范围内暂无巡查提醒。到达机构设置的提醒时间后，有待跟进事项的长辈会出现在这里。',
         ),
       );
     } catch (e) {

@@ -96,7 +96,7 @@ class DailyLifeTests(TestCase):
             self.sign(event["id"], [], self.carer)
         ids = [self.first["id"]]
         for extra in (
-            {"mealIntake": {self.second["id"]: "错误的长者"}},
+            {"mealIntake": {self.second["id"]: "错误的长辈"}},
             {"mealIntake": {ids[0]: "字" * 301}},
         ):
             with self.assertRaises(ValueError):

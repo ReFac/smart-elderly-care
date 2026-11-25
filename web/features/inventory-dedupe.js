@@ -73,7 +73,7 @@ function confirmMatchedItem(ctx, values, result) {
   });
   modal = ctx.detail('发现相似物资品目', node('div', 'fx-profile', [
     node('p', 'form-description', result.source === 'deepseek'
-      ? 'DeepSeek 已核对候选，请检查包装和型号后选择。'
+      ? 'AI 已核对候选，请检查包装和型号后选择。'
       : '已按库存台账匹配相近名称，请检查包装和型号后选择。'),
     section('本次填报', facts(reviewFields(values))),
     ...candidates,

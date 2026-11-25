@@ -223,13 +223,13 @@ def source(db, p):
         or not re.fullmatch(pattern, p[key])
         or not isinstance(p.get("residentId"), str)
     ):
-        raise ValueError("请指定长者与文书原件")
+        raise ValueError("请指定长辈与文书原件")
     record = db.execute(
         f"SELECT id,metadata FROM dossier_documents WHERE {column}=? AND resident_id=?",
         (p[key], p["residentId"]),
     ).fetchone()
     if not record or json.loads(record[1]).get("method") not in STAGED:
-        raise ValueError("未找到该长者可复核的 OCR 原件")
+        raise ValueError("未找到该长辈可复核的 OCR 原件")
     return record
 
 

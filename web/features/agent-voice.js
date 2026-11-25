@@ -143,7 +143,7 @@ export function voiceServiceReason(service) {
     {
       inactive: '机构语音服务尚未开通，可先输入文字。',
       disabled: '机构已暂停语音转写，可先输入文字。',
-      exhausted: '机构语音额度已用完，可先输入文字。',
+      exhausted: '本期语音转写时长已用完，可先输入文字。',
       unconfigured: '语音服务待配置，可先输入文字。',
     }[service.state] || ''
   );

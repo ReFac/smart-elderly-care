@@ -1,4 +1,4 @@
-"""Run discovery with a separate credential vault and no live DeepSeek HTTP requests."""
+"""Run discovery using isolated credentials and simulated provider responses."""
 
 from pathlib import Path
 import sys
@@ -11,8 +11,10 @@ from provider_fixture import credential_env
 
 
 def deny_live_provider(event, args):
-    if event == "urllib.Request" and urlsplit(args[0]).hostname == "api.deepseek.com":
-        raise AssertionError("普通测试须使用本地模拟 DeepSeek 回执")
+    if event == "urllib.Request" and urlsplit(args[0]).hostname in {
+        "api.deepseek.com", "api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com",
+    }:
+        raise AssertionError("普通测试须使用本地模拟供应商回执")
 
 
 if __name__ == "__main__":

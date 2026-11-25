@@ -60,7 +60,7 @@ class CarePlanDraftTests(unittest.TestCase):
                 },
             )
 
-        with self.assertRaisesRegex(ValueError, "请先选择一位长者"):
+        with self.assertRaisesRegex(ValueError, "请先选择一位长辈"):
             start("")
         start(self.rid)
         action = self.data()["agentRuns"][0]

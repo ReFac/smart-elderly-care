@@ -97,17 +97,17 @@ export function reviewVisit(ctx, person, draft, localUrls, origin) {
   const form = node('form', 'medical-visit-form');
   form.autocomplete = 'off';
   const factsLine = node('p', 'medical-visit-target', [ctx.ui.icon('folder', 18),
-    supplemental ? '补充原就诊病例' : '写入长者档案', node('strong', '', residentLabel(ctx, person))]);
+    supplemental ? '补充原就诊病例' : '写入长辈档案', node('strong', '', residentLabel(ctx, person))]);
   const content = node('div', 'medical-visit-review-content', [
     draft.attachments?.length ? originals(draft.attachments, localUrls) : null,
     fields.element,
   ]);
   add(form,
     factsLine,
-    draft.identityConflict ? node('p', 'medical-visit-warning', '这组资料存在长者身份或就诊日期冲突，请返回并按一位长者的一次就诊重新分组。') : null,
+    draft.identityConflict ? node('p', 'medical-visit-warning', '这组资料存在长辈身份或就诊日期冲突，请返回并按一位长辈的一次就诊重新分组。') : null,
     ...(draft.warnings || []).map(w => node('p', 'medical-visit-warning', w)),
     content,
-    node('label', 'access-check', [check, '我已核对长者、就诊日期、用药和医嘱，确认保存以上内容。']),
+    node('label', 'access-check', [check, '我已核对长辈、就诊日期、用药和医嘱，确认保存以上内容。']),
     error,
   );
   const dialog = ctx.detail(supplemental ? '核对就诊补充资料' : '核对就诊病例', form);

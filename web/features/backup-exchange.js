@@ -32,7 +32,7 @@ function differences(view) {
       ['当前业务版本', String(view.currentRevision)],
       [
         '来源内容',
-        view.residents + ' 位长者 · ' + view.staff + ' 名员工 · ' + view.documents + ' 份医疗原件',
+        view.residents + ' 位长辈 · ' + view.staff + ' 名员工 · ' + view.documents + ' 份医疗原件',
       ],
     ]),
   ]);

@@ -94,7 +94,7 @@ def observe(db, person, user, body, now):
         "wearable",
         "staff-verified",
     ):
-        raise ValueError("须核对个人佩戴设备归属或由工作人员确认是该长者的观察记录")
+        raise ValueError("须核对个人佩戴设备归属或由工作人员确认是该长辈的观察记录")
     if day < person["_fromDay"]:
         raise ValueError("该时段不能确定属于本次入住床位，请核对转床与入住日期")
     bed = person["bedId"]

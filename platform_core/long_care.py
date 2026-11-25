@@ -36,7 +36,7 @@ def catalog():
 def record(state, p, actor, today):
     person = lookup(state, "residents", p.get("residentId"))
     if person.get("status") not in ("在住", "待入住", "未入住", "新档案"):
-        raise ValueError("归档长者资料仅供查阅")
+        raise ValueError("归档长辈资料仅供查阅")
     events = state.setdefault("longCareEvents", [])
     last = next((r for r in reversed(events) if r["residentId"] == person["id"]), {})
     event = p.get("event")

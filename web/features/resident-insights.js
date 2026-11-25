@@ -6,7 +6,7 @@ const evidenceTypes = {
   task: '照护工单',
   vital: '体征记录',
   reviewedCough: '已复核咳嗽观察',
-  resident: '长者档案',
+  resident: '长辈档案',
   groupActivity: '活动出席确认',
   reviewedFall: '跌倒现场核实记录',
 };
@@ -69,7 +69,7 @@ function observationForm(ctx, name, url, submit) {
   ctx.dialog({
     title: '登记已核实的咳嗽观察',
     description:
-      '请核实声音属于这位长者。每人每小时登记一个合计；多人房间来源不明的声音请保留在设备端。',
+      '请核实声音属于这位长辈。每人每小时登记一个合计；多人房间来源不明的声音请保留在设备端。',
     fields: [
       field('day', '观察日期', { type: 'date', value: today(ctx), max: today(ctx) }),
       field('hour', '观察小时（北京时间 0–23）', { type: 'number', min: 0, max: 23 }),
@@ -184,7 +184,7 @@ export function residentInsights(ctx, residentId, {compact = false} = {}) {
       fields: [
         select(
           'mode',
-          '这位长者的简报',
+          '这位长辈的简报',
           Object.entries(modes).map(([value, label]) => ({ value, label })),
           { value: info.mode },
         ),
@@ -231,7 +231,7 @@ export function residentInsights(ctx, residentId, {compact = false} = {}) {
                   title: '生成巡查简报',
                   target: name,
                   fields: [
-                    ['依据', '这位长者今天和昨天的用餐、活动和个人观察记录'],
+                    ['依据', '这位长辈今天和昨天的用餐、活动和个人观察记录'],
                     ['生成内容', '按日期整理，保留每段的来源'],
                   ],
                 },
@@ -366,7 +366,7 @@ function priorityPanel(ctx, url, report, revision, reload) {
     }
     if (saved.items?.length) {
       area.replaceChildren(
-        node('strong', '', 'DeepSeek 建议核对顺序'),
+        node('strong', '', 'AI 建议核对顺序'),
         node(
           'ol',
           '',
@@ -380,14 +380,14 @@ function priorityPanel(ctx, url, report, revision, reload) {
           'small',
           'fx-muted',
           saved.status === 'pending'
-            ? 'DeepSeek 排序已提交，可稍后重新打开简报查看。'
-            : '本次未取得可用的 DeepSeek 排序。原始巡查简报仍可查看。',
+            ? '排序已提交，可稍后重新打开简报查看。'
+            : '本次未取得可用的排序建议。原始巡查简报仍可查看。',
         ),
       );
     } else if (saved.available) {
       const button = btn(
         ctx,
-        '请 DeepSeek 排列核对顺序',
+        '生成核对顺序建议',
         async () => {
           button.disabled = true;
           try {
@@ -397,7 +397,7 @@ function priorityPanel(ctx, url, report, revision, reload) {
               { reportId: report.id, confirmed: true },
               revision(),
               {
-                title: '请 DeepSeek 排列核对顺序',
+                title: '生成核对顺序建议',
                 target: '本次巡查简报',
                 fields: [
                   ['发送内容', '仅发送待办类别代号，姓名、病历、录音和工单正文留在院内'],

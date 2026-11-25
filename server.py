@@ -88,6 +88,14 @@ class Handler(BaseHTTPRequestHandler):
             self.store, current or self.token("nh_visitor"), self.token(), demo=self.visitor_demo()
         )
 
+    def passkey_origin(self):
+        host = self.headers.get("Host", "")
+        if self.public_origin and host == urlsplit(self.public_origin).netloc:
+            return self.public_origin
+        if urlsplit("//" + host).hostname == "localhost":
+            return "http://" + host
+        return None
+
     def session_cookie(self, token):
         secure = "; Secure" if self.public_origin else ""
         age = access.SESSION_LIFETIME if token else 0
@@ -164,6 +172,10 @@ class Handler(BaseHTTPRequestHandler):
         return {key: values[0] for key, values in params.items()}
 
     def read_resource(self, path):
+        if path == "/api/auth/passkeys":
+            from platform_core import passkeys
+
+            return self.send_json(200, passkeys.listing(self.store, self.token(), self.passkey_origin()))
         if path == "/api/updates":
             service = self.update_service or updates.UpdateService(self.store)
             return self.send_json(200, service.status(self.token()))
@@ -350,7 +362,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/care/trial-assignees":
             query = parse_qs(urlsplit(self.path).query, max_num_fields=1)
             if set(query) != {"residentId"}:
-                raise ValueError("请选择试住长者档案")
+                raise ValueError("请选择试住长辈档案")
             return self.send_json(200, self.store.trial_assignees(token, query["residentId"][0]))
         if path == "/api/care/handover-recipients":
             return self.send_json(200, self.store.handover_recipients(token))
@@ -602,6 +614,14 @@ class Handler(BaseHTTPRequestHandler):
             from platform_core import inventory_dedupe
 
             return self.send_json(200, inventory_dedupe.preview(self.store, self.token(), self.read_json(4096)))
+        if path == "/api/staff/resume/preview":
+            from platform_core import staff_resume
+
+            token = self.token()
+            staff_resume.check(self.store, token)
+            if self.headers.get_content_type() not in ("application/pdf", "image/png", "image/jpeg"):
+                raise InvalidMedia("请选择 PDF、PNG 或 JPEG 简历")
+            return self.send_json(200, staff_resume.preview(self.store, token, self.read_body(staff_resume.MAX_BYTES)))
         if path == "/api/public/visitor/code":
             result = visitor_access.request_code(
                 self.store, self.read_json(512), self.client_address[0], demo=self.visitor_demo()
@@ -677,6 +697,33 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, expense_import.preview(
                 self.store, self.token(), self.read_json(2 * expense_import.FILE_LIMIT)
             ))
+        if path.startswith("/api/auth/passkeys/"):
+            from platform_core import passkeys
+
+            origin = self.passkey_origin()
+            if not passkeys.available(origin):
+                raise ValueError("通行密钥仅可用在机构 HTTPS 域名或 localhost")
+            request = self.read_json(32 * 1024)
+            operation = path.rsplit("/", 1)[-1]
+            if operation in ("enroll-options", "signin-options"):
+                return self.send_json(200, passkeys.options(self.store, self.token(), operation, request, origin, self.client_address[0]))
+            if operation == "revoke":
+                return self.send_json(200, passkeys.revoke(self.store, self.token(), request, origin))
+            if operation == "enroll":
+                return self.send_json(200, passkeys.finish(self.store, self.token(), operation, request, origin))
+            if operation == "signin":
+                token, user = passkeys.finish(self.store, None, operation, request, origin)
+                return self.send_json(200, {"user": user}, self.session_cookie(token))
+            raise FileNotFoundError("未找到通行密钥操作")
+        if path in ("/api/auth/reset-link/send", "/api/auth/reset-link/redeem"):
+            from platform_core import reset_links
+
+            request = self.read_json(2048)
+            if path.endswith("/send"):
+                if not self.token():
+                    raise SignedOut("请先登录")
+                return self.send_json(200, reset_links.send(self.store, self.token(), request, self.public_origin))
+            return self.send_json(200, reset_links.redeem(self.store, request), self.session_cookie(None))
         if path in ("/api/auth/code", "/api/auth/verify"):
             from platform_core import identity
 
@@ -934,12 +981,14 @@ class Handler(BaseHTTPRequestHandler):
             if not self.token():
                 raise SignedOut("请先登录")
             body = self.read_json(DOCUMENT_BODY)
-            if body.get("action") == "access.create" and (
-                not isinstance(body.get("payload"), dict)
-                or "invitation" not in body["payload"]
-                or "password" in body["payload"]
-            ):
-                raise ValueError("请登记本人激活账号的验证渠道；登录密码由账号本人设置")
+            if body.get("action") in ("access.create", "access.update"):
+                account_payload = body.get("payload")
+                if isinstance(account_payload, dict) and "invitation" in account_payload:
+                    invitation = account_payload["invitation"]
+                    if not isinstance(invitation, dict) or invitation.get("channel") != "sms":
+                        raise ValueError("请登记账号本人的手机号")
+                elif body["action"] == "access.create":
+                    raise ValueError("请登记本人手机号。登录密码由本人设置。")
             if (
                 body.get("action") not in ("dossier.document", "access.staffContract")
                 and int(self.headers["Content-Length"]) > SMALL_BODY
@@ -1063,7 +1112,14 @@ def main():
 
 
 def serve_institution(args, origin, initial_password):
-    store = Store(args.db, initial_data=args.initial_data, initial_owner_password=initial_password)
+    from platform_core import sms_delivery
+
+    try:
+        codes, links = sms_delivery.configured()
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
+    store = Store(args.db, initial_data=args.initial_data, initial_owner_password=initial_password,
+                  code_senders=codes, reset_link_senders=links)
     update_service = updates.UpdateService(store)
     gate = Path(os.environ["NH_UPDATE_GATE"]) if os.environ.get("NH_UPDATE_GATE") else None
     handler = partial(

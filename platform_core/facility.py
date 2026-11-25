@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from .access_policy import has
 from .care.records import text_field
+from .portal import is_customer
 
 MAIN = "building-main"
 HOME_CAMPUS = "campus-main"
@@ -187,7 +188,7 @@ class _Access:
 
 
 def _access(db, user, *, environment=False):
-    if not user or not (
+    if not user or is_customer(user) or not (
         user["kind"] == "owner"
         or (environment and user["kind"] in ("staff", "family"))
         or (user["kind"] == "staff" and any(has(user, k) for k in (*READ_GRANTS, MANAGE_GRANT)))
@@ -882,7 +883,7 @@ def _edit_room(db, state, p, user, acl):
             if b["status"] == "空闲" and not b.get("residentId") and b["id"] not in assigned
         ]
         if len(slots) < count_to_remove:
-            raise ValueError("房型不能少于仍在使用的床位数，请先安置长者")
+            raise ValueError("房型不能少于仍在使用的床位数，请先安置长辈")
         for bed in sorted(slots, key=lambda b: (b["label"], b["id"]), reverse=True)[:count_to_remove]:
             bed["status"] = INACTIVE_BED
     return f"已将{rows[0]['number']}房调整为{room_type(count)}（{count} 张床）"

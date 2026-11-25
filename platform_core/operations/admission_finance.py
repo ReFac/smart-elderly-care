@@ -170,7 +170,7 @@ def use_security(state, resident, bill, today):
         return None
     deposit = lookup(state, "bills", deposit_id, "押金凭证")
     if deposit.get("kind") != "security" or deposit["residentId"] != resident["id"]:
-        raise ValueError("押金凭证与长者不匹配")
+        raise ValueError("押金凭证与长辈不匹配")
     remaining = Decimal(str(deposit["paid"])) - sum(
         (Decimal(str(row["amount"])) for row in state["payments"] if row.get("securityBillId") == deposit_id),
         Decimal(0),
@@ -234,13 +234,13 @@ def project_status(state, data):
 
 def configure(state, payload):
     if set(payload) != {"residentId", "reminderDays", "securityMode"}:
-        raise ValueError("请选择长者及账单提醒设置")
-    resident = lookup(state, "residents", payload["residentId"], "长者档案")
+        raise ValueError("请选择长辈及账单提醒设置")
+    resident = lookup(state, "residents", payload["residentId"], "长辈档案")
     settings = resident.get("admissionTerms")
     if not settings or resident["status"] != "在住" or resident.get("stayType") != "formal":
-        raise ValueError("此设置仅用于已登记入住收费约定的在住长者")
+        raise ValueError("此设置仅用于已登记入住收费约定的在住长辈")
     changed = terms({"depositMonths": settings["depositMonths"], "reminderDays": payload["reminderDays"],
                      "securityMode": payload["securityMode"]})
     for key in ("reminderDays", "securityMode"):
         settings[key] = changed[key]
-    return "已更新本长者的账单提醒与押金抵扣规则"
+    return "已更新本长辈的账单提醒与押金抵扣规则"

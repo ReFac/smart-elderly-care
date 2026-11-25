@@ -126,42 +126,53 @@ def stream(key, body, received, *, timeout=60):
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json",
                  "Accept": "text/event-stream"},
     )
-    pieces, finish, usage = [], None, None
-    length, transferred = 0, 0
     with build_opener(NoRedirect()).open(req, timeout=timeout) as response:
-        while raw := response.readline(MAX_REPLY_BYTES + 1):
-            transferred += len(raw)
-            if len(raw) > MAX_REPLY_BYTES or transferred > 2 * 1024 * 1024:
-                raise ValueError("云端回复超出流式限制")
-            if not raw.startswith(b"data:"):
-                continue
-            data = raw[5:].strip()
-            if data == b"[DONE]":
+        return read_chat_stream(response, received)
+
+
+def data_lines(response):
+    transferred = 0
+    while raw := response.readline(MAX_REPLY_BYTES + 1):
+        transferred += len(raw)
+        if len(raw) > MAX_REPLY_BYTES or transferred > 2 * 1024 * 1024:
+            raise ValueError("云端回复超出流式限制")
+        if raw.startswith(b"data:"):
+            yield raw[5:].strip()
+
+
+def read_chat_stream(response, received, *, allow_terminal_eof=False):
+    pieces, finish, usage = [], None, None
+    length = 0
+    for data in data_lines(response):
+        if data == b"[DONE]":
+            if finish is not None:
+                break
+            raise ValueError("云端回复缺少结束状态")
+        chunk = json.loads(data)
+        if chunk.get("usage") is not None:
+            usage = chunk["usage"]
+        for choice in chunk.get("choices", []):
+            delta = choice.get("delta") or {}
+            part = delta.get("content")
+            if choice.get("index", 0) != 0 or delta.get("tool_calls"):
+                raise ValueError("文字回复流格式无效")
+            if part:
+                if not isinstance(part, str):
+                    raise ValueError("云端回复分段无效")
+                length += len(part)
+                if length > 12000:
+                    raise ValueError("云端回复文字过长")
+                pieces.append(part)
                 if finish is None:
-                    raise ValueError("云端回复缺少结束状态")
-                return {"usage": usage, "choices": [{
-                    "finish_reason": finish, "message": {"content": "".join(pieces)},
-                }]}
-            chunk = json.loads(data)
-            if chunk.get("usage") is not None:
-                usage = chunk["usage"]
-            for choice in chunk.get("choices", []):
-                delta = choice.get("delta") or {}
-                part = delta.get("content")
-                if choice.get("index", 0) != 0 or delta.get("tool_calls"):
-                    raise ValueError("文字回复流格式无效")
-                if part:
-                    if not isinstance(part, str):
-                        raise ValueError("云端回复分段无效")
-                    length += len(part)
-                    if length > 12000:
-                        raise ValueError("云端回复文字过长")
-                    pieces.append(part)
-                    if finish is None:
-                        received(part)
-                if choice.get("finish_reason") is not None:
-                    finish = choice["finish_reason"]
-    raise ValueError("云端回复流提前结束")
+                    received(part)
+            if choice.get("finish_reason") is not None:
+                finish = choice["finish_reason"]
+    else:
+        if not (allow_terminal_eof and finish is not None and usage):
+            raise ValueError("云端回复流提前结束")
+    return {"usage": usage, "choices": [{
+        "finish_reason": finish, "message": {"content": "".join(pieces)},
+    }]}
 
 
 @dataclass(frozen=True)

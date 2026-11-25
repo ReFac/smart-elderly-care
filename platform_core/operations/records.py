@@ -76,4 +76,4 @@ def lookup(state, table, row_id, label):
 
 
 def get_resident(state, payload):
-    return lookup(state, "residents", payload.get("residentId"), "长者档案")
+    return lookup(state, "residents", payload.get("residentId"), "长辈档案")

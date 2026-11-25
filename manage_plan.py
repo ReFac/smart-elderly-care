@@ -28,6 +28,10 @@ def main():
     commands.add_parser("status", help="查看套餐与用量")
     pages = commands.add_parser("ocr-quota", help="仅调整当前套餐的 OCR 总页数，保留其他额度和历史用量")
     pages.add_argument("--pages", type=int, required=True)
+    speech = commands.add_parser("asr-quota", help="调整本机构语音转写时长上限")
+    asr_limit = speech.add_mutually_exclusive_group(required=True)
+    asr_limit.add_argument("--unlimited", action="store_true", help="为本机构开通不限累计时长的语音转写")
+    asr_limit.add_argument("--seconds", type=int, help="恢复累计时长上限并设置本期秒数")
     commands.add_parser("disable", help="停止接受新的付费规划")
     commands.add_parser("unsettled", help="查看待结算或结果未明的记录")
     reconcile = commands.add_parser(
@@ -92,6 +96,16 @@ def main():
                     raise ValueError("此机构尚无可调整的套餐")
                 media.grant(db, plan["id"], "ocr", args.pages)
                 change = f"调整本期 OCR 总额度至 {args.pages} 页"
+            elif args.command == "asr-quota":
+                if args.unlimited:
+                    media.allow_unlimited_asr(db)
+                    change = "开通机构语音转写不限累计时长"
+                else:
+                    plan = provider.latest(db)
+                    if not plan:
+                        raise ValueError("此机构尚无可调整的套餐")
+                    media.grant(db, plan["id"], "asr", args.seconds)
+                    change = f"调整本期语音转写总额度至 {args.seconds} 秒"
             elif args.command == "media-reconcile":
                 media.reconcile(db, args.call, args.units, provider.local_time())
                 change = f"媒体识别用量对账 {args.call}，结算 {args.units} 单位"

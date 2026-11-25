@@ -11,7 +11,7 @@ const data = { revision: 3, canWrite: true, reports: [] };
 const queries = [], saved = [], reviews = [];
 let respondToOldQuery;
 const held = new Promise(resolve => { respondToOldQuery = resolve; });
-const ctx = { state: { user: { id: 'test-self', kind: 'family' }, residents: [{ id: 'r001', name: '测试长者', status: '未入住' }], today: '2026-11-24' },
+const ctx = { state: { user: { id: 'test-self', kind: 'family' }, residents: [{ id: 'r001', name: '测试长辈', status: '未入住' }], today: '2026-11-24' },
   ui, detail, toast() {}, async get(path) {
     if (path.endsWith('/reported-medications')) return data;
     queries.push(path);

@@ -10,7 +10,7 @@ import time
 from unicodedata import category, normalize
 from uuid import uuid4
 
-from . import campus_access, identity, portal, staff_scope
+from . import account_directory, campus_access, identity, portal, staff_scope
 from .secure_storage import INTEGRITY_ERRORS
 
 from .access_policy import (
@@ -218,9 +218,14 @@ def _public(row):
         user["facilityScope"] = {"campusIds": [row["campus_id"]]}
     user["routes"] = resolve_routes(user)
     if user["kind"] == "family":
-        user["familyServices"] = bool(row["family_services"])
-        user["portalSelf"] = user["role"] == "入住长者"
-        user["portalScopes"] = json.loads(row["portal_scopes"])
+        user["portalSelf"] = portal.is_self_role(user["role"])
+        if user["portalSelf"]:
+            user["role"] = portal.SELF_ROLE
+        if portal.is_customer(user):
+            user.update(registeredCustomer=True, residentId="", permissions=[], familyServices=False, portalScopes=[])
+        else:
+            user["familyServices"] = bool(row["family_services"])
+            user["portalScopes"] = json.loads(row["portal_scopes"])
     return user
 
 
@@ -242,14 +247,18 @@ def login(db, username, password):
         "SELECT * FROM accounts WHERE username=?", (username.strip(),)
     ).fetchone()
     _verify_password(db, row, password, signing=False)
+    return issue_session(db, row["id"]), _public(row)
+
+
+def issue_session(db, account_id):
     token = secrets.token_urlsafe(32)
     now = int(time.time())
     db.execute("DELETE FROM sessions WHERE expires <= ?", (now,))
     db.execute(
         "INSERT INTO sessions VALUES(?,?,?)",
-        (_token_hash(token), row["id"], now + SESSION_LIFETIME),
+        (_token_hash(token), account_id, now + SESSION_LIFETIME),
     )
-    return token, _public(row)
+    return token
 
 
 def _verify_password(db, row, password, *, signing):
@@ -398,7 +407,7 @@ def _account_definition(user, p, target=None):
             (
                 target["role"]
                 if target
-                else "入住长者"
+                else portal.SELF_ROLE
                 if p.get("portalSelf")
                 else "亲属"
             ),
@@ -487,7 +496,7 @@ def _create(db, state, p, user, area_check):
     kind, role, grants = _account_definition(user, p)
     campus = _campus(db, user, p, kind)
     family_services = _family_services(p, kind)
-    scopes = portal.scopes(p, kind, portal_self=role == "入住长者")
+    scopes = portal.scopes(p, kind, portal_self=portal.is_self_role(role))
     username = _required(p.get("username"), "登录名", 40).lower()
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,39}", username):
         raise ValueError("登录名须为 3–40 位字母、数字、点、下划线或短横线")
@@ -511,7 +520,7 @@ def _create(db, state, p, user, area_check):
     if kind == "family":
         resident_id = p.get("residentId")
         if not any(r["id"] == resident_id for r in state["residents"]):
-            raise ValueError("请选择亲属已获授权的长者")
+            raise ValueError("请选择亲属已获授权的长辈")
     elif p.get("residentId"):
         raise ValueError("员工账号无需绑定亲属关系")
     salt = secrets.token_bytes(16)
@@ -571,6 +580,8 @@ def _update(db, p, target, user):
         "campusId",
     }:
         raise ValueError("只可修改员工或亲属的姓名、启用状态及员工岗位权限")
+    if portal.is_customer(target) and set(p) - {"id", "displayName", "enabled"}:
+        raise ValueError("注册顾客仅可修改姓名和启用状态")
     enabled = p.get("enabled", target["enabled"])
     if type(enabled) is not bool:
         raise ValueError("启用状态无效")
@@ -615,6 +626,7 @@ def _update(db, p, target, user):
         db.execute(
             "DELETE FROM identity_challenges WHERE account_id=?", (target["id"],)
         )
+        db.execute("DELETE FROM identity_reset_links WHERE account_id=?", (target["id"],))
         db.execute(
             "INSERT INTO identity_contacts VALUES(?,?,?,0)",
             (target["id"], invitation["channel"], address),
@@ -624,6 +636,7 @@ def _update(db, p, target, user):
             "DELETE FROM identity_challenges WHERE account_id=?", (target["id"],)
         )
         db.execute("DELETE FROM sessions WHERE account_id=?", (target["id"],))
+        db.execute("DELETE FROM identity_reset_links WHERE account_id=?", (target["id"],))
     changes = ["已更新待激活邀请渠道"] if "invitation" in p else []
     if duties != target.get("staffDuties", []):
         changes.append("已更新岗位职责")
@@ -734,7 +747,7 @@ def project(db, state, user, facility_policy=None):
     )
     if user["kind"] in ("owner", "staff"):
         filtered["signatureRealName"] = real_name(db, user["id"])
-    if user["kind"] == "family":
+    if user["kind"] == "family" and not portal.is_customer(user):
         portal.project(filtered, state, user)
     if user["kind"] == "family" and user.get("familyServices"):
         tasks = (
@@ -773,16 +786,18 @@ def project(db, state, user, facility_policy=None):
     if manages_accounts(user):
         area_check = staff_scope.boundary(db, user, facility_policy)
         assignable = _assignable(user)
+        owner = user["kind"] == "owner"
+        query = "SELECT * FROM accounts" if owner else "SELECT * FROM accounts WHERE kind='staff'"
         accounts = (
-            _public(row)
-            for row in db.execute("SELECT * FROM accounts ORDER BY kind DESC,username")
+            _public(row) for row in db.execute(query + " ORDER BY kind DESC,username")
         )
         paydays = dict(db.execute("SELECT account_id,payday FROM staff_paydays"))
-        owner = user["kind"] == "owner"
+        residents = {r["id"]: r for r in filtered["residents"]} if owner else {}
         real_names = dict(db.execute("SELECT account_id,real_name FROM account_real_names")) if owner else {}
         filtered.update(
             accounts=[
                 {**a, "allowedActions": allowed_actions(a),
+                 **account_directory.category(a, residents),
                  **({"payday": paydays[a["id"]]} if a["id"] in paydays else {}),
                  **({"signatureRealName": real_names.get(a["id"], "")} if owner and a["kind"] != "family" else {})}
                 for a in accounts
@@ -815,4 +830,7 @@ def _replace_password(db, target, new_password):
         (salt, _digest(new_password, salt), target["id"]),
     )
     db.execute("DELETE FROM sessions WHERE account_id=?", (target["id"],))
+    db.execute("DELETE FROM identity_reset_links WHERE account_id=?", (target["id"],))
+    db.execute("DELETE FROM identity_passkeys WHERE account_id=?", (target["id"],))
+    db.execute("DELETE FROM identity_passkey_challenges WHERE account_id=?", (target["id"],))
     db.execute("DELETE FROM login_failures WHERE subject=?", (target["id"],))

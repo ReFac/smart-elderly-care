@@ -136,7 +136,7 @@ def scope_label(db, state, user, scope, entity_id):
 
 def configure(db, state, user, values):
     if set(values) not in ({"residentId", *DEFAULT}, {"roomId", *DEFAULT}):
-        raise ValueError("请选择一个长者或房间，并填写合并方式和时间窗口")
+        raise ValueError("请选择一个长辈或房间，并填写合并方式和时间窗口")
     scope = "resident" if "residentId" in values else "room"
     field = scope + "Id"
     entity_id = values[field]
