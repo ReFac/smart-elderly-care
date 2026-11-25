@@ -8,7 +8,7 @@ from uuid import uuid4
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from . import audio_adapters, latest, local_time, read_key
+from . import audio_adapters, deepseek, latest, local_time, read_key
 
 ENDPOINT = "https://api.deepseek.com/v1/tools/"
 UNITS = {"ocr": "页", "asr": "秒"}
@@ -127,6 +127,15 @@ def reconcile(db, call, charged, now):
     )
 
 
+def record_late_charge(db, call, units):
+    # A successful supplier receipt can arrive after an operator closed the reservation.
+    # Preserve that settlement state and count the confirmed usage without creating another call.
+    db.execute(
+        "UPDATE media_usage SET charged=max(charged,?) WHERE id=? AND state='reconciled'",
+        (units, call),
+    )
+
+
 def invoke(kind, raw, filename, mime, key):
     boundary = "elderly-care-" + uuid4().hex
     data = bytearray()
@@ -159,12 +168,13 @@ def invoke(kind, raw, filename, mime, key):
         if not isinstance(obj, dict):
             raise ValueError
         if "error" in obj:
-            raise MediaError("DeepSeek 未完成识别，可稍后重试或手工录入")
+            raise MediaError("DeepSeek 未提供可核对的用量回执，请先对账或手工录入", uncertain=True)
         return obj
     except HTTPError as e:
+        e.close()
         raise MediaError(
-            f"DeepSeek 返回 HTTP {e.code}，请检查服务额度与文件格式后重试",
-            uncertain=e.code >= 500 and kind == "asr",
+            f"DeepSeek 返回 HTTP {e.code}，请检查服务额度与文件格式",
+            uncertain=e.code not in deepseek.REJECTED_HTTP,
         ) from None
     except (URLError, TimeoutError, HTTPException, OSError):
         raise MediaError(
@@ -185,7 +195,7 @@ def invoke_asr(service, raw, filename, mime, key, duration_ms):
         e.close()
         raise MediaError(
             f"语音服务返回 HTTP {e.code}，请联系平台运营方",
-            uncertain=e.code >= 500 or e.code == 408,
+            uncertain=e.code not in deepseek.REJECTED_HTTP,
         ) from None
     except (OSError, HTTPException):
         raise MediaError("识别连接中断，结果待平台对账；原件仍保留", uncertain=True) from None
@@ -247,7 +257,7 @@ def execute(
         prior = db.execute(
             """SELECT id,state,result FROM media_usage WHERE kind=? AND fingerprint=?
              AND (state IN ('complete','pending','uncertain') OR
-                  (kind='ocr' AND state='reconciled' AND charged>0)) ORDER BY rowid DESC LIMIT 1""",
+                  (state='reconciled' AND charged>0)) ORDER BY rowid DESC LIMIT 1""",
             (kind, digest),
         ).fetchone()
         if prior:
@@ -352,13 +362,14 @@ def execute(
         db.execute("BEGIN IMMEDIATE")
         if kind == "asr":
             history.watch(db, "media.asr")
-        if not db.execute(
+        settled = db.execute(
             """UPDATE media_usage SET state='complete',result=?,charged=?,vendor_id=?
                          WHERE id=? AND state='pending'""",
             (json.dumps(result, ensure_ascii=False), units, source_id, call),
-        ).rowcount:
-            raise ValueError("识别已进入平台对账")
-        if kind == "asr":
+        ).rowcount
+        if not settled:
+            record_late_charge(db, call, units)
+        elif kind == "asr":
             audit_asr(
                 db,
                 actor,
@@ -367,6 +378,8 @@ def execute(
                 f"记录 {label} 语音转写回执",
                 audit_scope,
             )
+    if not settled:
+        raise ValueError("识别已进入平台对账")
     with closing(store.connect()) as db:
         authorize(db, token)
     return result

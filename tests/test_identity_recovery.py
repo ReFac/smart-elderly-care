@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
+from threading import BoundedSemaphore
 import unittest
 from unittest.mock import patch
 
@@ -127,6 +128,17 @@ class IdentityRecovery(unittest.TestCase):
                 self.password(req, "abcdefgh")
         with self.assertRaises(ValueError):
             self.password(req, self.out[-1][1])
+
+    def test_pending_delivery_capacity_is_checked_for_known_and_unknown_accounts(self):
+        self.invite()
+        capacity = BoundedSemaphore(1)
+        with patch.object(identity, "_delivery_slots", capacity), capacity:
+            for username in ("round-nurse", "unknown-account"):
+                with self.assertRaisesRegex(access.LoginThrottled, "正忙"):
+                    identity.request_code(self.store, {"purpose": "password", "channel": "email", "username": username}, background=True)
+        with closing(self.store.connect()) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM identity_challenges").fetchone()[0], 0)
+        self.assertEqual(self.out, [])
 
     def test_reset_challenge_invalidated_by_contact_correction_or_account_disable(self):
         staff = self.invite()

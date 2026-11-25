@@ -830,6 +830,12 @@ def _replace_password(db, target, new_password):
         (salt, _digest(new_password, salt), target["id"]),
     )
     db.execute("DELETE FROM sessions WHERE account_id=?", (target["id"],))
+    db.execute("DELETE FROM visitor_sessions WHERE account_id=?", (target["id"],))
+    db.execute(
+        """DELETE FROM visitor_challenges WHERE demo=0 AND phone IN (
+           SELECT destination FROM identity_contacts WHERE account_id=? AND channel='sms' AND verified>=0)""",
+        (target["id"],),
+    )
     db.execute("DELETE FROM identity_reset_links WHERE account_id=?", (target["id"],))
     db.execute("DELETE FROM identity_passkeys WHERE account_id=?", (target["id"],))
     db.execute("DELETE FROM identity_passkey_challenges WHERE account_id=?", (target["id"],))

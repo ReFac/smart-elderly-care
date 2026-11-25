@@ -8,6 +8,7 @@ import { openPriorReports } from './assistants.js';
 import { assistantCommand, assistantPageLinks, openAssistantAction } from './assistant-actions.js';
 import { openVisitEditor } from './medical-visit-intake.js';
 import { recognizeStaffResume, staffResumeTypes } from './staff-resume.js';
+import { dictationReview } from './assistant-dictation.js';
 
 const path = '/api/assistant/chat';
 const dayLabel = new Intl.DateTimeFormat('zh-CN', {
@@ -142,6 +143,7 @@ function buildChat(getContext, actor, area, region, label) {
   input.maxLength = 12000;
   input.placeholder = '问点什么，或按住下方说话…';
   input.setAttribute('aria-label', '消息内容');
+  const dictation = dictationReview(input, adjustInput);
   const send = control('发送', 'send', 'assistant-send', () => {}, true);
   send.type = 'submit';
   const note = el('p', 'assistant-status');
@@ -224,16 +226,19 @@ function buildChat(getContext, actor, area, region, label) {
         body: blob,
       }),
     onText(result) {
-      const transcript = result.text?.trim();
-      if (destroyed || panel.hidden || !transcript) return;
-      input.value = [input.value.trim(), transcript].filter(Boolean).join('\n');
+      const raw = result.text?.trim();
+      if (destroyed || panel.hidden || !raw) return;
+      const polished = typeof result.polishedText === 'string' ? result.polishedText.trim() || raw : raw;
+      const prefix = input.value.trim();
+      input.value = [prefix, polished].filter(Boolean).join('\n');
       voiceDraft = typeof result.transcriptId === 'string' ? result.transcriptId : '';
+      dictation.show(raw, polished, prefix ? prefix.length + 1 : 0);
       adjustInput();
       if (input.value.length > input.maxLength) {
         note.textContent = '转写内容较长，请拆分后发送。';
       } else if (auto.checked) composer.requestSubmit();
       else {
-        note.textContent = '已转写，可以编辑后发送。';
+        note.textContent = raw === polished ? '已转写，可以编辑后发送。' : '';
         input.focus();
       }
     },
@@ -281,6 +286,7 @@ function buildChat(getContext, actor, area, region, label) {
     resumeStatus,
     network.status,
     reader.popup,
+    dictation.element,
     composeBox,
     node('div', 'assistant-composer-foot', [autoLabel, reader.label, network.button]),
   );
@@ -297,6 +303,7 @@ function buildChat(getContext, actor, area, region, label) {
       : '问点什么，或按住下方说话…';
     input.disabled = !loaded || waiting;
     input.readOnly = sending;
+    dictation.sync();
     send.disabled =
       blocked ||
       !input.value.trim() ||
@@ -562,15 +569,20 @@ function buildChat(getContext, actor, area, region, label) {
   let openingAction = false;
   async function perform(action, button) {
     if (openingAction) return;
+    const origin = location.hash;
     openingAction = true;
     if (button) {
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
     }
     try {
-      if (!(await getContext().refreshWorkspace()) || destroyed || panel.hidden) return;
+      const ctx = getContext();
+      const checked = ctx.checkNavigation ? await ctx.checkNavigation() : await ctx.refreshWorkspace();
+      if (!checked || destroyed || panel.hidden || origin !== location.hash || document.querySelector('dialog[open]')) return;
+      const live = getContext();
+      if (!live.available(action.route)) return live.toast('当前账号无法打开这个页面');
       hide(true);
-      await openAssistantAction(getContext(), action);
+      await openAssistantAction(live, action);
     } catch (e) {
       if (!destroyed) getContext().toast(e.message);
     } finally {
@@ -614,7 +626,7 @@ function buildChat(getContext, actor, area, region, label) {
     adjustInput();
     draw('pending');
     request = new AbortController();
-    let action,
+    let action, openedEarly = false,
       received = false,
       speechFrames = false;
     try {
@@ -630,18 +642,29 @@ function buildChat(getContext, actor, area, region, label) {
         ...(speechRequested ? { voiceTranscriptId: retry.voiceTranscriptId } : {}),
       }, request.signal, event => {
         if (destroyed) return;
-        if (event.type === 'begin' && !panel.hidden && speechRequested && !speechDismissed)
-          speechTurn = { region, scopeKey: event.scopeKey, generation: event.generation, requestId: event.requestId };
+        if (event.type === 'begin' && !panel.hidden) {
+          if (speechRequested && !speechDismissed)
+            speechTurn = { region, scopeKey: event.scopeKey, generation: event.generation, requestId: event.requestId };
+          if (event.requestId === retry.id && startPage === location.hash && !openedEarly &&
+              !openingAction && !document.querySelector('dialog[open]')) {
+            const destination = assistantCommand(getContext(), { role: 'assistant', action: event.action });
+            if (destination) {
+              openedEarly = true;
+              perform(destination);
+            }
+          }
+        }
         if (event.type === 'text' && typeof event.text === 'string') appendText(event.text);
         if (event.type === 'speech' && Number.isInteger(event.sentence)) {
           speechFrames = true;
-          if (!panel.hidden && speechTurn) reader.enqueueSentence(event.sentence, speechTurn);
+          if (speechTurn && !speechDismissed) reader.enqueueSentence(event.sentence, speechTurn);
         }
       });
       if (destroyed) return;
       update(result, true);
+      dictation.sent();
       received = true;
-      if (!panel.hidden && speechRequested && !speechFrames && !speechDismissed)
+      if (speechRequested && !speechFrames && !speechDismissed)
         reader.enqueue(messages.at(-1), {region, scopeKey, generation});
       if (
         messages.at(-2)?.content === text &&
@@ -699,7 +722,7 @@ function buildChat(getContext, actor, area, region, label) {
         adjustInput();
       }
     }
-    if (!destroyed && !panel.hidden && action && !document.querySelector('dialog[open]'))
+    if (!openedEarly && !destroyed && !panel.hidden && action && !document.querySelector('dialog[open]'))
       perform(action);
   }
   composer.addEventListener('submit', (event) => {
@@ -708,11 +731,16 @@ function buildChat(getContext, actor, area, region, label) {
   });
   input.addEventListener('beforeinput', (event) => {
     if (voiceDraft && event.inputType !== 'historyUndo' &&
-      input.selectionStart === 0 && input.selectionEnd === input.value.length)
+      input.selectionStart === 0 && input.selectionEnd === input.value.length) {
       voiceDraft = '';
+      dictation.clear();
+    }
   });
   input.addEventListener('input', () => {
-    if (!input.value.trim()) voiceDraft = '';
+    if (!input.value.trim()) {
+      voiceDraft = '';
+      dictation.clear();
+    }
     adjustInput();
   });
   let composing = false;
@@ -758,7 +786,7 @@ function buildChat(getContext, actor, area, region, label) {
       lastFocused = document.activeElement;
       if (reader.popup.parentNode !== composer) {
         reader.popup.classList.remove('assistant-reader-detached');
-        composer.insertBefore(reader.popup, composeBox);
+        composer.insertBefore(reader.popup, dictation.element);
       }
       panel.hidden = false;
       document.getElementById('assistant-launch')?.setAttribute('aria-expanded', 'true');

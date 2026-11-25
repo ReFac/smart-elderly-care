@@ -6,7 +6,7 @@ import argparse
 import logging
 from functools import partial
 from http.cookies import CookieError, SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import mimetypes
 from pathlib import Path
@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from platform_core.agents import chat
 from platform_core.operations import expense_import
 from platform_core.backups import exchange
-from platform_core import access, facility, updates, visitor_access
+from platform_core import access, facility, http_capacity, updates, visitor_access
 from platform_core import daily_life, lead_intake, medical_visits, resident_health, scheduled_work
 from platform_core.provider import round_priorities
 from platform_core.store import Conflict, SignedOut, Store, encode
@@ -45,12 +45,14 @@ class Handler(BaseHTTPRequestHandler):
         # Do not include staff names or room filters from the query string in access logs.
         self.log_message("%s %s %s", self.command, self.path.partition("?")[0], code)
 
-    def respond(self, status, content, mime, cookie=None, *, attachment=None):
+    def respond(self, status, content, mime, cookie=None, *, attachment=None, retry_after=None):
         self.send_response(status)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        if retry_after is not None:
+            self.send_header("Retry-After", str(retry_after))
         if attachment:
             self.send_header("Content-Disposition", f'attachment; filename="{attachment}"')
         self.send_header("Referrer-Policy", "no-referrer")
@@ -66,9 +68,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
-    def send_json(self, status, body, cookie=None):
+    def send_json(self, status, body, cookie=None, *, retry_after=None):
         self.respond(
-            status, encode(body).encode(), "application/json; charset=utf-8", cookie
+            status, encode(body).encode(), "application/json; charset=utf-8", cookie,
+            retry_after=retry_after,
         )
 
     def token(self, name="nh_session"):
@@ -134,16 +137,23 @@ class Handler(BaseHTTPRequestHandler):
             path = unquote(urlsplit(self.path).path)
             if self.update_gate and not self.update_gate.is_file() and path != "/api/health":
                 return self.send_json(503, {"error": "机构正在切换新版，请稍后重新打开"})
-            if method == "GET":
-                self.read_resource(path)
-            else:
+            if method == "POST":
                 origin = self.headers.get("Origin")
                 if origin and origin not in {
                     self.public_origin,
                     "http://" + host if local else self.public_origin,
                 }:
                     raise PermissionError("请从机构工作台提交")
-                self.write_resource(path)
+            operation = self.read_resource if method == "GET" else self.write_resource
+            slots = getattr(getattr(self, "server", None), "heavy_slots", None)
+            if slots is None or not http_capacity.heavy_request(method, path, self.headers.get("Content-Length")):
+                return operation(path)
+            if not slots.acquire(blocking=False):
+                return self.send_json(503, {"error": "机构正在处理较多请求，请稍后重试"}, retry_after=2)
+            try:
+                return operation(path)
+            finally:
+                slots.release()
         except SignedOut as e:
             self.send_json(401, {"error": str(e)})
         except (access.LoginThrottled, lead_intake.SubmissionLimit) as e:
@@ -431,6 +441,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, state)
         if path == "/api/version":
             return self.send_json(200, self.store.version(token))
+        if path == "/api/assistant/navigation-version":
+            return self.send_json(200, self.store.navigation_version(token))
         if path == "/api/state":
             return self.send_json(200, self.store.snapshot(token))
         match = re.fullmatch(r"/api/portal/history/(careSchedule|medication)", path)
@@ -1115,6 +1127,7 @@ def serve_institution(args, origin, initial_password):
     from platform_core import sms_delivery
 
     try:
+        workers, heavy_workers = http_capacity.configured_limits()
         codes, links = sms_delivery.configured()
     except ValueError as error:
         raise SystemExit(str(error)) from None
@@ -1126,7 +1139,8 @@ def serve_institution(args, origin, initial_password):
         Handler, store=store, public_origin=origin, demo_public_tour=args.demo_public_tour,
         update_service=update_service, update_gate=gate, update_boot=os.environ.get("NH_UPDATE_BOOT"),
     )
-    with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
+    with http_capacity.CapacityServer(("127.0.0.1", args.port), handler,
+                                      workers=workers, heavy_workers=heavy_workers) as server:
         stopped = Event()
         worker = Thread(target=dispatch_scheduled_work, args=(store, stopped), name="scheduled-work", daemon=True)
         auto = Thread(target=dispatch_updates, args=(update_service, stopped), name="platform-updates", daemon=True)

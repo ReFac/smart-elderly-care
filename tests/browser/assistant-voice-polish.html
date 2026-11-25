@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>健康助理语音整理回归</title>
+<link rel="stylesheet" href="../../web/style.css">
+<link rel="stylesheet" href="../../web/agents.css">
+<body>
+<output role="status">运行中</output>
+<script type="module">
+  import { chatLauncher, openChat, clearChat } from '../../web/features/assistant-chat.js';
+
+  const userId = 'voice-polish-test';
+  const chatPath = '/api/assistant/chat';
+  const voicePath = '/api/assistant/voice';
+  const region = { roomId: 'fixture-room' };
+  const scopeKey = 'voice-polish-scope';
+  const generation = 'voice-polish-thread';
+  const state = {
+    user: { id: userId, kind: 'staff', permissions: ['assistants'], routes: ['overview'] },
+    uiSettings: { institutionName: '演示机构', hiddenRoutes: [] },
+    assistantVoice: { state: 'available', path: voicePath },
+  };
+  const ctx = { state, available: () => true, async refreshWorkspace() { return true; } };
+  const raw = '嗯，查一下，查一下 302 房张阿姨今早有没有吃药，不要登记。';
+  const polished = '查一下 302 房张阿姨今早有没有吃药，不要登记。';
+  const speech = [], turns = [], messages = [], readings = [];
+  let recording;
+
+  function check(condition, message) {
+    if (!condition) throw new Error(message);
+  }
+  async function until(test, message) {
+    const deadline = performance.now() + 5000;
+    while (!test() && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 12));
+    check(test(), message);
+  }
+  const panel = () => document.getElementById('assistant-chat');
+  const input = () => panel().querySelector('.assistant-input');
+  const control = label => [...panel().querySelectorAll('button,summary')]
+    .find(button => button.textContent.trim() === label && button.getClientRects().length);
+  const snapshot = () => Response.json({ scopeKey, generation, messages });
+
+  window.fetch = async (path, options = {}) => {
+    if (path === chatPath + '?roomId=fixture-room') return snapshot();
+    if (path === voicePath + '?roomId=fixture-room') {
+      check(options.method === 'POST' && options.body.size > 0, '语音应由录音入口上传');
+      const transcriptId = crypto.randomUUID().replaceAll('-', '');
+      speech.push({ ...recording, transcriptId });
+      return Response.json(speech.at(-1));
+    }
+    if (path === chatPath + '/stream') {
+      const turn = JSON.parse(options.body);
+      turns.push(turn);
+      messages.push({ role: 'user', content: turn.text }, {
+        role: 'assistant', content: '已收到这次询问。', requestId: turn.requestId,
+      });
+      return snapshot();
+    }
+    if (path === chatPath + '/speech') {
+      readings.push(JSON.parse(options.body));
+      return Response.json({ error: '模拟朗读回执' }, { status: 503 });
+    }
+    throw new Error('整理语音不应请求额外接口 ' + path);
+  };
+
+  function type(text) {
+    input().value = text;
+    input().dispatchEvent(new Event('input'));
+  }
+  async function send() {
+    const expected = turns.length + 1;
+    input().form.requestSubmit();
+    await until(() => turns.length === expected && !input().readOnly, '提交一次对话请求');
+    return turns.at(-1);
+  }
+  async function dictate(text, polishedText) {
+    recording = { text, ...(polishedText ? { polishedText } : {}) };
+    const mic = panel().querySelector('.assistant-hold');
+    const expected = speech.length + 1;
+    mic.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    await until(() => mic.dataset.phase === 'recording', '进入录音');
+    await new Promise(resolve => setTimeout(resolve, 240));
+    mic.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
+    await until(() => speech.length === expected && mic.dataset.phase === 'idle', '完成一次转写');
+    return speech.at(-1).transcriptId;
+  }
+
+  async function run() {
+    const audio = new AudioContext();
+    const oscillator = audio.createOscillator();
+    const stream = audio.createMediaStreamDestination();
+    oscillator.connect(stream);
+    oscillator.start();
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true,
+      value: async () => stream.stream.clone() });
+    localStorage.removeItem('assistant:auto-send:' + userId);
+    const launcher = chatLauncher(() => openChat(() => ctx, { ...region, label: '演示房间' }));
+    document.body.append(launcher);
+    launcher.click();
+    await until(() => input() && !input().disabled, '打开健康助理');
+
+    const typedText = '嗯，先看今天有哪些访客。';
+    type(typedText);
+    const typed = await send();
+    check(typed.text === typedText && !typed.readAloud && !speech.length, '手打内容原样进入 Agent');
+
+    const read = panel().querySelector('.assistant-read-option input');
+    read.closest('label').click();
+    const spokenId = await dictate(raw, polished);
+    check(input().value === polished && turns.length === 1, '整理结果先留在输入框');
+    check(control('查看原话'), '有可操作的原话查阅入口');
+    control('查看原话').click();
+    await until(() => panel().innerText.includes(raw), '可以核对转写原话');
+    const cleaned = await send();
+    check(cleaned.text === polished && cleaned.readAloud && cleaned.voiceTranscriptId === spokenId,
+      '整理稿仅发送一次并保留可朗读语音凭证');
+    await until(() => readings.some(item => item.requestId === cleaned.requestId), '整理稿的答复仍可朗读');
+
+    const prefix = '上一班备注';
+    type(prefix);
+    const restoreId = await dictate(raw, polished);
+    check(input().value === prefix + '\n' + polished, '整理稿追加至已有草稿');
+    check(control('查看原话'), '追加语音也可查看原话');
+    control('查看原话').click();
+    const restore = control('使用原话') || control('恢复原话');
+    check(restore, '查看原话后可一键恢复');
+    restore.click();
+    check(input().value === prefix + '\n' + raw, '仅替换整理稿，保留已有草稿');
+    const restored = await send();
+    check(restored.text === prefix + '\n' + raw && restored.voiceTranscriptId === restoreId, '可以发送核对后的原话');
+
+    const auto = [...panel().querySelectorAll('label')].find(label => label.textContent.includes('语音转写后自动发送'));
+    check(auto, '可开启转写后自动发送');
+    auto.click();
+    const autoId = await dictate(raw, polished);
+    await until(() => turns.length === 4 && !input().readOnly, '自动发送一条整理后的语音');
+    check(turns.at(-1).text === polished && turns.at(-1).voiceTranscriptId === autoId && speech.length === 3,
+      '输入自动发送整理稿，复用已有转写凭证');
+    const preview = control('查看原话');
+    check(preview, '自动发送后仍可查看原话');
+    preview.click();
+    const original = document.getElementById(preview.getAttribute('aria-controls'));
+    check(!original.hidden && original.innerText.includes(raw) && !control('使用原话') && turns.length === 4,
+      '发送后可核对原话，查阅不会再次提交');
+    clearChat();
+    oscillator.stop();
+    await audio.close();
+    document.documentElement.dataset.result = 'pass';
+    document.querySelector('output').textContent = 'PASS';
+  }
+  run().catch(error => {
+    clearChat();
+    document.documentElement.dataset.result = 'fail';
+    document.querySelector('output').textContent = error.stack || error.message;
+  });
+</script>
+</body>
+</html>

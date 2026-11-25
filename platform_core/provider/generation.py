@@ -135,7 +135,7 @@ def generate(
             raise ValueError("缺少有效用量")
         tokens, status, reason = remote_receipt.total, "closed", "invalid_output"
         choice = raw["choices"][0]
-        if choice.get("finish_reason") != "stop":
+        if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
             raise ValueError("回复未完成")
         content = choice["message"]["content"]
         result = validate({"text": content} if on_delta else json.loads(content))

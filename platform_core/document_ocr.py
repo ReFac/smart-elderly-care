@@ -14,7 +14,7 @@ LEGACY_METHOD = "院内 OCR"
 STAGED = (METHOD, LEGACY_METHOD)
 FIELDS = {"summary": "病史摘要", "allergies": "过敏史", "risk": "高危要点"}
 LABELS = {
-    "name": r"(?:患者姓名|姓名|patient name|name)",
+    "name": r"(?:患者姓名|患者名字|姓名|patient name|name)",
     "summary": r"(?:出院诊断|主要诊断|诊断|病史摘要|diagnosis|discharge diagnosis|history)",
     "allergies": r"(?:药物过敏史|过敏史|过敏原|allergies|allergy)",
     "risk": r"(?:高危要点|高危提示|风险提示|风险因素|risk factors|risk)",
@@ -22,6 +22,32 @@ LABELS = {
 PATTERNS = {
     k: re.compile(r"^" + p + r"\s*[:：]\s*(.+)$", re.I) for k, p in LABELS.items()
 }
+NAME_LABEL = re.compile(r"(?:^|[|｜;；,，\s])" + LABELS["name"] + r"\s*[:：]\s*", re.I)
+NAME_FIELD_END = re.compile(
+    r"[|｜\t]|[;；,，\s]+(?:[\u3400-\u9fff]{1,12}|sex|gender|age|date of birth|dob|patient id)\s*[:：]"
+    r"|(?:姓名|性别(?:[/／]年龄)?|年龄|出生日期|住院号|门诊号|病历号)\s*[:：]",
+    re.I,
+)
+
+
+def name_from_field(value):
+    """Keep the labelled name when OCR puts other form fields on the same line."""
+    return NAME_FIELD_END.split(value, maxsplit=1)[0].strip()
+
+
+def names_on_line(value):
+    return [name_from_field(value[m.end():]) for m in NAME_LABEL.finditer(value)]
+
+
+def normalized_candidates(candidates):
+    """Adapt stored OCR receipts without changing their original lines or page references."""
+    for candidate in candidates:
+        if candidate["field"] != "name":
+            yield candidate
+            continue
+        value = candidate["value"]
+        for name in dict.fromkeys([name_from_field(value), *names_on_line(value)]):
+            yield {**candidate, "value": name}
 
 
 class RecognitionError(ValueError):
@@ -70,13 +96,15 @@ def page_text(page, number, width, height):
             result.append(line)
             for field, pattern in PATTERNS.items():
                 if match := pattern.match(text):
-                    candidates.append(
+                    values = names_on_line(text) if field == "name" else [match[1].strip()]
+                    candidates.extend(
                         {
                             "field": field,
-                            "value": match[1].strip(),
+                            "value": value,
                             "line": line["line"],
                             "page": number,
                         }
+                        for value in values if value
                     )
                     break
 
@@ -366,8 +394,6 @@ def detail(db, user, document_id):
     ).fetchone()
     if not row:
         raise FileNotFoundError("找不到可核对的 OCR 原件")
-    return (
-        json.loads(row[0])
-        if row[0]
-        else {"state": "queued", "lines": [], "candidates": []}
-    )
+    result = json.loads(row[0]) if row[0] else {"state": "queued", "lines": []}
+    result["candidates"] = list(normalized_candidates(result.get("candidates", [])))
+    return result

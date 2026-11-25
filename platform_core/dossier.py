@@ -484,7 +484,7 @@ def review_document(db, state, p, user, today):
         raise ValueError("请选择与实际识别结果相符的文字来源")
     identity_mismatch = any(
         c["field"] == "name" and c["value"] != resident["name"]
-        for c in ocr.get("candidates", [])
+        for c in document_ocr.normalized_candidates(ocr.get("candidates", []))
     )
     if changes and identity_mismatch:
         raise ValueError("原文识别姓名与档案不同，请先核实身份，本次仅可留存文书")

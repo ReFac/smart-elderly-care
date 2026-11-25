@@ -90,10 +90,17 @@ def clear_due(db, state, day, resident_id=None):
 
 
 def maintain(store):
-    now = store.now()
-    day = now.date().isoformat()
-    if getattr(store, "_archive_checked", None) == day:
+    if store._archive_checked == store.now().date().isoformat():
         return
+    with store._daily_maintenance_lock:
+        now = store.now()
+        day = now.date().isoformat()
+        if store._archive_checked != day:
+            _maintain(store, now, day)
+            store._archive_checked = day
+
+
+def _maintain(store, now, day):
     from .. import activity, lead_directory
 
     with closing(store.connect()) as db, db:
@@ -132,7 +139,6 @@ def maintain(store):
                     json.dumps(state, ensure_ascii=False, separators=(",", ":")),
                 ),
             )
-    store._archive_checked = day
 
 
 def after_restore(db, now):

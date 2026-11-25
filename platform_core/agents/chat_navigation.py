@@ -128,6 +128,10 @@ PUBLIC = re.compile(
     r"政策|法规|条例|新闻|官方网站|官网|政府网站|公开(?:资料|信息|网站)|外网|互联网|搜索引擎|https?://",
     re.I,
 )
+DIRECT = re.compile(
+    r"^(?:(?:请你|请|麻烦你|麻烦|帮我|给我|我要|先|现在|马上)[，,、\s]*)*"
+    r"(?:打开|进入|前往|跳转到|带我去|定位到|去)\s*(?P<name>[^，,。！!？?；;\n]+?)[。！!\s]*$"
+)
 SENTENCE = re.compile(r"[。！？!?；;\n]+")
 ROOM_NUMBER = {"单": 1, "一": 1, "双": 2, "两": 2, "二": 2, "三": 3, "四": 4,
                "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
@@ -257,6 +261,20 @@ def navigation_actions(actions, text, pages):
         if p in pages
     }
     return {r: kind for r, kind in actions.items() if r in targets}
+
+
+def direct_destination(text, pages, actions):
+    match = DIRECT.fullmatch(text.strip().replace("长者", "长辈"))
+    if not match or not actions or set(actions.values()) != {"navigate"}:
+        return None
+    name = match["name"].strip()
+    targets = [page for page in pages if page.route in actions and any(
+        name in (label, label + "页面", label + "界面", label + "页签")
+        for label in (page.title, *page.aliases)
+    )]
+    if len(targets) == 1:
+        return {**targets[0].link(), "kind": "navigate"}
+    return None
 
 
 def resolve(question, answer, pages, previous=(), action=None, area=None):

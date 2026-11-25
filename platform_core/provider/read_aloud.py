@@ -10,7 +10,7 @@ from urllib.request import Request, build_opener
 from uuid import uuid4
 
 from . import audio_adapters, deepseek, latest, local_time, read_key
-from .media import ENDPOINT
+from .media import ENDPOINT, record_late_charge
 
 CHUNK = 600
 
@@ -100,7 +100,8 @@ def listen(store, token, payload, *, transport=None):
             signature.append(piece_key)
         fingerprint = sha256(json.dumps(signature).encode()).hexdigest()
         if db.execute(
-            "SELECT 1 FROM media_usage WHERE kind='tts' AND fingerprint=? AND state<>'rejected'",
+            """SELECT 1 FROM media_usage WHERE kind='tts' AND fingerprint=?
+            AND state<>'rejected' AND NOT (state='reconciled' AND charged=0)""",
             (fingerprint,),
         ).fetchone():
             raise ValueError("这段朗读已请求，请查看当前答复")
@@ -131,10 +132,14 @@ def listen(store, token, payload, *, transport=None):
     except (OSError, URLError, HTTPException, ValueError):
         status = "uncertain"
     with closing(store.connect()) as db, db:
-        db.execute(
+        settled = db.execute(
             "UPDATE media_usage SET state=?,charged=? WHERE id=? AND state='pending'",
             (status, units if status == "complete" else 0, ref),
-        )
+        ).rowcount
+        if not settled and status == "complete":
+            record_late_charge(db, ref, units)
+    if not settled:
+        raise chat.Unavailable("这段朗读已进入平台对账")
     if status != "complete":
         raise chat.Unavailable("朗读服务暂未返回可播放的音频")
     with closing(store.connect()) as db, db:

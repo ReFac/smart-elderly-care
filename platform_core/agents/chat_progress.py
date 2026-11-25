@@ -50,7 +50,7 @@ class Progress:
         self.last_flush = 0
         self.suppressed = False
 
-    def bind(self, actor, scope, generation, request, check):
+    def bind(self, actor, scope, generation, request, check, *, action=None):
         self.identity = self.store, actor, scope, generation, request
         self.check = check
         with closing(self.store.connect()) as db:
@@ -58,7 +58,10 @@ class Progress:
         if self.speak:
             with _lock:
                 _pending_audio[self.identity] = self
-        self.emit({"type": "begin", "scopeKey": scope, "generation": generation, "requestId": request})
+        frame = {"type": "begin", "scopeKey": scope, "generation": generation, "requestId": request}
+        if action:
+            frame["action"] = action
+        self.emit(frame)
 
     def delta(self, text):
         if self.suppressed:

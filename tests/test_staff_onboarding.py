@@ -86,7 +86,7 @@ class StaffOnboarding(unittest.TestCase):
     def test_resume_only_returns_unambiguous_completed_page_fields(self):
         raw = {"pages": [{"page": 1, "state": "complete"}, {"page": 2, "state": "partial"}], "lines": [
             {"page": 1, "line": 1, "text": "姓名：张小明"},
-            {"page": 1, "line": 2, "text": "手机号：13900001025"},
+            {"page": 1, "line": 2, "text": "手机号：＋８６ １３９００００１０２５"},
             {"page": 2, "line": 1, "text": "姓名：王小明"},
             {"page": 1, "line": 3, "text": "岗位：总管理员"},
             {"page": 1, "line": 4, "text": "紧急联络人电话：13900001026"},

@@ -253,6 +253,12 @@
 .assistant-error { color: #93342f; }
 .assistant-status { color: var(--muted); }
 .assistant-error:empty, .assistant-status:empty { display: none; }
+.assistant-dictation { margin: 0 2px 7px; color: var(--muted); font-size: 12px; }
+.assistant-dictation-bar { display: flex; align-items: center; gap: 8px; }
+.assistant-dictation-toggle { padding: 3px 6px; border-radius: 5px; color: var(--accent); background: transparent; font-size: inherit; }
+.assistant-dictation-toggle:not(:disabled):hover { background: var(--soft); }
+.assistant-dictation-original { margin-top: 4px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; }
+.assistant-dictation-text { max-height: 100px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (min-width: 901px) and (max-width: 1080px) {
   .primary-nav a { padding-inline: 9px; }
   .primary-nav { gap: 0; }

@@ -36,7 +36,8 @@ def recipients(db, state, user, resident_id, policy):
         raise ValueError("请选择试住档案")
     result = []
     for row in db.execute(
-        "SELECT * FROM accounts WHERE enabled=1 AND kind IN ('staff','owner') ORDER BY display_name,username"
+        """SELECT * FROM accounts WHERE enabled=1 AND activation_pending=0
+        AND kind IN ('staff','owner') ORDER BY display_name,username"""
     ):
         employee = access._public(row)
         if policy is not None:

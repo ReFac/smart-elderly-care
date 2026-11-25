@@ -140,6 +140,13 @@ def data_lines(response):
             yield raw[5:].strip()
 
 
+def stream_frame(data):
+    frame = json.loads(data)
+    if not isinstance(frame, dict):
+        raise ValueError("云端回复流格式无效")
+    return frame
+
+
 def read_chat_stream(response, received, *, allow_terminal_eof=False):
     pieces, finish, usage = [], None, None
     length = 0
@@ -148,17 +155,26 @@ def read_chat_stream(response, received, *, allow_terminal_eof=False):
             if finish is not None:
                 break
             raise ValueError("云端回复缺少结束状态")
-        chunk = json.loads(data)
+        chunk = stream_frame(data)
+        choices = chunk.get("choices", [])
+        if "error" in chunk or not isinstance(choices, list):
+            raise ValueError("云端回复流格式无效")
         if chunk.get("usage") is not None:
             usage = chunk["usage"]
-        for choice in chunk.get("choices", []):
-            delta = choice.get("delta") or {}
+        for choice in choices:
+            if not isinstance(choice, dict):
+                raise ValueError("云端回复流格式无效")
+            delta = choice.get("delta")
+            if delta is None:
+                delta = {}
+            if not isinstance(delta, dict):
+                raise ValueError("云端回复流格式无效")
             part = delta.get("content")
             if choice.get("index", 0) != 0 or delta.get("tool_calls"):
                 raise ValueError("文字回复流格式无效")
+            if part is not None and not isinstance(part, str):
+                raise ValueError("云端回复分段无效")
             if part:
-                if not isinstance(part, str):
-                    raise ValueError("云端回复分段无效")
                 length += len(part)
                 if length > 12000:
                     raise ValueError("云端回复文字过长")

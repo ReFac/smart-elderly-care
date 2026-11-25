@@ -1,7 +1,7 @@
 """Audio compatibility is tested with in-memory provider replies."""
 
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.message import Message
 from io import BytesIO
 import json
@@ -187,10 +187,16 @@ class AudioGatewayUsageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "待平台核对"):
                 self.recognize()
             call.assert_called_once()
-        with closing(self.store.connect()) as db:
+        with closing(self.store.connect()) as db, db:
             self.assertEqual(media.amounts(db, self.plan, "asr")["held"], 2)
+            call_id = db.execute("SELECT id FROM media_usage").fetchone()[0]
+            media.reconcile(db, call_id, 1, self.store.now())
+        with patch.object(audio_adapters.connection, "open_request") as call:
+            with self.assertRaisesRegex(ValueError, "已对账扣费"):
+                self.recognize()
+            call.assert_not_called()
 
-    def test_configured_tts_reads_only_authorized_voice_replies_and_meters_chars(self):
+    def voice_turn(self):
         with patch.object(
             audio_adapters.connection,
             "open_request",
@@ -212,6 +218,16 @@ class AudioGatewayUsageTests(unittest.TestCase):
                 VALUES(?,?,?,?,?,'','','','请复核。',24,?)""",
                 (user["id"], scope, "fixture-generation", "voice-turn", "", receipt),
             )
+        return user, {
+            "region": {},
+            "scopeKey": scope,
+            "generation": "fixture-generation",
+            "requestId": "voice-turn",
+            "sentence": 0,
+        }
+
+    def test_configured_tts_reads_only_authorized_voice_replies_and_meters_chars(self):
+        user, payload = self.voice_turn()
         settings = {
             "NH_TTS_PROVIDER": "compatible",
             "NH_TTS_MODEL": "tts-fixture",
@@ -227,13 +243,6 @@ class AudioGatewayUsageTests(unittest.TestCase):
             ) as call,
             patch.object(read_aloud, "read_key") as legacy,
         ):
-            payload = {
-                "region": {},
-                "scopeKey": scope,
-                "generation": "fixture-generation",
-                "requestId": "voice-turn",
-                "sentence": 0,
-            }
             with self.assertRaises(PermissionError):
                 read_aloud.listen(
                     self.store,
@@ -249,3 +258,39 @@ class AudioGatewayUsageTests(unittest.TestCase):
                 "SELECT actor, charged, state FROM media_usage WHERE kind='tts'"
             ).fetchone()
             self.assertEqual(tuple(row), (user["id"], 7, "complete"))
+
+    def test_tts_zero_settlement_allows_retry_but_late_paid_audio_does_not(self):
+        _, payload = self.voice_turn()
+        with (
+            patch.object(read_aloud, "read_key", return_value="fixture"),
+            patch.object(read_aloud, "synthesize", side_effect=TimeoutError) as remote,
+        ):
+            with self.assertRaises(chat.Unavailable):
+                read_aloud.listen(self.store, self.token, payload)
+            with self.assertRaisesRegex(ValueError, "已请求"):
+                read_aloud.listen(self.store, self.token, payload)
+            remote.assert_called_once()
+
+        with closing(self.store.connect()) as db, db:
+            first = db.execute("SELECT id FROM media_usage WHERE kind='tts'").fetchone()[0]
+            media.reconcile(db, first, 0, self.store.now())
+
+        def settle_before_reply(*_):
+            with closing(self.store.connect()) as db, db:
+                active = db.execute("SELECT id FROM media_usage WHERE kind='tts' AND state='pending'").fetchone()[0]
+                media.reconcile(db, active, 0, self.store.now() + timedelta(minutes=11))
+            return sample_wav()
+
+        with (
+            patch.object(read_aloud, "read_key", return_value="fixture"),
+            patch.object(read_aloud, "synthesize", side_effect=settle_before_reply) as remote,
+        ):
+            with self.assertRaisesRegex(chat.Unavailable, "对账"):
+                read_aloud.listen(self.store, self.token, payload)
+            with self.assertRaisesRegex(ValueError, "已请求"):
+                read_aloud.listen(self.store, self.token, payload)
+            remote.assert_called_once()
+
+        with closing(self.store.connect()) as db:
+            rows = db.execute("SELECT state,charged FROM media_usage WHERE kind='tts' ORDER BY rowid").fetchall()
+            self.assertEqual([tuple(row) for row in rows], [("reconciled", 0), ("reconciled", 7)])

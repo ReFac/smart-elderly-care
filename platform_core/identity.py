@@ -11,7 +11,7 @@ import secrets
 import smtplib
 import ssl
 import time
-from threading import Thread
+from threading import BoundedSemaphore, Thread
 from uuid import uuid4
 
 from . import access, activity, history, secure_storage
@@ -19,6 +19,7 @@ from . import access, activity, history, secure_storage
 LIFETIME = 600
 MAX_TRIES = 5
 CHANNELS = ("email", "sms")
+_delivery_slots = BoundedSemaphore(2)
 
 
 def init(db):
@@ -293,6 +294,35 @@ def request_code(
     sender = senders(store).get(channel)
     if sender is None:
         raise ValueError("机构尚未接通此验证渠道")
+    background = background and purpose == "password"
+    if background and not _delivery_slots.acquire(blocking=False):
+        raise access.LoginThrottled("验证码投递服务正忙，请稍后再试")
+    dispatched = False
+    try:
+        challenge, code, dst = _issue_challenge(store, payload, purpose, channel, token, peer, host_owner)
+        if dst:
+            def deliver():
+                try:
+                    _deliver_challenge(store, sender, dst, code, purpose, challenge)
+                finally:
+                    if background:
+                        _delivery_slots.release()
+
+            if background:
+                try:
+                    Thread(target=deliver, name="identity-mail", daemon=True).start()
+                except RuntimeError:
+                    raise access.LoginThrottled("验证码投递服务正忙，请稍后再试") from None
+                dispatched = True
+            else:
+                deliver()
+        return {"challenge": challenge, "expiresIn": LIFETIME}
+    finally:
+        if background and not dispatched:
+            _delivery_slots.release()
+
+
+def _issue_challenge(store, payload, purpose, channel, token, peer, host_owner):
     challenge = uuid4().hex
     code = f"{secrets.randbelow(100_000_000):08d}"
     now = int(time.time())
@@ -326,27 +356,20 @@ def request_code(
                 ),
             )
 
-    def deliver():
-        try:
-            sender(dst, code)
-        except (OSError, ValueError, KeyError, smtplib.SMTPException):
-            with closing(store.connect()) as db, db:
-                db.execute("DELETE FROM identity_challenges WHERE id=?", (challenge,))
-            if purpose != "password":
-                raise ValueError("渠道未能投递，请检查机构验证服务后重试") from None
-        else:
-            with closing(store.connect()) as db, db:
-                db.execute(
-                    "UPDATE identity_challenges SET delivered=1 WHERE id=?",
-                    (challenge,),
-                )
+    return challenge, code, dst
 
-    if dst:
-        if background and purpose == "password":
-            Thread(target=deliver, name="identity-mail", daemon=True).start()
-        else:
-            deliver()
-    return {"challenge": challenge, "expiresIn": LIFETIME}
+
+def _deliver_challenge(store, sender, dst, code, purpose, challenge):
+    try:
+        sender(dst, code)
+    except (OSError, ValueError, KeyError, smtplib.SMTPException):
+        with closing(store.connect()) as db, db:
+            db.execute("DELETE FROM identity_challenges WHERE id=?", (challenge,))
+        if purpose != "password":
+            raise ValueError("渠道未能投递，请检查机构验证服务后重试") from None
+    else:
+        with closing(store.connect()) as db, db:
+            db.execute("UPDATE identity_challenges SET delivered=1 WHERE id=?", (challenge,))
 
 
 def finish(store, payload, *, token=None, host_owner=False):

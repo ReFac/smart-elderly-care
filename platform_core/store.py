@@ -2,9 +2,10 @@
 
 from contextlib import closing
 from datetime import datetime
+from hashlib import sha256
 import json
 from pathlib import Path
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Lock
 from zoneinfo import ZoneInfo
 
 from .room_context import room_context, validate_proposal
@@ -61,6 +62,10 @@ def viewer(db, token):
     return user
 
 
+def actor_stamp(user):
+    return sha256(json.dumps(user, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 class Store:
     def __init__(
         self,
@@ -81,6 +86,9 @@ class Store:
             self.path
         )
         self.now = now
+        self._daily_maintenance_lock = Lock()
+        self._trials_checked = None
+        self._archive_checked = None
         self.network_probes = BoundedSemaphore(4)
         self.public_submissions = lead_intake.PublicSubmissions()
         self.code_senders = dict(code_senders or {})
@@ -197,11 +205,23 @@ class Store:
             user = self.actor(db, token)
             return {
                 "userId": user["id"],
+                "actorStamp": actor_stamp(user),
                 "groupActivityDue": daily_life.pending_count(db, None, user, self.now()),
                 "today": self.now().date().isoformat(),
                 "revision": db.execute(
                     "SELECT revision FROM workspace WHERE id=1"
                 ).fetchone()[0],
+            }
+
+    def navigation_version(self, token):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN")
+            user = self.actor(db, token)
+            return {
+                "userId": user["id"],
+                "actorStamp": actor_stamp(user),
+                "revision": db.execute("SELECT revision FROM workspace WHERE id=1").fetchone()[0],
+                "today": self.now().date().isoformat(),
             }
 
     def snapshot(self, token):
@@ -210,6 +230,7 @@ class Store:
         with closing(self.connect()) as db, db:
             db.execute("BEGIN")
             user = self.actor(db, token)
+            stamp = actor_stamp(user)
             row = db.execute(
                 "SELECT revision,data FROM workspace WHERE id=1"
             ).fetchone()
@@ -385,6 +406,7 @@ class Store:
             data["groupActivityDue"] = daily_life.pending_count(db, state, user, self.now())
             return {
                 "revision": row["revision"],
+                "actorStamp": stamp,
                 "today": today,
                 "data": data,
                 "audit": logs,

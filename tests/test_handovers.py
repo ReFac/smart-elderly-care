@@ -64,6 +64,14 @@ class ShiftHandoverTests(unittest.TestCase):
         family, family_account = self.account("family-login", family=True)
         _, disabled = self.account("disabled", "care")
         self.execute(self.owner, "access.update", id=disabled["id"], enabled=False)
+        self.execute(
+            self.owner, "access.create", kind="staff", role="自定义", permissions=["care"],
+            displayName="尚未激活的接班员工", username="handover-pending-worker",
+            invitation={"channel": "sms", "destination": "13900001025"},
+        )
+        pending = next(a for a in self.store.snapshot(self.owner)["data"]["accounts"]
+                       if a["username"] == "handover-pending-worker")
+        self.assertTrue(pending["activationPending"])
         listed = self.store.handover_recipients(sender)["recipients"]
         self.assertEqual(
             {r["id"] for r in listed}, {self.owner_account["id"], receiver["id"]}
@@ -73,7 +81,7 @@ class ShiftHandoverTests(unittest.TestCase):
         for token in (other, family):
             with self.assertRaises(PermissionError):
                 self.store.handover_recipients(token)
-        for not_eligible in (sender_account, other_account, family_account, disabled):
+        for not_eligible in (sender_account, other_account, family_account, disabled, pending):
             with self.assertRaises((ValueError, PermissionError)):
                 self.submit(sender, not_eligible)
         self.execute(

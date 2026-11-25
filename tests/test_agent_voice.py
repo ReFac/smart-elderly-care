@@ -10,8 +10,32 @@ from unittest.mock import patch
 from provider_fixture import isolate_credentials
 from test_deepseek_media import sample_wav
 from platform_core import provider
-from platform_core.provider import media, speech
+from platform_core.provider import media, speech, voice_cleanup
 from platform_core.store import Store, TIMEZONE
+
+
+class VoiceCleanupTests(unittest.TestCase):
+    def test_polish_removes_pauses_and_restarts(self):
+        for original, expected in (
+            ("嗯，呃，帮我，帮我打开入住管理。", "帮我打开入住管理。"),
+            ("嗯请帮我请帮我查看床位管理", "请帮我查看床位管理"),
+            ("查看今天的工单，呃，接着查看交班记录。", "查看今天的工单，接着查看交班记录。"),
+            ("打开床位管理，不对，是打开入住管理。", "打开入住管理。"),
+            ("嗯，张阿姨 302 房昨晚21:30用了1.5毫升，欠费 ¥1,200.50，不能再给药。",
+             "张阿姨 302 房昨晚21:30用了1.5毫升，欠费 ¥1,200.50，不能再给药。"),
+        ):
+            with self.subTest(original=original):
+                self.assertEqual(voice_cleanup.polish(original), expected)
+
+    def test_polish_does_not_infer_changes_to_business_details(self):
+        for original in (
+            "嗯，呃", "唔，不能给药。", "张伟，张伟有两名同名长辈。",
+            "原话是嗯，呃，给药没成功。", "备注：他回答‘嗯，知道了’。",
+            "302 房，不对，是 303 房", "打开 302 房，不对，打开 303 房。",
+            "不能打开床位管理，不对，打开入住管理。", "金额100, um, 200元均是原值。",
+        ):
+            with self.subTest(original=original):
+                self.assertEqual(voice_cleanup.polish(original), original)
 
 
 class AgentVoiceTests(unittest.TestCase):
@@ -155,6 +179,24 @@ class AgentVoiceTests(unittest.TestCase):
                     "transcriptId": free,
                 },
             )
+
+    def test_assistant_voice_includes_a_reviewable_version_without_an_extra_provider_call(self):
+        original = "嗯，查一下，查一下 302 房张阿姨今早有没有吃药，不要登记。"
+        with patch.object(media, "invoke", return_value={**self.reply, "text": original}) as invoke:
+            result = speech.recognize_agent(self.store, self.staff, None, self.raw, True, conversation=True)
+            self.assertEqual(result, speech.recognize_agent(
+                self.store, self.staff, None, self.raw, True, conversation=True,
+            ))
+            invoke.assert_called_once()
+            regular = self.recognize()
+        self.assertEqual(result["text"], original)
+        self.assertEqual(result["polishedText"], "查一下 302 房张阿姨今早有没有吃药，不要登记。")
+        self.assertEqual(regular["text"], original)
+        self.assertNotIn("polishedText", regular)
+        with closing(self.store.connect()) as db:
+            actor = self.store.actor(db, self.staff)
+            speech.require_chat_receipt(db, actor, None, result["transcriptId"])
+            self.assertEqual(media.amounts(db, self.plan, "asr")["used"], 2)
 
     def test_grants_consent_region_and_midflight_revocation(self):
         no_voice = self.user("text-worker", ["assistants", "care"])

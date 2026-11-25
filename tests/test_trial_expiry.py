@@ -4,10 +4,13 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
+from queue import SimpleQueue
 from tempfile import TemporaryDirectory
+from threading import Barrier
 import unittest
+from unittest.mock import patch
 
-from platform_core.care import trial_expiry
+from platform_core.care import archive_retention, trial_expiry
 from platform_core.store import Store, TIMEZONE
 
 
@@ -61,8 +64,28 @@ class TrialDeadlineTests(unittest.TestCase):
         self.now = datetime(2028, 3, 1, 23, 59, 59, tzinfo=TIMEZONE)
         self.assertEqual(self.resident()["bedId"], self.bed)
         self.now += timedelta(seconds=1)
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            list(pool.map(lambda _: trial_expiry.maintain(self.store), range(3)))
+        connections = SimpleQueue()
+        original = self.store.connect
+        start = Barrier(8, timeout=10)
+
+        def traced_connect():
+            db = original()
+            db.set_trace_callback(lambda sql: connections.put(sql) if sql == "BEGIN IMMEDIATE" else None)
+            return db
+
+        def maintain(_):
+            start.wait()
+            trial_expiry.maintain(self.store)
+            archive_retention.maintain(self.store)
+
+        with (
+            patch.object(self.store, "connect", traced_connect),
+            ThreadPoolExecutor(max_workers=8) as pool,
+        ):
+            list(pool.map(maintain, range(8)))
+            trial_expiry.maintain(self.store)
+            archive_retention.maintain(self.store)
+        self.assertEqual(connections.qsize(), 2)
         resident = self.resident()
         self.assertEqual(
             (resident["status"], resident["bedId"], resident["trialReleasedOn"]),
@@ -74,6 +97,20 @@ class TrialDeadlineTests(unittest.TestCase):
         revision = self.store.version(self.owner)["revision"]
         self.store = Store(self.path, lambda: self.now)
         self.assertEqual(self.store.version(self.owner)["revision"], revision)
+        self.assertEqual(self.expiry_events(), 1)
+
+    def test_failed_daily_scan_can_retry_during_the_same_day(self):
+        self.now += timedelta(days=4)
+        for job in (trial_expiry.maintain, archive_retention.maintain):
+            with (
+                patch.object(self.store, "connect", side_effect=OSError("暂时无法打开")),
+                self.assertRaisesRegex(OSError, "暂时无法打开"),
+            ):
+                job(self.store)
+            with patch.object(self.store, "connect", wraps=self.store.connect) as connect:
+                job(self.store)
+                job(self.store)
+                connect.assert_called_once()
         self.assertEqual(self.expiry_events(), 1)
 
     def test_missed_deadline_and_new_occupant_survive_late_confirmation(self):

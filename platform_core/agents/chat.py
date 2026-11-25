@@ -266,7 +266,7 @@ def permitted_actions(user, routes, text, selected):
         )
     if re.search(
         prefix
-        + r"(?:打开|带我去|去|进入|跳转|定位|办理|创建|新建|登记|查看.{0,10}(?:界面|页面)|找.{0,10}(?:页面|界面))",
+        + r"(?:打开|带我去|前往|去|进入|跳转|定位|办理|创建|新建|登记|查看.{0,10}(?:界面|页面)|找.{0,10}(?:页面|界面))",
         text,
     ):
         if "入住" in text and not any(label in text for label in ("床位", "试住", "入住管理", "入住名册")):
@@ -532,6 +532,15 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             )
             actions = {}
 
+        direct = chat_navigation.direct_destination(text, pages, actions)
+        early_action = direct
+        if manual_allowed:
+            early_action = manual_form.action()
+        elif requested_filters is not None and open_filtered:
+            early_action = {**filter_links[0], "kind": "navigate"}
+        if early_action and area:
+            early_action = {**early_action, "region": ctx.region.selection(area)}
+
         brief = ward_brief.topic(text) if faq_request is None and manual_form is None and requested_filters is None and not actions and user["kind"] in ("owner", "staff") else ""
         if chat_scope.obvious_unrelated(text) or not (
             faq_request or manual_form or requested_filters is not None or brief or chat_navigation.local_question(text)
@@ -564,14 +573,16 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             nonlocal lookup_actions
             if manual_form:
                 facts = {"可打开的手填表单": manual_form.title if manual_allowed else None}
+            elif direct:
+                facts = {"已核对的操作入口": direct["title"]}
+            elif requested_filters is not None:
+                facts = {"床位页面筛选结果": [entry["title"] for entry in filter_links]}
             elif faq_request:
                 facts = {"公开常见问题": [
                     {"问题": entry.question, "已核对说明": entry.answer} for entry in faq_request["items"]
                 ]}
             else:
                 facts = ctx.evidence(store, db, user, state, selected, hours, topics)
-            if requested_filters is not None:
-                facts["床位页面筛选结果"] = [entry["title"] for entry in filter_links]
             if brief:
                 lines[:] = ward_brief.phrases(brief, facts)
                 return {
@@ -599,7 +610,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                 page,
                 text,
                 web_enabled=web_enabled,
-                include_history=faq_request is None and manual_form is None,
+                include_history=faq_request is None and manual_form is None and requested_filters is None and not direct,
             )
             if lookup_actions:
                 body["tools"] = [action.function() for action in lookup_actions]
@@ -700,7 +711,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
     result, failure = None, ""
     try:
         if progress:
-            progress.bind(uid, scope, generation, request, current_search_state)
+            progress.bind(uid, scope, generation, request, current_search_state, action=early_action)
             emit_delta, flush_delta = resident_wording_stream(progress.delta)
         if consider_search:
             try:
@@ -788,6 +799,9 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             action = None
         else:
             _, answer, action = extract(response, actions, request, scope)
+        if direct:
+            action = direct
+            answer = "正在打开「" + direct["title"] + "」。"
         if manual_form:
             if manual_allowed:
                 action = manual_form.action()

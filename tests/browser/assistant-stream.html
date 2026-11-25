@@ -18,7 +18,13 @@
     uiSettings: { institutionName: '演示机构', hiddenRoutes: [] },
     assistantVoice: {state: 'available', path: '/api/assistant/voice'},
   };
-  const ctx = { state, available: () => true, async refreshWorkspace() { return true; } };
+  const ctx = {
+    state, available: () => true, async checkNavigation() { return true; },
+    go(route, _tab, onArrival) {
+      history.pushState(null, '', '#' + route);
+      onArrival?.();
+    },
+  };
   const find = selector => document.querySelector(selector);
   const first = '这是可以立即显示并朗读的第一句。';
   const last = '这是推迟到结束前才返回的收尾。';
@@ -93,7 +99,9 @@
       const stream = new ReadableStream({
         start(controller) {
           turn.controller = controller;
-          frame(turn, {type: 'begin', scopeKey, generation, requestId: payload.requestId});
+          frame(turn, {type: 'begin', scopeKey, generation, requestId: payload.requestId,
+            ...(payload.text === '打开运营总览' ? { action: { kind: 'navigate', route: 'overview', title: '运营总览' } } : {}),
+          });
           options.signal.addEventListener('abort', () => {
             if (!turn.done) controller.error(options.signal.reason);
           }, {once: true});
@@ -232,12 +240,24 @@
     popup().querySelector('.assistant-reader-close').click();
     await until(() => calls[2].signal.aborted, '退出停止朗读');
 
+    await speak('打开运营总览');
+    const navigated = turns.at(-1);
+    await until(() => location.hash === '#overview' && panel().hidden, '语音指令提前打开页面');
+    beginSpeech(navigated);
+    await until(() => calls.length === 4 && !navigated.done, '切到业务页后仍并行朗读');
+    calls[3].deliver();
+    await until(() => !popup().hidden && popup().classList.contains('assistant-reader-detached'), '跳转后继续用声纹小窗');
+    popup().querySelector('.assistant-reader-close').click();
+    finish(navigated);
+    await until(() => !input().readOnly, '跳转后的完整答复仍写回');
+    launch.click();
+    await until(() => !input().disabled, '重开对话可发送下一条消息');
     await speak('销毁期间的对话');
     const discarded = turns.at(-1);
     beginSpeech(discarded);
-    await until(() => calls.length === 4, '等待一段可中止的朗读');
+    await until(() => calls.length === 5, '等待一段可中止的朗读');
     clearChat();
-    check(!panel() && discarded.signal.aborted && calls[3].signal.aborted, '销毁助理时中止接收及朗读');
+    check(!panel() && discarded.signal.aborted && calls[4].signal.aborted, '销毁助理时中止接收及朗读');
     launch.click();
     await until(() => !input().disabled, '再次打开健康助理');
     check(!find('.assistant-read-option input').checked, '新面板默认不朗读');

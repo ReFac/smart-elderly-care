@@ -231,14 +231,20 @@ def _anthropic_stream(response, received):
     usage, pieces, finish = {}, [], None
     length = 0
     for line in deepseek.data_lines(response):
-        event = json.loads(line)
+        event = deepseek.stream_frame(line)
         kind = event.get("type")
         if kind == "message_start":
-            usage.update(event["message"]["usage"])
+            message = event.get("message")
+            if not isinstance(message, dict) or not isinstance(message.get("usage"), dict):
+                raise ValueError("云端回复流格式无效")
+            usage.update(message["usage"])
             usage.pop("output_tokens", None)
         elif kind == "message_delta":
-            usage.update(event.get("usage", {}))
-            finish = event["delta"].get("stop_reason") or finish
+            receipt, delta = event.get("usage", {}), event.get("delta")
+            if not isinstance(receipt, dict) or not isinstance(delta, dict):
+                raise ValueError("云端回复流格式无效")
+            usage.update(receipt)
+            finish = delta.get("stop_reason") or finish
         elif kind == "message_stop" and finish:
             return _anthropic_response(
                 {
@@ -250,11 +256,13 @@ def _anthropic_stream(response, received):
         elif kind == "error":
             raise ValueError("云端回复流提前结束")
         elif kind in ("content_block_start", "content_block_delta"):
-            block = event["content_block" if kind == "content_block_start" else "delta"]
+            block = event.get("content_block" if kind == "content_block_start" else "delta")
+            if not isinstance(block, dict):
+                raise ValueError("云端回复流格式无效")
             if block.get("type") == "tool_use":
                 raise ValueError("文字回复流格式无效")
             if block.get("type") in ("text", "text_delta"):
-                part = block["text"]
+                part = block.get("text")
                 if not isinstance(part, str):
                     raise ValueError("云端回复分段无效")
                 length += len(part)

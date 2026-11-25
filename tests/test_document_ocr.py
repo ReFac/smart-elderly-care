@@ -403,7 +403,7 @@ class DocumentOcrTests(unittest.TestCase):
                     "finish_reason": "stop",
                     "text": "<｜ref｜>text<｜/ref｜><｜box｜>[[100,100,800,180]]<｜/box｜>姓名："
                     + self.resident()["name"]
-                    + "\n过敏史：原文乙",
+                    + " 性别：女 年龄：76\n过敏史：原文乙",
                 }
             ],
         }
@@ -437,6 +437,8 @@ class DocumentOcrTests(unittest.TestCase):
         self.assertEqual(
             [c["field"] for c in result["candidates"]], ["name", "allergies"]
         )
+        self.assertEqual(result["candidates"][0]["value"], self.resident()["name"])
+        self.assertIn("性别：女", result["lines"][0]["text"])
         self.assertTrue(result["lines"][0]["box"])
         self.assertNotIn("confidence", result["lines"][0])
         self.assertIsNone(self.view()["summary"])

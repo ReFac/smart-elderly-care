@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 from platform_core import provider
 from platform_core.agents import chat
+from platform_core.agents.chat_progress import Progress
 from platform_core.store import Store, TIMEZONE
 
 
@@ -75,3 +76,40 @@ class AssistantFormTests(unittest.TestCase):
         self.assertIn("没有", denied["content"])
         self.assertIsNone(self.ask("如何打开办理试住？", "form-question")["action"])
         self.assertIsNone(self.ask("请勿打开定时工单", "form-negative")["action"])
+
+    def test_confirmed_destinations_are_emitted_before_cloud_response(self):
+        cases = (
+            ("打开床位管理", {"kind": "navigate", "route": "beds"}),
+            ("新增员工", {"kind": "openForm", "route": "access", "form": "staffAdd"}),
+            ("床位管理筛选主楼", {"kind": "navigate", "route": "beds", "tab": "all"}),
+            ("床位管理可以筛选主楼？", {}),
+        )
+        revision = self.store.version(self.token)["revision"]
+        for index, (prompt, expected) in enumerate(cases):
+            with self.subTest(prompt=prompt):
+                events = []
+                progress = Progress(self.store, events.append)
+
+                def cloud(key, body):
+                    self.assertEqual([event["type"] for event in events], ["begin"])
+                    emitted = events[0].get("action")
+                    if expected:
+                        self.assertEqual({key: emitted[key] for key in expected}, expected)
+                    else:
+                        self.assertIsNone(emitted)
+                    return self.transport(key, body)
+
+                try:
+                    result = chat.reply(self.store, self.token, {
+                        "requestId": "early-" + str(index), "text": prompt,
+                    }, progress=progress, transport=cloud)
+                finally:
+                    progress.close()
+                if expected:
+                    self.assertEqual(events[0]["action"], {
+                        k: result["messages"][-1]["action"][k] for k in events[0]["action"]
+                    })
+                else:
+                    self.assertNotEqual(result["messages"][-1]["action"]["kind"], "navigate")
+        self.assertEqual(self.transport.call_count, len(cases))
+        self.assertEqual(self.store.version(self.token)["revision"], revision)

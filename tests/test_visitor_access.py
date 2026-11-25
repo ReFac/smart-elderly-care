@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from platform_core import portal, reset_links, visitor_access
+from platform_core import portal, reset_links, secure_storage, visitor_access
 from platform_core.store import SignedOut, Store
 
 
@@ -16,13 +16,14 @@ class VisitorAccessTests(TestCase):
         self.store = Store(Path(directory.name) / "tour.sqlite3", now=lambda: self.now,
                            initial_owner_password="visitor-test-only")
 
-    def verify_phone(self, phone):
+    def request_phone(self, phone):
         assigned = []
         self.store.code_senders["sms"] = lambda _, code: assigned.append(code)
         challenge = visitor_access.request_code(self.store, {"phone": phone}, "fixture")
-        return visitor_access.verify(self.store, {
-            "challengeId": challenge["challengeId"], "code": assigned[0],
-        }, "fixture")
+        return {"challengeId": challenge["challengeId"], "code": assigned[0]}
+
+    def verify_phone(self, phone):
+        return visitor_access.verify(self.store, self.request_phone(phone), "fixture")
 
     def owner_change(self, token, action, **payload):
         return self.store.execute(action, payload, self.store.version(token)["revision"], token)
@@ -101,11 +102,17 @@ class VisitorAccessTests(TestCase):
         self.assertNotIn("13000000202", repr(rows))
         with self.assertRaises(SignedOut):
             self.store.snapshot(tour)
+        self.now += timedelta(minutes=2)
+        pending = self.request_phone("13000000202")
         issued = []
         self.store.reset_link_senders["sms"] = lambda _, link: issued.append(link)
         reset_links.send(self.store, owner, {"id": guest["id"]}, "https://care.invalid")
         password = "customer-isolation-fixture"
         reset_links.redeem(self.store, {"token": issued[0].split("#reset=")[1], "newPassword": password})
+        self.assertFalse(visitor_access.status(self.store, tour, None)["signedIn"])
+        self.assertFalse(visitor_access.status(self.store, second, None)["signedIn"])
+        with self.assertRaises(ValueError):
+            visitor_access.verify(self.store, pending, "fixture")
         token, actor = self.store.login(guest["username"], password)
         self.assertEqual(actor["routes"], ["tour", "faq", "account"])
         data = self.store.snapshot(token)["data"]
@@ -125,15 +132,43 @@ class VisitorAccessTests(TestCase):
         for field in ({"residentId": "r001"}, {"familyServices": True}, {"portalScopes": ["medication"]}):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 self.owner_change(owner, "access.update", id=guest["id"], **field)
+        self.now += timedelta(minutes=2)
+        fresh_tour = self.verify_phone("13000000202")
+        self.assertTrue(visitor_access.status(self.store, fresh_tour, None)["signedIn"])
         self.owner_change(owner, "access.update", id=guest["id"], enabled=False)
-        self.assertFalse(visitor_access.status(self.store, tour, None)["signedIn"])
+        self.assertFalse(visitor_access.status(self.store, fresh_tour, None)["signedIn"])
         with self.assertRaises(SignedOut):
             self.store.snapshot(token)
         self.now += timedelta(minutes=2)
         with self.assertRaises(ValueError):
             self.verify_phone("13000000202")
         self.owner_change(owner, "access.update", id=guest["id"], enabled=True)
-        self.assertFalse(visitor_access.status(self.store, second, None)["signedIn"])
+        self.assertFalse(visitor_access.status(self.store, fresh_tour, None)["signedIn"])
         reopened = Store(self.store.path)
         reopened_token, _ = reopened.login("owner", "visitor-test-only")
         self.assertEqual(len(reopened.snapshot(reopened_token)["data"]["accounts"]), 2)
+
+    def test_visitor_proofs_survive_same_host_update_only(self):
+        tour = self.verify_phone("13000000303")
+        username = visitor_access.status(self.store, tour, None)["customerUsername"]
+        pending = self.request_phone("13000000404")
+        root = self.store.path.parent
+        point = root / "tour.akbak"
+        secure_storage.create_snapshot(self.store, point)
+
+        for same_host in (True, False):
+            with self.subTest(same_host=same_host):
+                restored_path = root / f"restored-{same_host}.sqlite3"
+                secure_storage.restore_snapshot(
+                    point, restored_path, self.store.storage_key_file, same_host=same_host,
+                )
+                restored = Store(restored_path, now=lambda: self.now)
+                owner, _ = restored.login("owner", "visitor-test-only")
+                self.assertIn(username, [account["username"] for account in restored.snapshot(owner)["data"]["accounts"]])
+                self.assertEqual(visitor_access.status(restored, tour, None)["signedIn"], same_host)
+                if same_host:
+                    session = visitor_access.verify(restored, pending, "fixture")
+                    self.assertTrue(visitor_access.status(restored, session, None)["signedIn"])
+                else:
+                    with self.assertRaises(ValueError):
+                        visitor_access.verify(restored, pending, "fixture")

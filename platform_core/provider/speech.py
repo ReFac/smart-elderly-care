@@ -9,7 +9,7 @@ import zlib
 
 from .. import access
 from ..care.records import lookup
-from . import audio_adapters, media
+from . import audio_adapters, media, voice_cleanup
 
 
 # Ogg uses a non-reflected CRC-32 without initial/final XOR. The standard library
@@ -281,7 +281,7 @@ def recognize_agent(store, token, selected, raw, consent, *, conversation=False)
             raise PermissionError("工作区域或语音权限已变化，请重新核对")
         return user
 
-    return transcribe(
+    result = transcribe(
         store,
         token,
         reference,
@@ -290,6 +290,11 @@ def recognize_agent(store, token, selected, raw, consent, *, conversation=False)
         audit_scope,
         feature="assistant.voiceAsr" if conversation else "agent.voiceAsr",
     )
+    if conversation:
+        polished = voice_cleanup.polish(result["text"])
+        if polished != result["text"]:
+            return {**result, "polishedText": polished}
+    return result
 
 
 def require_agent_receipt(db, user, selected, receipt):

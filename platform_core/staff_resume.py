@@ -2,13 +2,14 @@
 
 from contextlib import closing
 import re
+from unicodedata import normalize
 
 from . import access, document_ocr, identity
 
 
 MAX_BYTES = 8 * 1024 * 1024
 NAME = re.compile(r"(?:^|\s)(?:姓名|应聘人|candidate name|name)\s*[:：]\s*([\w·• -]{2,60}?)(?=\s+[\w ]{1,20}[:：]|$)", re.I)
-PHONE = re.compile(r"(?<![\d+])(?:\+86[ -]?)?1[3-9]\d{9}(?!\d)")
+PHONE = re.compile(r"(?<![0-9+])(?:\+86[ -]?)?1[3-9][0-9]{9}(?![0-9])")
 
 
 def authorize(store, db, token):
@@ -29,8 +30,9 @@ def suggestions(result):
             value = " ".join(name[1].split())
             if not any(c.isdigit() or c == "_" for c in value):
                 evidence["displayName"].setdefault(value, line)
-        if re.match(r"(?:手机号码?|联系电话|手机|电话|mobile|phone)\s*[:：]", text, re.I):
-            for match in PHONE.finditer(text):
+        phone_text = normalize("NFKC", text)
+        if re.match(r"(?:手机号码?|联系电话|手机|电话|mobile|phone)\s*:", phone_text, re.I):
+            for match in PHONE.finditer(phone_text):
                 value = identity.destination("sms", re.sub(r"[ -]", "", match[0]))
                 evidence["phone"].setdefault(value, line)
     fields = {}

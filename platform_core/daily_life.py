@@ -35,6 +35,8 @@ def init(db):
         details TEXT NOT NULL, proposedById TEXT NOT NULL, proposedBy TEXT NOT NULL, proposedAt TEXT NOT NULL,
         requestId TEXT NOT NULL, fingerprint TEXT NOT NULL, scopeKey TEXT NOT NULL,
         UNIQUE(proposedById,requestId), UNIQUE(campusId,scopeKey,kind,day,startsAt))""")
+    db.execute("""CREATE INDEX IF NOT EXISTS daily_life_due
+        ON daily_life_events(day,endsAt,id)""")
     db.execute("""CREATE TABLE IF NOT EXISTS daily_life_invitees(
         eventId TEXT NOT NULL REFERENCES daily_life_events(id), residentId TEXT NOT NULL,
         roomId TEXT NOT NULL, roomNumber TEXT NOT NULL, bedId TEXT NOT NULL, bedLabel TEXT NOT NULL,
@@ -503,23 +505,37 @@ def pending_count(db, state, user, now):
     ):
         return 0
     now = now.astimezone(LOCAL)
+    due_at = now.date().isoformat(), now.strftime("%H:%M")
     if not db.execute(
         """SELECT 1 FROM daily_life_events e WHERE (day,endsAt) <= (?,?)
             AND NOT EXISTS (SELECT 1 FROM daily_life_signatures s WHERE s.eventId=e.id) LIMIT 1""",
-        (now.date().isoformat(), now.strftime("%H:%M")),
+        due_at,
     ).fetchone():
         return 0
     rooms = facility._meta(db, facility._access(db, user, environment=True))
-    return len(
-        _pending(
-            db,
-            state,
-            user,
-            now,
-            {r["id"] for r in rooms},
-            count_only=True,
-        )
-    )
+    if not rooms:
+        return 0
+    if state is None:
+        residents, moves = db.execute(
+            """SELECT json_extract(data,'$.residents'),json_extract(data,'$.bedMoves')
+               FROM workspace WHERE id=1"""
+        ).fetchone()
+        state = {"residents": json.loads(residents), "bedMoves": json.loads(moves or "[]")}
+    visible = _visible_residents(db, state, user)
+    if not visible:
+        return 0
+    # A signer must be able to verify the entire saved roster, including each original room.
+    return db.execute(
+        """SELECT count(*) FROM daily_life_events e
+           WHERE (e.day,e.endsAt) <= (?,?)
+             AND NOT EXISTS (SELECT 1 FROM daily_life_signatures s WHERE s.eventId=e.id)
+             AND EXISTS (SELECT 1 FROM daily_life_invitees i WHERE i.eventId=e.id)
+             AND NOT EXISTS (
+                 SELECT 1 FROM daily_life_invitees i WHERE i.eventId=e.id
+                   AND (i.roomId NOT IN (SELECT value FROM json_each(?))
+                        OR i.residentId NOT IN (SELECT value FROM json_each(?))))""",
+        (*due_at, json.dumps([r["id"] for r in rooms]), json.dumps(list(visible))),
+    ).fetchone()[0]
 
 
 def roster(store, token, campus_id="", room_id="", day=""):

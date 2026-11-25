@@ -327,6 +327,8 @@ def restore_snapshot(source, target_db, recovery_key_file, *, same_host=False):
                 "identity_reset_links",
                 "identity_passkey_challenges",
                 "identity_limits",
+                "visitor_sessions",
+                "visitor_challenges",
                 "backup_retrievals",
                 "backup_restores",
                 "backup_imports",

@@ -9,7 +9,7 @@
 <output role="status">运行中</output>
 <script type="module">
   import { chatLauncher, toggleChat, clearChat } from '../../web/features/assistant-chat.js';
-  import { assistantPageLinks, openAssistantAction } from '../../web/features/assistant-actions.js';
+  import { assistantCommand, assistantPageLinks, openAssistantAction } from '../../web/features/assistant-actions.js';
   import { renderFeature } from '../../web/features/index.js';
   import { selectTab } from '../../web/features/shared.js';
   import * as ui from '../../web/lib/ui.js';
@@ -23,6 +23,7 @@
   }
 
   const question = '我该从哪里查看长护险记录？';
+  const direct = '打开长期护理保险';
   const destination = { route: 'longCare', title: '长期护理保险' };
   const denied = { route: 'settings', title: '机构设置' };
   const state = {
@@ -31,15 +32,16 @@
     residents: [], longCareEvents: [], allowedActions: [],
   };
   const requests = [], navigations = [], messages = [];
-  let freshRoutes = ['longCare'], refreshes = 0, reads = 0;
+  let freshRoutes = ['longCare'], refreshes = 0, reads = 0, complete;
   const ctx = {
     state, ui,
     available: route => state.user.routes.includes(route) && !state.uiSettings.hiddenRoutes.includes(route),
-    async refreshWorkspace() {
+    async checkNavigation() {
       refreshes++;
       state.user.routes = [...freshRoutes];
       return true;
     },
+    async refreshWorkspace() { throw new Error('导航不应拉取完整工作台'); },
     go(route, tab, onArrival) {
       navigations.push(route);
       if (tab) selectTab(route, tab);
@@ -56,7 +58,21 @@
       const payload = JSON.parse(options.body);
       requests.push(payload);
       messages.push({ role: 'user', content: payload.text, pageLinks: [denied] });
-      if (payload.text === question) {
+      if (payload.text === direct) {
+        const action = { ...destination, kind: 'navigate' };
+        const encoder = new TextEncoder();
+        const result = new ReadableStream({ start(controller) {
+          controller.enqueue(encoder.encode(JSON.stringify({ type: 'begin', action, requestId: payload.requestId }) + '\n'));
+          complete = () => {
+            messages.push({ role: 'assistant', content: '正在打开长期护理保险。', action, pageLinks: [destination] });
+            controller.enqueue(encoder.encode(JSON.stringify({ type: 'done', result: {
+              generation: 'fixture-generation', scopeKey: 'fixture-scope', messages,
+            } }) + '\n'));
+            controller.close();
+          };
+        } });
+        return new Response(result, { headers: { 'Content-Type': 'application/x-ndjson' } });
+      } else if (payload.text === question) {
         messages.push({ role: 'assistant', content: '可以进入长期护理保险查看经办台账。',
           pageLinks: [destination, destination, denied, { route: 'https://example.org', title: '不属于工作台' }] });
       } else if (payload.text === '这两个地方分别在哪儿？') {
@@ -79,10 +95,14 @@
   async function send(text) {
     const input = find('.assistant-input');
     const before = requests.length;
+    submit(text);
+    await until(() => requests.length === before + 1 && !input.readOnly && !input.disabled, '完成本轮问答');
+  }
+  function submit(text) {
+    const input = find('.assistant-input');
     input.value = text;
     input.dispatchEvent(new Event('input'));
     input.form.requestSubmit();
-    await until(() => requests.length === before + 1 && !input.readOnly && !input.disabled, '完成本轮问答');
   }
   async function run() {
     await open();
@@ -127,6 +147,18 @@
       {...roomEntry, kind: 'navigate'});
     check(arrival?.[0] === 'beds' && arrival[1] === 'all' &&
       JSON.stringify(arrival[2]) === expectedParams, '点击房型入口带着楼层、房型和数量进入床位列表');
+    const selected = assistantCommand(ctx, { role: 'assistant', action: { ...roomEntry, kind: 'navigate' },
+      pageLinks: [{ ...roomEntry, params: { ...roomEntry.params, floor: 'floor-8' } }, roomEntry] });
+    check(selected.params.floor === 'floor-2', '同一床位页签有多个入口时，保留选定的筛选条件');
+
+    const before = navigations.length;
+    history.replaceState(null, '', '#overview');
+    submit(direct);
+    await until(() => location.hash === '#longCare' && typeof complete === 'function', '云端完整答复之前即进入目标页');
+    check(find('.assistant-input').readOnly, '路由跳转与云端答复并行');
+    complete();
+    await until(() => !find('.assistant-input').readOnly, '云端答复继续完成');
+    check(navigations.length === before + 1, '完整答复到达后不会再次打开页面');
     clearChat();
     document.documentElement.dataset.result = 'pass';
     find('output').textContent = 'PASS';

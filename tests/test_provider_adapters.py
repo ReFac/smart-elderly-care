@@ -204,6 +204,22 @@ class ChatProviderAdapterTests(unittest.TestCase):
                 if kind != "anthropic":
                     self.assertEqual(payload["stream_options"], {"include_usage": True})
 
+    def test_malformed_stream_shapes_raise_a_provider_error(self):
+        for kind, frame in (
+            ("openai", []),
+            ("openai", {"choices": [{"delta": ["invalid"]}]}),
+            ("google", {"choices": [None]}),
+            ("anthropic", []),
+            ("anthropic", {"type": "content_block_delta", "delta": ["invalid"]}),
+        ):
+            with (
+                self.subTest(kind=kind, frame=frame),
+                patch.dict("os.environ", {"NH_CHAT_PROVIDER": kind}),
+                patch.object(connection, "open_request", return_value=stream_data([frame])),
+                self.assertRaisesRegex(ValueError, "回复流格式"),
+            ):
+                completions.stream("key", BASE, self.fail)
+
     def test_selected_provider_does_not_read_deepseek_key_and_invalid_config_is_closed(
         self,
     ):

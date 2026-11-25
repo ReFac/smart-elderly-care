@@ -163,3 +163,26 @@ class TrialFollowupTests(unittest.TestCase):
                 },
                 token,
             )
+
+    def test_new_trial_callbacks_cannot_be_assigned_to_an_unactivated_account(self):
+        rid, bed = self.trial()
+        self.save("access.create", {
+            "kind": "staff", "role": "自定义", "permissions": ["residents"],
+            "displayName": "尚未激活的员工", "username": "trial-pending-worker",
+            "invitation": {"channel": "sms", "destination": "13900001025"},
+        })
+        invited = next(a for a in self.state()["accounts"] if a["username"] == "trial-pending-worker")
+        self.assertTrue(invited["activationPending"])
+        recipients = {r["id"] for r in self.store.trial_assignees(self.owner, rid)["recipients"]}
+        self.assertNotIn(invited["id"], recipients)
+        active = self.staff[0][1]
+        self.assertIn(active, recipients)
+        fields = {"residentId": rid, "reason": "暂缓入住", "assigneeId": invited["id"], "dueDate": "2026-11-25"}
+        with self.assertRaises(ValueError):
+            self.save("care.endTrial", fields)
+        self.assertEqual(next(r for r in self.state()["residents"] if r["id"] == rid)["bedId"], bed)
+        self.save("care.endTrial", {**fields, "assigneeId": active})
+        (task,) = self.state()["trialFollowups"]
+        with self.assertRaises(ValueError):
+            self.save("care.reassignTrialFollowup", {"taskId": task["id"], "assigneeId": invited["id"]})
+        self.assertEqual(self.state()["trialFollowups"][0]["assigneeId"], active)

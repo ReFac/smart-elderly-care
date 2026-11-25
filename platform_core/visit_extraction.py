@@ -20,10 +20,6 @@ LABELS = {
     "orders": "本次医嘱",
     "followUp": "复诊安排",
 }
-NAME = re.compile(
-    r"(?:^|[|;；\s])(?:患者姓名|患者名字|姓名|patient name)\s*[:：]\s*([^|;；,，\s]+)",
-    re.I,
-)
 VISIT_DATE = re.compile(
     r"(?:实际就诊日期|就诊日期|门诊日期|就医日期|就诊时间)\s*[:：]\s*(.+)"
 )
@@ -31,7 +27,7 @@ DATE = re.compile(
     r"(?<!\d)(\d{4})\s*[-./年]\s*(\d{1,2})\s*[-./月]\s*(\d{1,2})(?:日|号)?(?!\d)"
 )
 SENSITIVE = re.compile(
-    r"(?:患者姓名|姓名|证件号|身份证|住址|联系电话|手机号|病案号|住院号|门诊号|病人号|patient name)\s*[:：]",
+    r"(?:患者姓名|患者名字|姓名|证件号|身份证|住址|联系电话|手机号|病案号|住院号|门诊号|病人号|patient name)\s*[:：]",
     re.I,
 )
 GUIDE = (
@@ -98,14 +94,15 @@ def _recognized(store, token, files, manifest, authorize, name):
         for line in result.get("lines", []):
             source = line["text"].strip()
             comparable = clean(source)
-            for match in NAME.finditer(comparable):
-                if clean(match[1]) != clean(name):
-                    mismatch = True
+            names = document_ocr.names_on_line(comparable)
+            if any(value and value != clean(name) for value in names):
+                mismatch = True
             if hit := VISIT_DATE.search(comparable):
                 if when := day(hit[1]):
                     dates.add(when)
             if (
                 item["category"] == "CT影像"
+                or names
                 or SENSITIVE.search(comparable)
                 or pages.get(line["page"], "complete") != "complete"
             ):
@@ -127,8 +124,8 @@ def _recognized(store, token, files, manifest, authorize, name):
         if omitted:
             warnings.append(label + " 的部分文字超出整理窗口，请在原件上逐页补核。")
         if any(
-            clean(c.get("value", "")) != clean(name)
-            for c in result.get("candidates", [])
+            clean(c["value"]) != clean(name)
+            for c in document_ocr.normalized_candidates(result.get("candidates", []))
             if c.get("field") == "name"
         ):
             mismatch = True

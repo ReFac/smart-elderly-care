@@ -100,6 +100,7 @@ export function assistantCommand(ctx, message) {
   if (action.kind !== 'navigate') return ['notice', 'workOrder', 'medicationRound', 'scheduledMeal'].includes(action.kind) ? action : null;
   const target = pageDestination(ctx, action);
   if (!target) return null;
+  if (target.params || target.tab) return { ...target, kind: 'navigate' };
   const links = assistantPageLinks(ctx, message).filter((link) => link.destination === target.destination);
   const link = links.find((item) => item.tab === target.tab) || links[0] || target;
   return { ...link, kind: 'navigate' };
@@ -119,7 +120,7 @@ export function openAssistantAction(ctx, action) {
     const link = pageDestination(ctx, action);
     if (!link) return ctx.toast('当前账号无法打开这个页面');
     const arrival = () => document.getElementById('content')?.focus({ preventScroll: true });
-    return link.params ? ctx.go(link.destination, link.tab, arrival, link.params) :
+    return link.params || link.destination === 'beds' ? ctx.go(link.destination, link.tab, arrival, link.params || {}) :
       ctx.go(link.destination, link.tab, arrival);
   }
   if (!action.id) return ctx.toast('无法识别这项建议，请重新提问');

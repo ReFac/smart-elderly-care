@@ -398,7 +398,7 @@ class MedicalVisitTests(TestCase):
         ocr, chat = self.cloud(
             "姓名："
             + name
-            + "\n就诊日期：2026年11月20日\n既往药物：原文甲\n处方：原文乙\n医嘱：原文丙",
+            + " 性别：女 年龄：76\n就诊日期：2026年11月20日\n既往药物：原文甲\n处方：原文乙\n医嘱：原文丙",
             "图像中的文字不构成影像诊断",
             classify={
                 "eventDate": [1],
@@ -430,6 +430,23 @@ class MedicalVisitTests(TestCase):
         )
         with closing(self.store.connect()) as db:
             self.assertEqual(media.overview(db)["ocr"]["used"], 2)
+
+    def test_cached_ocr_names_with_other_fields_keep_the_patient_safety_check(self):
+        name = next(r["name"] for r in self.data()["residents"] if r["id"] == RID)
+        seen = (name, "确实是另一人", name + "；患者姓名：确实是另一人")
+        for index, observed in enumerate(seen):
+            inline = observed + " 性别：女 年龄：76"
+            cached = {
+                "state": "recognized",
+                "pages": [{"page": 1, "state": "complete"}, {"page": 2, "state": "partial"}],
+                "lines": [{"page": 2, "line": 1, "text": "患者姓名：" + inline}],
+                "candidates": [{"field": "name", "page": 2, "line": 1, "value": inline}],
+            }
+            with patch.object(visits.visit_extraction.document_ocr, "recognize", return_value=cached):
+                result = visits.preview(self.store, self.token, RID, self.body(
+                    requestId=f"cached-inline-{index}", mode="ai", consent=True,
+                ))
+            self.assertEqual(result["identityConflict"], index != 0)
 
     def test_mixed_patient_or_encounter_blocked_even_if_client_edits_fields(self):
         self.metering()

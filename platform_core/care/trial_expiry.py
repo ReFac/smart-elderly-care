@@ -33,13 +33,20 @@ def release(state, person):
 
 
 def maintain(store):
+    if store._trials_checked == store.now().date().isoformat():
+        return
+    with store._daily_maintenance_lock:
+        now = store.now()
+        day = now.date().isoformat()
+        if store._trials_checked != day:
+            _maintain(store, now, day)
+            store._trials_checked = day
+
+
+def _maintain(store, now, day):
     from .. import activity, history
     from ..store import encode
 
-    now = store.now()
-    day = now.date().isoformat()
-    if getattr(store, "_trials_checked", None) == day:
-        return
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
         revision, raw = db.execute(
@@ -65,4 +72,3 @@ def maintain(store):
                 {"residentId": person["id"]},
                 old,
             )
-    store._trials_checked = day

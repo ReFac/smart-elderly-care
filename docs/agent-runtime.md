@@ -103,3 +103,5 @@ python3 -m unittest discover -s tests -p 'test_agent_runtime.py' -v
 在床位管理中选择楼层或房间，可在所选范围内询问助理。范围随运行保存在 SQLite 中。照护和财务工具只计算该范围当前在住长辈的工单、评估或账单。尚无位置归属的物资只在全院任务使用。历史账单按现居区域的长辈归集，历史房间审计按事件发生时的床位归集。
 
 `GET /api/agent/capabilities` 提供登录人的本地工具、业务命令和规划方式。通过 `GET /api/facility/search` 本地搜索姓名或房号。通过 `GET /api/agent/room-context?roomId=…&limit=12` 取得可操作工单的目标编号、字段与权限条件。提交 `POST /api/agent/room-proposals` 时提供 `revision` 以及仅含 `roomId, taskId, note, requestId` 的 `payload`，服务端在写事务内重新核对房间、当前入住和工单，随后进入现有人工确认队列。这些查询和草稿均零模型调用。每个客户使用独立机构数据库，后续可通过受信的服务端 `Store(..., facility_policy=...)` 接入细粒度区域授权。该扩展约束房间与 Agent 接口；原有临床、财务等管理模块继续执行其现有岗位权限。
+
+明确的页面、手填表单和单一床位筛选指令，经服务端核对权限后随流式回答的首帧发出入口。页面可以先打开，模型继续完成答复，开启朗读时声纹小窗会随之继续播放。打开入口前，工作台核对当前账号、权限和版本，有变化时才重读完整工作台。办理业务仍需在对应表单核对并确认。

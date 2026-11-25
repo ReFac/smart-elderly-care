@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError
 import wave
 
 from provider_fixture import isolate_credentials
@@ -229,6 +230,16 @@ class MediaTests(unittest.TestCase):
             self.assertEqual(media.amounts(db, self.plan, "asr")["held"], 0)
         with patch.object(media, "invoke", return_value=self.reply):
             self.assertEqual(self.call()["text"], self.reply["text"])
+
+    def test_gateway_failures_are_held_until_the_supplier_charge_is_known(self):
+        for kind, code, uncertain in (("ocr", 504, True), ("asr", 408, True), ("ocr", 429, False)):
+            with self.subTest(kind=kind, code=code), patch.object(media, "build_opener") as opener:
+                body = BytesIO()
+                opener.return_value.open.side_effect = HTTPError("https://fixture.invalid", code, "fixture", {}, body)
+                with self.assertRaises(media.MediaError) as raised:
+                    media.invoke(kind, b"fixture", "upload", "application/octet-stream", "test-key")
+                self.assertIs(raised.exception.uncertain, uncertain)
+                self.assertTrue(body.closed)
 
     def test_uploaded_wav_retains_original_locally_and_only_sends_audio_samples(self):
         self.grant()

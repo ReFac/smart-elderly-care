@@ -32,6 +32,7 @@ let state, revision, route;
 let branding = {};
 let epoch = 0,
   refreshing = false;
+let deferredRefresh = null;
 const seenAlerts = new Set();
 let historyScope = {};
 let focusIds = [];
@@ -56,6 +57,7 @@ function permitted(permission) {
 }
 function signedOut() {
   epoch++;
+  deferredRefresh = null;
   state = null;
   residentOverlay = null;
   clearChat();
@@ -111,8 +113,10 @@ async function signOut() {
   }
 }
 function applySnapshot(snapshot) {
+  deferredRefresh = null;
   state = {
     ...snapshot.data,
+    actorStamp: snapshot.actorStamp,
     today: snapshot.today,
     audit: snapshot.audit,
     revision: snapshot.revision,
@@ -253,7 +257,19 @@ async function readState({publicLanding = false} = {}) {
   if (!response.ok) throw new Error('无法读取机构工作台，请重试。');
   const snapshot = await response.json();
   if (epoch !== current) return false;
-  applySnapshot(snapshot);
+  if (state?.user.id !== snapshot.data.user.id || snapshot.revision >= revision)
+    applySnapshot(snapshot);
+  return true;
+}
+
+async function checkNavigation() {
+  const current = epoch;
+  const check = await get('/api/assistant/navigation-version');
+  if (current !== epoch || !state) return false;
+  if (check.revision === revision && check.today === state.today && check.userId === state.user.id &&
+      check.actorStamp && check.actorStamp === state.actorStamp) return true;
+  if (!(await readState()) || current !== epoch) return false;
+  render();
   return true;
 }
 
@@ -390,6 +406,7 @@ function context() {
     openChanges,
     undoRevision,
     confirmChange,
+    checkNavigation,
     focusIds,
     async refreshWorkspace(origin) {
       if (!(await readState())) return false;
@@ -966,6 +983,31 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
+function sameRefreshVersion(check, version) {
+  return check.revision === version.revision && check.userId === version.userId &&
+    check.actorStamp === version.actorStamp && check.today === version.today &&
+    check.groupActivityDue === version.groupActivityDue;
+}
+
+function dialogRefreshTarget(dialog) {
+  const data = dialog.dataset;
+  return [data.proposalId, data.agentRunId, data.handoverId, data.pendingHandoverId,
+    data.managedAccountId, data.roundsResidentId, data.linkedResident].join('\0');
+}
+
+function deferRefresh(snapshot, dialogs) {
+  deferredRefresh = {
+    revision: snapshot.revision,
+    userId: snapshot.data.user.id,
+    actorStamp: snapshot.actorStamp,
+    today: snapshot.today,
+    groupActivityDue: snapshot.data.groupActivityDue,
+    route: location.hash,
+    dialogCount: dialogs.length,
+    dialogs: new WeakMap(dialogs.map(dialog => [dialog, dialogRefreshTarget(dialog)])),
+  };
+}
+
 async function refresh() {
   if (!state || saving || refreshing || document.hidden) return;
   refreshing = true;
@@ -974,13 +1016,17 @@ async function refresh() {
   try {
     const check = await get('/api/version');
     if (current !== epoch || saving || version !== revision) return;
-    if (
-      check.revision === revision &&
-      check.userId === state.user.id &&
-      check.groupActivityDue === state.groupActivityDue &&
-      check.today === state.today
-    )
-      return;
+    if (sameRefreshVersion(check, {
+      revision, userId: state.user.id, actorStamp: state.actorStamp,
+      today: state.today, groupActivityDue: state.groupActivityDue,
+    })) return;
+    if (check.actorStamp && deferredRefresh && deferredRefresh.route === location.hash &&
+        sameRefreshVersion(check, deferredRefresh)) {
+      const dialogs = [...document.querySelectorAll('dialog[open]')];
+      if (dialogs.length === deferredRefresh.dialogCount &&
+          (dialogs.length || editing) &&
+          dialogs.every(dialog => deferredRefresh.dialogs.get(dialog) === dialogRefreshTarget(dialog))) return;
+    }
     const snapshot = await get('/api/state');
     if (current !== epoch || saving || version !== revision) return;
     const inbox = snapshot.data.familyRoundInbox;
@@ -1000,7 +1046,10 @@ async function refresh() {
       JSON.stringify(state.uiSettings.hiddenRoutes) !==
         JSON.stringify(snapshot.data.uiSettings.hiddenRoutes);
     const dialogs = [...document.querySelectorAll('dialog[open]')];
-    if (editing && !changedUser && !dialogs.length) return;
+    if (editing && !changedUser && !dialogs.length) {
+      deferRefresh(snapshot, dialogs);
+      return;
+    }
     if (dialogs.length && !changedUser) {
       const obsolete = dialogs.some(
         (d) =>
@@ -1028,7 +1077,10 @@ async function refresh() {
           d.dataset.managedAccountId &&
           !snapshot.data.accounts?.some((a) => a.id === d.dataset.managedAccountId),
       );
-      if (!obsolete && !settled && !received && !lostTarget) return;
+      if (!obsolete && !settled && !received && !lostTarget) {
+        deferRefresh(snapshot, dialogs);
+        return;
+      }
     }
     dialogs.forEach((d) => d.close());
     applySnapshot(snapshot);
@@ -1041,5 +1093,8 @@ async function refresh() {
 }
 window.addEventListener('focus', refresh);
 document.addEventListener('visibilitychange', refresh);
+document.addEventListener('close', event => {
+  if (deferredRefresh?.dialogs.has(event.target)) refresh();
+}, true);
 setInterval(refresh, 4000);
 load();

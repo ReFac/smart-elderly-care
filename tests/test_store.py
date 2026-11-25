@@ -40,6 +40,18 @@ class WorkspaceTransactions(unittest.TestCase):
         self.assertEqual(user["username"], "owner")
         self.assertIn("settings", user["routes"])
 
+    def test_version_detects_effective_user_scope_without_a_workspace_write(self):
+        scope = {"roomIds": []}
+        self.store.facility_policy = lambda _db, _user: scope
+        before = self.store.version(self.token)
+        self.assertEqual(before["actorStamp"], self.store.snapshot(self.token)["actorStamp"])
+        scope["roomIds"] = ["room-policy-example"]
+        after = self.store.version(self.token)
+        self.assertEqual(after["revision"], before["revision"])
+        self.assertEqual(after["userId"], before["userId"])
+        self.assertNotEqual(after["actorStamp"], before["actorStamp"])
+        self.assertEqual(after["actorStamp"], self.store.snapshot(self.token)["actorStamp"])
+
     def test_restart_preserves_state_and_audit_and_refreshes_business_day(self):
         before = self.store.snapshot(self.token)
         self.execute("care.inquire", {"name": "走查长辈"}, before["revision"])

@@ -136,6 +136,23 @@ class DailyLifeTests(TestCase):
                 ).fetchone()
             )
 
+    def test_due_count_requires_the_entire_group_within_the_current_scope(self):
+        room = self.first["roomId"]
+        signer_id = self.store.snapshot(self.signer)["data"]["user"]["id"]
+        self.submit()
+        self.submit(requestId="room-breakfast", roomId=room)
+        self.now += timedelta(minutes=1)
+        self.store.facility_policy = lambda _db, user: {"roomIds": [room]} if user["id"] == signer_id else {}
+
+        self.assertEqual(self.store.version(self.owner)["groupActivityDue"], 2)
+        self.assertEqual(self.store.version(self.signer)["groupActivityDue"], 1)
+        self.assertEqual(self.store.snapshot(self.signer)["data"]["groupActivityDue"], 1)
+        self.assertEqual(self.store.version(self.carer)["groupActivityDue"], 0)
+        (event,) = self.roster(self.signer)["pending"]
+        self.sign(event["id"], [self.first["id"]])
+        self.assertEqual(self.store.version(self.signer)["groupActivityDue"], 0)
+        self.assertEqual(self.store.version(self.owner)["groupActivityDue"], 1)
+
     def test_trial_attends_leave_is_omitted_and_transfer_preserves_snapshot(self):
         self.cmd(self.owner, "care.register", {"name": "合成试住"})
         state = self.store.snapshot(self.owner)["data"]

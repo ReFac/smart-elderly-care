@@ -86,17 +86,17 @@ class TokenReceiptTests(unittest.TestCase):
         )
 
     def test_rejected_business_shape_still_records_actual_receipt(self):
-        with (
-            patch.object(provider, "read_key", return_value="test"),
-            patch.object(
-                deepseek, "send", return_value=response(message="不是完整 JSON")
-            ),
-        ):
-            with self.assertRaisesRegex(ValueError, "未能完成"):
+        replies = [response(message="不是完整 JSON"), {**response(), "choices": [None]}]
+        for index, reply in enumerate(replies):
+            with (
+                patch.object(provider, "read_key", return_value="test"),
+                patch.object(deepseek, "send", return_value=reply),
+                self.assertRaisesRegex(ValueError, "未能完成"),
+            ):
                 generation.generate(
                     self.store,
                     "change-review",
-                    "usage-invalid",
+                    "usage-invalid-" + str(index),
                     "根据已给事实答复",
                     {"test": 7},
                     generation.narrative,
@@ -105,9 +105,7 @@ class TokenReceiptTests(unittest.TestCase):
                 )
         self.assertEqual(
             self.rows(),
-            [
-                ("workflow.changeReview", self.owner["id"], 111, 111, 100, 60, 40, 11),
-            ],
+            [("workflow.changeReview", self.owner["id"], 111, 111, 100, 60, 40, 11)] * 2,
         )
 
     def test_late_receipt_keeps_paid_total_and_breakdown_on_original_row(self):

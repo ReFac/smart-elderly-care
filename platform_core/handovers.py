@@ -11,7 +11,7 @@ from .care.records import append_record, get_resident, lookup, text_field
 def recipients(db, actor, policy=None):
     access.require(actor, "care")
     accounts = db.execute(
-        """SELECT * FROM accounts WHERE enabled=1 AND kind IN ('staff','owner')
+        """SELECT * FROM accounts WHERE enabled=1 AND activation_pending=0 AND kind IN ('staff','owner')
         AND id<>? ORDER BY display_name,username""",
         (actor["id"],),
     )
@@ -62,6 +62,7 @@ def recipient(db, actor, account_id, policy):
     if (
         not receiver
         or not receiver["enabled"]
+        or receiver["activationPending"]
         or receiver["kind"] not in ("staff", "owner")
         or receiver["id"] == actor["id"]
         or not access.has(receiver, "care")
