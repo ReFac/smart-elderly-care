@@ -72,7 +72,7 @@ function attachmentsInput(ctx, rows, changed) {
   ]) };
 }
 
-export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '') {
+export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '', originals = []) {
   if (!canAct(ctx, 'dossier.confirmVisit')) return ctx.toast('当前账号没有就诊病例核对权限。');
   if (resident && !visitCandidates(ctx).some(row => row.id === resident.id)) return ctx.toast('这份档案当前只读。');
   const ai = mode === 'ai';
@@ -81,7 +81,7 @@ export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '')
   const dialog = ctx.detail(ai ? '整理就诊资料' : '手动录入病例', form);
   dialog.classList.add('medical-visit-dialog');
   let person = resident, existing = null, date = '';
-  const rows = [];
+  const rows = originals.map(row => ({...row}));
   let active;
   let requestId = crypto.randomUUID();
   dialog.addEventListener('close', () => active?.abort(), {once: true});
@@ -104,7 +104,7 @@ export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '')
     if (person?.id !== chosen.id) {
       existing = null;
       date = '';
-      rows.splice(0);
+      rows.splice(0, rows.length, ...originals.map(row => ({...row})));
     }
     person = chosen;
     dialog.dataset.roundsResidentId = person.id;
@@ -153,7 +153,7 @@ export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '')
         const chosen = list.find(row => row.id === select.value) || null;
         if (existing?.id !== chosen?.id) {
           date = '';
-          rows.splice(0);
+          rows.splice(0, rows.length, ...originals.map(row => ({...row})));
           requestId = crypto.randomUUID();
         }
         existing = chosen;

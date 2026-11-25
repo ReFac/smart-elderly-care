@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>医疗评估报告回归</title>
+<output>检查中</output>
+<script type="module">
+import * as ui from '../../web/lib/ui.js';
+import { detail, formDialog } from '../../web/lib/dialogs.js';
+import { evaluationDetails } from '../../web/features/assessment-scale.js';
+import { riskDrawer, createRiskAssessment } from '../../web/features/risk-reports.js';
+
+const resident = {id:'synthetic', name:'样本甲', level:'待复核',status:'在住'};
+const report = {residentId:resident.id, id:'qa-risk', date:'2026-11-24', subject:'专项观察',
+  finding:'合成观察记录', riskReport:{topic:'专项观察', level:'中风险', score:0, maximum:8,
+    bands:[{level:'中风险',min:0,max:8}], dimensions:[{group:'环境',score:0,maximum:8}],
+    tags:['机构原表'],preventionSteps:[{title:'核对登记',detail:'合成预案'}],
+    reviewNote:'下次核对原表',factors:[{group:'环境', finding:'合成分项记录', points:0}], avoid:'原表注明的注意事项'}};
+const ctx = {ui, detail, dialog:formDialog, state:{residents:[resident,{id:'other',name:'样本乙',status:'在住'}],
+  allowedActions:['care.screen'], followups:[report],residentRooms:{synthetic:'101'}, user:{id:'qa'}, assessments:[]}};
+const out = document.querySelector('output');
+function check(value, message) { if (!value) throw Error(message); }
+try {
+  riskDrawer(ctx, report);
+  let drawer = document.querySelector('dialog[open]');
+  check(drawer.querySelector('.evaluation-identity').innerText.includes('样本甲（101）'), '长辈和所在房间');
+  check(drawer.querySelector('.risk-result').dataset.tone === 'medium', '使用原表核定的风险等级');
+  check(drawer.querySelector('.risk-score strong').textContent === '0', '零分与空值区分');
+  check(drawer.querySelector('.evaluation-track span').style.width === '0%', '实际零分不绘制填充');
+  check(drawer.querySelector('.clinical-caution') && !drawer.querySelector('.clinical-guidance'), '单独警示项');
+  check(drawer.querySelector('.evaluation-bands [aria-current]').textContent === '中风险 0–8', '采用本次原表区间');
+  check(drawer.querySelector('.risk-steps').textContent.includes('合成预案') &&
+    drawer.querySelector('.review-plan').textContent.includes('下次核对原表'), '原表预案和复评备注');
+  const buttons = () => [...drawer.querySelectorAll('button')];
+  buttons().find(b => b.textContent === '评估详情').click();
+  check(drawer.textContent.includes('qa-risk'), '详情显示原编号');
+  drawer.close();
+  let submitted;
+  ctx.command = async (_action, payload) => { submitted = payload; return true; };
+  createRiskAssessment(ctx, resident.id);
+  const form = document.querySelector('dialog[open] form');
+  check(form.elements.residentId.length === 1 && form.elements.residentId.value === resident.id, '从档案锁定对象');
+  form.elements.instrument.value = '合成量表';
+  form.elements.finding.value = '检查保存字段';
+  form.elements.level.value = '中风险';
+  form.elements.tags.value = '合成标签';
+  form.elements.recommended.value = '核对原始评估';
+  form.elements.reviewNote.value = '复评备注';
+  const section = [...form.querySelectorAll('section')].find(s => s.querySelector('h3')?.textContent === '原量表风险区间');
+  section.querySelector('button').click();
+  section.querySelector('select').value = '中风险';
+  section.querySelector('input').value = '0';
+  form.requestSubmit();
+  await Promise.resolve();
+  check(submitted?.residentId === resident.id && submitted.riskReport.bands[0].max === null, '保存原表无上限区间');
+  check(submitted.riskReport.bedside.recommended[0] === '核对原始评估' && submitted.riskReport.tags[0] === '合成标签', '原表结构写入');
+  evaluationDetails(ctx, {residentId:resident.id, level:'既有照护等级', note:'历史记录未使用量表'});
+  drawer = document.querySelector('dialog[open]');
+  check(drawer.querySelector('.risk-score strong').textContent === '—', '历史无分值记录');
+  check(drawer.textContent.includes('历史记录未使用量表') && !drawer.querySelector('.evaluation-bars'), '不推断分项得分');
+  drawer.close();
+  out.textContent = 'PASS';
+} catch (e) {out.textContent = 'FAIL ' + e.stack;}
+</script>
+</html>

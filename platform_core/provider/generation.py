@@ -1,5 +1,6 @@
 """Metered model generation. Only server-built scoped projections belong in facts."""
 
+from base64 import b64encode
 from contextlib import closing
 import hashlib
 from http.client import HTTPException
@@ -34,6 +35,7 @@ def generate(
     output_tokens=640,
     shared_once=False,
     on_delta=None,
+    image=None,
 ):
     """Reserve before sending, persist confirmed billing even if the returned JSON is unusable."""
     from . import late_usage, latest, model_name, read_model_key, usage
@@ -59,6 +61,14 @@ def generate(
         body.pop("response_format")
     digest = fingerprint(body)
     size = len(json.dumps(messages, ensure_ascii=False).encode()) + 128 + completions.output_budget(body)
+    if image is not None:
+        mime, original = image
+        if (completions.provider_name() != "deepseek" or model != "deepseek-flash"
+                or mime not in ("image/png", "image/jpeg") or not 0 < len(original) <= 8 * 1024 * 1024):
+            raise ValueError("当前模型无法按图分类，请核对原件")
+        digest = fingerprint([digest, mime, hashlib.sha256(original).hexdigest(), "low"])
+        # DeepSeek caps visual input at 1,024 tokens per image. Base64 bytes are transport only.
+        size += 1024
     request = "generation/" + fingerprint(request_id)
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
@@ -129,6 +139,14 @@ def generate(
     status, reason, tokens, result = "uncertain", "provider_unavailable", 0, None
     remote_receipt = None
     try:
+        if image is not None:
+            messages[-1]["content"] = [
+                {"type": "text", "text": messages[-1]["content"]},
+                {"type": "image_url", "image_url": {
+                    "url": "data:" + mime + ";base64," + b64encode(original).decode("ascii"),
+                    "detail": "low",
+                }},
+            ]
         raw = completions.stream(key, body, on_delta, timeout=40) if on_delta else completions.send(key, body, timeout=40)
         remote_receipt = token_receipt.read(raw, size)
         if remote_receipt is None:

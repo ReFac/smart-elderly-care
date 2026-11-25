@@ -45,12 +45,14 @@ class Handler(BaseHTTPRequestHandler):
         # Do not include staff names or room filters from the query string in access logs.
         self.log_message("%s %s %s", self.command, self.path.partition("?")[0], code)
 
-    def respond(self, status, content, mime, cookie=None, *, attachment=None, retry_after=None, etag=None):
+    def respond(self, status, content, mime, cookie=None, *, attachment=None, retry_after=None, etag=None, page_count=None):
         self.send_response(status)
         self.send_header("Content-Type", mime)
         if status != 304:
             self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "private, no-cache" if etag else "no-store")
+        if page_count is not None:
+            self.send_header("X-Page-Count", str(page_count))
         if etag:
             self.send_header("ETag", etag)
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -185,6 +187,9 @@ class Handler(BaseHTTPRequestHandler):
         return {key: values[0] for key, values in params.items()}
 
     def read_resource(self, path):
+        if path == "/api/care/risk-report-example":
+            from platform_core.care import risk_reports
+            return self.send_json(200, risk_reports.example(self.store, self.token()))
         if path == "/api/system/monitor":
             from platform_core import system_monitor
             params = self.query_fields({"view"})
@@ -650,6 +655,33 @@ class Handler(BaseHTTPRequestHandler):
             from platform_core import inventory_dedupe
 
             return self.send_json(200, inventory_dedupe.preview(self.store, self.token(), self.read_json(4096)))
+        doc_page = re.fullmatch(r"/api/assistant/documents/pages/([1-9][0-9]{0,3})", path)
+        if doc_page:
+            from platform_core import pdf_original
+            from platform_core.agents import document_intake
+
+            token = self.token()
+            document_intake.check(self.store, token)
+            if self.headers.get_content_type() != "application/pdf":
+                raise InvalidMedia("请选择 PDF 原件")
+            raw = self.read_body(8 * 1024 * 1024)
+            number = int(doc_page[1])
+            count = pdf_original.pages(raw)
+            if number > count:
+                raise ValueError("页码超出原件范围")
+            page = pdf_original.render_page(raw, number)
+            document_intake.check(self.store, token)
+            return self.respond(200, page, "image/png", page_count=count)
+        if path == "/api/assistant/documents/preview":
+            from platform_core.agents import document_intake
+
+            token = self.token()
+            document_intake.check(self.store, token)
+            mime = self.headers.get_content_type()
+            if mime not in ("application/pdf", "image/png", "image/jpeg"):
+                raise InvalidMedia("请选择 PDF、PNG 或 JPEG 原件")
+            return self.send_json(200, document_intake.preview(
+                self.store, token, self.read_body(8 * 1024 * 1024), mime))
         if path == "/api/staff/resume/preview":
             from platform_core import staff_resume
 
@@ -663,6 +695,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.store, self.read_json(2048), self.client_address[0], self.token()
             )
             return self.send_json(201, {"user": user}, self.session_cookie(token))
+        if path == "/api/public/visitor/wechat-contact":
+            from platform_core import wechat_tour
+            return self.send_json(202, wechat_tour.receive(self.store, self.read_json(1024), self.client_address[0]))
         if path == "/api/public/visitor/code":
             result = visitor_access.request_code(
                 self.store, self.read_json(512), self.client_address[0], demo=self.visitor_demo()

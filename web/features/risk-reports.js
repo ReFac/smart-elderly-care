@@ -1,40 +1,10 @@
-import { badge, btn, byRecent, canAct, facts, field, link, memo, named, node, options, residentField,
-  residentName, section, select, table, today } from './shared.js';
+import { badge, btn, byRecent, canAct, facts, link, named, node, residentName, section, table } from './shared.js';
+import { evaluationBars, evaluationHeader, evaluationResult } from './evaluation-report.js';
 import { evaluationDetails } from './assessment-scale.js';
 import { residentAnchor, staffLabel } from './people-labels.js';
 
-const topics=['跌倒/坠床','压疮','噎食/误吸','走失','其他'];
-const levels=['低风险','中风险','高风险','待专业复核'];
-
-function create(ctx, rid='') {
-  const factors=node('div','risk-factors-form');
-  function add() {
-    const controls=['评估维度','观察与依据','原表分值'].map((label,i)=>{
-      const c=node('input','plan-input'); c.type=i===2?'number':'text'; c.placeholder=label;
-      c.setAttribute('aria-label',label); c.required=i!==2; c.maxLength=i===0?60:200;
-      if(i===2){c.min=0;c.max=10000;c.step=1;} return c;
-    });
-    const row=node('div','risk-factor-input',[...controls,btn(ctx,'移除',()=>row.remove(),'ghost')]);
-    factors.append(row);
-  }
-  const content = section('风险触发因素',node('div','',[factors,btn(ctx,'添加评估因素',add)]));
-  const score = name => field(name,name==='score'?'原量表总分':'原量表满分',{type:'number',required:false,min:0,max:10000,step:1});
-  ctx.dialog({title:'登记专项风险评估',description:'按专业人员完成的原始评估登记。无评分的评估可留空分值。',content,
-    fields:[residentField(ctx,{value:rid}),select('topic','评估专项',options(topics)),
-      field('instrument','量表名称、版本或评估依据'),select('level','经专业人员核定的等级',[{value:'',label:'请选择'},...options(levels)]),
-      score('score'),score('maximum'),memo('finding','评估结论',true),memo('immediate','立即执行'),
-      memo('follow','近期跟进'),memo('routine','日常维护'),memo('avoid','应避免的情况'),
-      field('nextReview','下次专项评估日期',{type:'date',min:today(ctx),required:false})],
-    submitLabel:'确认登记',onSubmit:v=>{
-      const num=x=>x===''?null:Number(x);
-      const entries=[...factors.children].map(r=>{const [group,finding,points]=r.querySelectorAll('input');
-        return {group:group.value,finding:finding.value,points:num(points.value)};});
-      const {residentId,finding,...report}=v;
-      return ctx.command('care.screen',{residentId,subject:report.topic,finding,riskReport:{
-        ...report,score:num(report.score),maximum:num(report.maximum),factors:entries}},
-        {title:'登记专项风险报告',target:residentName(ctx,residentId),fields:[['专项',report.topic],['人工核定等级',report.level]]});
-    }});
-}
+import { createRiskAssessment } from './risk-report-form.js';
+export { createRiskAssessment };
 
 function history(ctx, rid) {
   return byRecent(ctx.state.followups || []).filter(r=>r.residentId===rid);
@@ -46,27 +16,53 @@ function renderReport(ctx,r) {
   const previous = history(ctx,r.residentId).filter(p=>p.riskReport?.topic===data?.topic);
   const index=previous.findIndex(p=>p.id===r.id);
   const last=index<0?null:previous[index+1]?.riskReport;
-  const score = data?.score;
-  root.append(node('div','risk-result',[node('div','',[node('h2','',data?.level||r.priority||'待专业复核'),
-    node('p','',r.finding)]),node('div','risk-score',[node('strong','',score==null?'—':score),
-    node('small','',score==null?'未提供量表分值':'总得分'+(data.maximum==null?'':' / '+data.maximum)),
-    last?.score!=null?node('small','','上次 '+last.score+' 分'):null])]));
+  const level = data?.level || r.priority || '待专业复核';
+  root.append(evaluationResult({
+    title: level, topic: data?.topic || r.subject, finding: r.finding,
+    score: data?.score, maximum: data?.maximum,
+    lastScore: last?.instrument === data?.instrument && last?.maximum === data?.maximum ? last?.score : null,
+    bands: data?.bands || [],
+    tone: ({'高风险':'high','中风险':'medium','低风险':'low'})[level] || 'neutral',
+  }));
   const factors=data?.factors||[];
   const grouped=new Map();
   for(const f of factors) if(f.points!=null) grouped.set(f.group,(grouped.get(f.group)||0)+f.points);
   const factorsCard=section('风险触发因素',factors.length ? node('dl','risk-factor-list',factors.map(f=>node('div','',[
     node('dt','',f.group),node('dd','',f.finding),node('strong','',f.points==null?'未评分':f.points+' 分')]))) :
     node('p','fx-muted',r.basis||'本次记录未登记分项因素'));
-  const totals=section('分项得分分布',grouped.size?node('div','risk-bars',[...grouped].map(([label,value])=>{
-    const meter=node('meter','');meter.max=Math.max(...grouped.values(),1);meter.value=value;meter.setAttribute('aria-label',label+' '+value+'分');
-    return node('label','',[node('span','',label),meter,node('strong','',value+' 分')]);})):node('p','fx-muted','本次记录没有可汇总的分项得分'));
+  const dimensions = data?.dimensions || [];
+  const scores = dimensions.length ? dimensions.map(d => [d.group, d.score]) : [...grouped];
+  const maxima = Object.fromEntries(dimensions.map(d => [d.group,d.maximum]));
+  const totals = section('分项得分分布', scores.length ? evaluationBars(scores, maxima) :
+    node('p','fx-muted','本次记录没有可汇总的分项得分'));
   root.append(node('div','risk-columns',[factorsCard,totals]));
-  const measures=[['立即执行',data?.immediate],['近期跟进',data?.follow||r.intervention],['日常维护',data?.routine]];
-  root.append(section('护理干预建议',node('div','risk-measures',measures.map(([t,v])=>
-    node('article','',[node('h4','',t),node('p','',v||'未登记')])))));
-  if(data?.avoid) root.append(section('防护注意事项',node('p','',data.avoid)));
-  root.append(facts([['下次评估',data?.nextReview||r.dueDate||'待安排'],['随访责任人',r.assignee?staffLabel(ctx,r.assignee,r.assigneeId):'待安排'],
-    ['原始依据',data?.instrument||'档案记录'],['登记人',r.openedBy?staffLabel(ctx,r.openedBy):'见长辈档案']]));
+
+  const lines = text => (text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const recommendations = [...new Set([...(data?.bedside?.recommended || []), ...lines(r.intervention)])];
+  const cautions = [...new Set([...(data?.bedside?.avoid || []), ...lines(data?.avoid)])];
+  if (recommendations.length || cautions.length) {
+    const groups = [['推荐措施',recommendations,'clinical-guidance'],['避免事项',cautions,'clinical-caution']];
+    root.append(section('床旁防护重点', node('div','risk-precautions',groups.filter(([,items]) => items.length)
+      .map(([title,items,tone]) => node('article',tone,[node('h4','',title),
+        node('ul','',items.map(text=>node('li','',text)))])))));
+  }
+  const measures = [['立即执行', data?.immediate], ['近期跟进', data?.follow], ['日常维护', data?.routine]];
+  if (measures.some(([,value]) => value)) root.append(section('护理干预建议', node('div','risk-measures',
+    measures.map(([title,value]) => node('article','',[node('h4','',title), value
+      ? node('ul','',lines(value).map(text=>node('li','',text))) : node('p','fx-muted','未登记')])))));
+  if (data?.preventionSteps?.length) {
+    const plan = section((data.topic || '') + '重点防护预案', node('ol','risk-steps',
+      data.preventionSteps.map(step=>node('li','',[node('h4','',step.title),node('p','',step.detail)]))));
+    plan.classList.add('clinical-plan');
+    root.append(plan);
+  }
+  const reviewer = data?.reviewer || r.assignee;
+  const next = section('下次评估计划', facts([
+    ['建议评估日期',data?.nextReview || r.dueDate || '待安排'],
+    ['负责评估人',reviewer ? staffLabel(ctx,reviewer,r.assignee === reviewer ? r.assigneeId : undefined) : '待安排'],
+    ['跟进备注',data?.reviewNote || '未登记']]));
+  next.classList.add('review-plan');
+  root.append(next);
   return root;
 }
 
@@ -74,20 +70,21 @@ function profileRisk(person){
   return {residentId:person.id,id:'profile-'+person.id,subject:'档案风险提示',finding:person.risk,date:'',profile:true};
 }
 
-export function riskDrawer(ctx,row) {
+export function riskDrawer(ctx,row,{example = false} = {}) {
   const person=ctx.state.residents.find(p=>p.id===row.residentId);
   if(!person)return;
   const body=node('div','risk-panel'); let dialog;
   function show(r,tab='报告'){
     const chooseTab=n=>{const b=btn(ctx,'评估'+n,()=>show(r,n),'ghost');b.setAttribute('aria-pressed',String(n===tab));return b;};
     const other=btn(ctx,'其他评估',()=>show(r,'其他'),'ghost');other.setAttribute('aria-pressed',String(tab==='其他'));
-    const header=node('header','plan-person',[node('span','plan-avatar',person.name.slice(0,1)),
-      named(residentName(ctx,r.residentId),[person.level,r.subject,r.date,r.openedBy?staffLabel(ctx,r.openedBy):''].filter(Boolean).join(' · ')),
-      badge(ctx,r.riskReport?.level||'查阅记录')]);
+    const header=evaluationHeader(ctx, r.residentId,
+      [r.date && '评估日期 ' + r.date, r.openedBy && '评估人 ' + staffLabel(ctx,r.openedBy),
+       r.subject && '专项 ' + r.subject, !r.profile && '编号 ' + r.id],
+      [person.level && '照护等级 ' + person.level, r.riskReport?.instrument], r.riskReport?.tags || []);
     const tabs=node('nav','risk-tabs',[chooseTab('报告'),chooseTab('详情'),other]);
+    tabs.setAttribute('aria-label','专项评估视图');
     let content;
-    const report=renderReport(ctx,r);
-    if(tab==='报告') content=report;
+    if(tab==='报告') content=renderReport(ctx,r);
     else if(tab==='详情') content=facts([['评估编号',r.profile?'档案风险提示':r.id],['评估专项',r.subject],
       ['记录时间',r.date||'见档案历史'],['评估依据',r.riskReport?.instrument],['观察记录',r.finding],['分级依据',r.basis],
       ['干预安排',r.intervention],['随访记录',r.actual],['效果评价',r.outcome],['状态',r.status||'已登记']].filter(([,v])=>v));
@@ -105,12 +102,14 @@ export function riskDrawer(ctx,row) {
       show(r,'报告');
       window.print();
     },'primary');
+    const switching = body.contains(document.activeElement);
     body.replaceChildren(header,tabs,content,node('footer','plan-footer',[btn(ctx,'关闭',()=>dialog.close()),print]));
+    if (switching) tabs.querySelector('[aria-pressed=true]')?.focus({preventScroll:true});
   }
   show(row);
-  dialog=ctx.detail('专项评估结果',body);
+  dialog=ctx.detail(example ? '专项评估结果 · 虚构示例' : '专项评估结果',body);
   dialog.classList.add('risk-drawer');
-  dialog.dataset.roundsResidentId = row.residentId;
+  if (!example) dialog.dataset.roundsResidentId = row.residentId;
 }
 
 export function riskDesk(ctx) {
@@ -118,7 +117,7 @@ export function riskDesk(ctx) {
   const rows=[...data,...ctx.state.residents.filter(p=>p.risk).map(profileRisk)];
   return table(ctx,{title:'专项风险档案',rows,
     search:{placeholder:'搜索长辈、专项或结论',value:r=>residentName(ctx,r.residentId)+' '+r.subject+' '+r.finding},
-    action:canAct(ctx,'care.screen')?btn(ctx,'登记专项评估',()=>create(ctx),'primary'):null,
+    action:canAct(ctx,'care.screen')?btn(ctx,'登记专项评估',()=>createRiskAssessment(ctx),'primary'):null,
     cols:[{label:'长辈',view:r=>residentAnchor(ctx,r.residentId)},{label:'本次评估',view:r=>named(r.subject,r.date||'长辈档案')},
       {label:'风险等级',view:r=>r.riskReport?badge(ctx,r.riskReport.level):r.priority||'未核定'},
       {label:'原始总分',view:r=>r.riskReport?.score??'—'},{label:'评估人',view:r=>r.openedBy?staffLabel(ctx,r.openedBy):'—'},

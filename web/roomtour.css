@@ -41,3 +41,23 @@
   .tour-stop {gap:6px}
   .tour-stop img {width:42px;height:42px}
 }
+
+dialog.tour-invite { width:min(416px,calc(100vw - 36px)); padding:0; border:0; border-radius:50px 16px 32px 16px; overflow:auto; background:var(--surface); box-shadow:0 20px 80px #17262b50; }
+.tour-invite[open] { animation:tour-invite-open .32s cubic-bezier(.2,.82,.25,1); }
+.tour-invite::backdrop { background:#17252080; }
+.invite-garden { position:relative; height:106px; background:linear-gradient(90deg,#334e4380,transparent 65%),url('/assets/visit/garden.webp') center 48% / cover; border-bottom-right-radius:62% 27px; }
+.invite-garden::after { content:''; display:block; height:100%; width:34%; opacity:.7; background:repeating-radial-gradient(ellipse at 0 112%,transparent 0 8px,#fff8 9px 10px,transparent 11px 18px); border-bottom-right-radius:100% 60%; }
+.invite-close { position:absolute; top:9px; right:10px; width:40px; height:40px; border:0; border-radius:50%; font-size:23px; background:rgba(255,255,255,.91); color:#344039; line-height:1; }
+.invite-body { padding:16px clamp(18px,5vw,32px) 26px; }
+.invite-body h2 { font-size:clamp(1.25rem,4.6vw,1.55rem); line-height:1.4; }
+.invite-body h2:focus { outline:0; }
+.invite-body > p { margin:8px 0 18px; font-size:.95rem; color:var(--muted); }
+.invite-body form:not([hidden]),.invite-wechat:not([hidden]) { display:grid; gap:8px; }
+.invite-body form label { font-weight:600; }
+.invite-body input { background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:10px 13px; width:100%; }
+.invite-body .primary { width:100%; min-height:49px; text-align:center; border-radius:11px; margin-top:6px; }
+.invite-manual { color:var(--accent); background:transparent; border:0; min-height:40px; }
+.invite-body .form-error:empty { display:none; }
+.invite-body .invite-receipt { margin-bottom:0; font-weight:650; }
+@keyframes tour-invite-open { from { opacity:0; transform:translateY(10px) scale(.985); } to { opacity:1; transform:none; } }
+@media(prefers-reduced-motion:reduce){ .tour-invite[open] { animation:none; } }

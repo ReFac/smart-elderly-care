@@ -1,0 +1,16 @@
+<view class="card">
+  <text class="title">{{done ? '已收到您的联系方式' : '预约院方回电'}}</text>
+  <block wx:if="{{!done}}">
+    <text class="detail">同意后，院方可使用本次提交的手机号联系您，介绍照护服务或安排参观。</text>
+    <text wx:if="{{error}}" class="error">{{error}}</text>
+    <block wx:if="{{manual}}">
+      <input type="number" maxlength="11" value="{{phone}}" bindinput="onInput" placeholder="请输入 11 位手机号" aria-label="手机号"/>
+      <button type="primary" disabled="{{busy}}" bindtap="sendPhone">确认并同意院方回电</button>
+    </block>
+    <block wx:else>
+      <button type="primary" open-type="getPhoneNumber" disabled="{{busy}}" bindgetphonenumber="onPhone">授权微信手机号并同意回电</button>
+      <button class="quiet" bindtap="useManual">手动填写手机号</button>
+    </block>
+  </block>
+  <button class="quiet" bindtap="leave">返回参观</button>
+</view>

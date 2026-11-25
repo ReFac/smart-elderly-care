@@ -4,6 +4,7 @@
 <title>助理对话与语音回归</title>
 <link rel="stylesheet" href="../../web/style.css">
 <link rel="stylesheet" href="../../web/agents.css">
+<link rel="stylesheet" href="../../web/features/medical-visits.css">
 <body>
 <output id="result" role="status">运行中</output>
 <script type="module">
@@ -21,18 +22,20 @@
   const state = {
     user:{id:'fixture-voice', kind:'staff', permissions:['assistants','voice']},
     uiSettings:{institutionName:'测试机构',hiddenRoutes:[]},
+    allowedActions:['dossier.confirmVisit'],
     agentCapabilities:{voiceInput:{path:'/test/asr',state:'available'}},
   };
   const goTo = [];
   const ctx = {state, available:() => true, go: (...args) => goTo.push(args), async refreshWorkspace(){return true;}};
   let messages = [], submitted = [], audioUploads = 0, fail = false, generation = 'test', releaseReply;
+  let speechResult = {text:'护理用具还有多少？'};
   const snapshot = () => ({ messages:[...messages], scopeKey:'fixture', generation, contextLimit:100000 });
   window.fetch = async (url, options) => {
     if (url === '/api/assistant/network/probe') return Response.json({connected:true});
     if (url === '/test/asr') {
       check(options.body instanceof Blob && options.headers['X-DeepSeek-Consent'] === 'yes', '录音请求');
       audioUploads++;
-      return Response.json({text:'护理用具还有多少？'});
+      return Response.json(speechResult);
     }
 
     if (options.method !== 'POST') return Response.json(snapshot());
@@ -73,7 +76,7 @@
     }});
     const launcher=chatLauncher(()=>toggleChat(()=>ctx));
     document.body.append(launcher);
-    localStorage.removeItem('assistant:auto-send:fixture-voice');
+    localStorage.setItem('assistant:auto-send:fixture-voice', 'no');
     launcher.click();
     await until(()=>!find('.assistant-input').disabled,'打开对话');
     const input=find('.assistant-input'), mic=find('.assistant-hold');
@@ -87,20 +90,47 @@
     type('今天养老院怎么样？');enter();
     await until(()=>find('.from-assistant'),'等待回答');
     check(submitted.length===1 && goTo.length===0 && !find('dialog[open]'),'普通聊天只回复');
-    const pointer = (kind) => mic.dispatchEvent(new PointerEvent(kind,{bubbles:true,button:0,isPrimary:true,pointerId:4}));
+    const pointer = (kind,type='mouse') => mic.dispatchEvent(new PointerEvent(kind,{bubbles:true,button:0,isPrimary:true,pointerId:4,pointerType:type}));
+    const toolbar = () => [mic, ...document.querySelectorAll('.assistant-attachment,.assistant-send')].map(item => {
+      const {x,y,width,height} = item.getBoundingClientRect();
+      return [x,y,width,height].join(',');
+    }).join('/');
+    const drawer = find('#assistant-chat');
+    drawer.style.width = 'min(280px, 100vw)';
+    const uploadButton = drawer.querySelector('.assistant-document-upload button');
+    check(uploadButton && uploadButton.getBoundingClientRect().top>mic.getBoundingClientRect().top+12,
+      '窄屏提供上传图片，工具栏可换行');
+    const resting = toolbar();
     pointer('pointerdown');
+    check(toolbar()===resting,'开启麦克风时按键位置固定');
     await until(()=>mic.dataset.phase==='recording', '麦克风启动');
+    check(toolbar()===resting,'录音时按键和相邻控件均不位移');
+    release(mic);
+    check(mic.dataset.phase==='recording','键盘松开不会结束由指针发起的录音');
+    await new Promise(resolve=>setTimeout(resolve,250)); pointer('pointercancel');
+    check(mic.dataset.phase==='idle' && submitted.length===1 && audioUploads===0,'手势取消不会上传或发送');
+    pointer('pointerdown','touch');
+    await until(()=>mic.dataset.phase==='recording', '触屏长按开始录音');
+    await new Promise(resolve=>setTimeout(resolve,250)); pointer('pointerup','touch'); pointer('pointerup','touch');
+    check(toolbar()===resting,'转写时按钮及相邻控件位置固定');
+    await until(()=>submitted.length===2 && !input.readOnly, '忽略旧版手动设置，松开只发送一次');
+    check(audioUploads===1 && submitted.at(-1).text===speechResult.text,'自动发送识别结果');
+    drawer.style.removeProperty('width');
+    check(!find('.assistant-auto'),'无自动发送选项');
+    speechResult={text:'  '};
+    pointer('pointerdown');
+    await until(()=>mic.dataset.phase==='recording', '再次长按鼠标');
     await new Promise(resolve=>setTimeout(resolve,250)); pointer('pointerup');
-    await until(()=>input.value.includes('护理用具'), '松开自动转写并回填');
-    check(submitted.length===1 && audioUploads===1,'不开自动发送时可以修改');
-    find('.assistant-auto input').click();
+    await until(()=>find('.assistant-status').textContent.includes('没有听清'),'空白转写给出提示');
+    check(submitted.length===2,'空白转写不发送');
+    speechResult={text:'联网查询护理用具'};
     find('.assistant-network').click();
     await until(()=>find('.assistant-network').getAttribute('aria-pressed')==='true','启用联网后语音提问');
     type(''); press(mic);
     await until(()=>mic.dataset.phase==='recording','再次录音');
     await new Promise(resolve=>setTimeout(resolve,250)); release(mic);
-    await until(()=>submitted.length===2,'开启自动发送后松开即发');
-    check(audioUploads===2 && streams.every(s=>s.getAudioTracks().every(t=>t.readyState==='ended')),'麦克风已释放');
+    await until(()=>submitted.length===3,'键盘松开即发');
+    check(audioUploads===3 && streams.every(s=>s.getAudioTracks().every(t=>t.readyState==='ended')),'麦克风已释放');
     check(submitted.at(-1).webSearch===true, '语音自动发送沿用当前联网开关');
     await until(()=>!find('.assistant-network').disabled,'语音问题已送达');
     find('.assistant-network').click();
@@ -109,7 +139,7 @@
     check(input.value==='追问' && !goTo.length,'出错保留草稿');
     const previous=submitted.at(-1).requestId;
     fail=false;enter();
-    await until(()=>!find('.assistant-error').innerText && find('.assistant-log').querySelectorAll('.from-assistant').length===3 && submitted.length===4,'重试');
+    await until(()=>!find('.assistant-error').innerText && find('.assistant-log').querySelectorAll('.from-assistant').length===4 && submitted.length===5,'重试');
     check(submitted.at(-1).requestId===previous,'重试使用同一发送编号');
     type('生成详细汇报');enter();
     const log = find('.assistant-log');
@@ -123,7 +153,7 @@
     await until(()=>!log.querySelector('.assistant-waiting'),'请求已返回');
     check(Math.abs(log.scrollTop-35)<5, '手动向上翻阅原位置保持');
     log.scrollTop=log.scrollHeight;type('短回复');enter();
-    await until(()=>log.querySelectorAll('.from-assistant').length===6,'短回答完成');
+    await until(()=>log.querySelectorAll('.from-assistant').length===7,'短回答完成');
     check(log.scrollHeight-log.clientHeight-log.scrollTop<4, '短回复跟随底部');
     type('创建老人入住');enter();
     await until(()=>goTo[0]?.[0]==='residents','明确指令快速定位');
@@ -139,7 +169,8 @@
     check(!find('#assistant-chat'),'切换账号清除对话和录音');
     launcher.click();
     await until(()=>!find('.assistant-input').disabled,'新账号对话');
-    check(!find('.assistant-auto input').checked,'自动发送偏好按账号隔离');
+    check(!find('.assistant-auto'),'新账号也只提供松开发送');
+    localStorage.removeItem('assistant:auto-send:fixture-voice');
     clearChat(); oscillator.stop(); audio.close();
     document.documentElement.dataset.result = 'pass';
     find('output').textContent = 'PASS';

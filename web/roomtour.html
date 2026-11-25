@@ -7,7 +7,7 @@
 </head><body><a class="skip-link" href="#main">跳到主要内容</a>
 <header class="site-header"><div class="site-wrap site-nav"><a class="site-brand" href="/visit"><span class="brand-mark"><img src="/assets/desk-mark.svg" width="34" height="32" alt=""></span><strong data-brand>医养服务</strong></a>
       <nav aria-label="官网导航"><a href="/visit">机构首页</a><a href="/roomtour" aria-current="page">环境导览</a><a href="/visit#care">照护服务</a><a href="/faq">常见问题</a></nav>
-      <div class="site-actions account-actions"><a class="staff-link" href="/?workspace=1">账号登录</a><a class="secondary" href="/visitor-register.html">免手机号注册</a></div>
+      <div class="site-actions account-actions"><a class="staff-link" href="/?workspace=1">账号登录</a><a class="secondary" href="/visit#book-visit">预约来院</a></div>
     </div></header>  <main id="main" class="site-wrap tour-workspace">
     <header class="tour-title">
       <div><p class="visit-crumb"><a href="/visit">机构首页</a> / 环境导览</p><h1>3D 环境导览</h1><p>选择空间，拖动查看全景布局。场景为设计示意。</p></div>
@@ -44,6 +44,25 @@
       </aside>
     </div>
   </main>
+  <dialog class="tour-invite" id="tour-invite" aria-labelledby="tour-invite-title" aria-describedby="tour-invite-purpose">
+    <div class="invite-garden" aria-hidden="true"></div>
+    <button class="invite-close" type="button" aria-label="关闭，继续匿名参观" title="继续匿名参观">×</button>
+    <div class="invite-body">
+      <h2 id="tour-invite-title" tabindex="-1" autofocus>想进一步了解院内生活？</h2>
+      <p id="tour-invite-purpose">留下手机号，院方接待人员可回电介绍照护服务。您也可以关闭窗口，继续匿名参观。</p>
+      <form id="tour-contact">
+        <label for="tour-phone">联系手机号</label>
+        <input id="tour-phone" name="phone" type="tel" autocomplete="tel-national" inputmode="tel" maxlength="11" pattern="1[3-9][0-9]{9}" title="请填写 11 位中国大陆手机号" placeholder="请输入 11 位手机号" required>
+        <p class="form-error" role="alert"></p>
+        <button type="submit" class="primary">确认并同意院方回电</button>
+      </form>
+      <div class="invite-wechat" hidden>
+        <button class="invite-manual" type="button">手动填写手机号</button>
+        <a class="primary">使用微信手机号并同意回电</a>
+      </div>
+      <div class="invite-receipt" hidden><p role="status">已收到您的联系方式。</p><button type="button" class="primary">继续参观</button></div>
+    </div>
+  </dialog>
 <footer class="site-footer"><div class="site-wrap footer-layout"><a class="site-brand" href="/visit"><span class="brand-mark"><img src="/assets/desk-mark.svg" width="34" height="32" alt=""></span><strong data-brand>医养服务</strong></a>
       <nav aria-label="页脚导航"><a href="/roomtour">环境导览</a><a href="/visit#book-visit">预约来院</a><a href="/faq">常见问题</a><a href="/?workspace=1">账号登录</a></nav>
     </div></footer></body></html>

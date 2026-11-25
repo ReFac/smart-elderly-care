@@ -262,6 +262,9 @@ def execute(
         ).fetchone()
         if prior:
             if prior["state"] == "complete":
+                if feature in ("assistant.documentOcr", "access.resumeOcr"):
+                    db.execute("UPDATE media_usage SET original=? WHERE id=? AND original IS NULL",
+                               (raw, prior["id"]))
                 return json.loads(prior["result"])
             if prior["state"] == "reconciled":
                 raise ValueError("该原件已对账扣费，请按保留的原件人工核对")
@@ -303,7 +306,7 @@ def execute(
                 digest,
                 int(now.timestamp()),
                 reserve,
-                raw if kind == "asr" else None,
+                raw if kind == "asr" or feature in ("assistant.documentOcr", "access.resumeOcr") else None,
                 reference,
                 feature,
             ),

@@ -5,7 +5,7 @@ export function replyReader(report, exit) {
   const check = el('input');
   check.type = 'checkbox';
   check.disabled = true;
-  const label = node('label', 'assistant-auto assistant-read-option', [check, icon('speaker', 15), '朗读']);
+  const label = node('label', 'assistant-read-option', [check, icon('speaker', 15), '朗读']);
   label.title = '仅朗读按住说话的语音答复';
   check.setAttribute('aria-description', label.title);
 

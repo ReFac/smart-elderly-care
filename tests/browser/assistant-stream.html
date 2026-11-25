@@ -157,7 +157,6 @@
     oscillator.start();
     Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {configurable: true,
       value: async () => destination.stream.clone()});
-    localStorage.removeItem('assistant:auto-send:stream-fixture');
     launch.click();
     await until(() => input() && !input().disabled, '打开健康助理');
     const checkSpeech = find('.assistant-read-option input');
@@ -172,9 +171,9 @@
     checkSpeech.closest('label').click();
     check(checkSpeech.checked, '点击朗读标签可在按住说话前开启朗读');
     await speak('分段返回');
-    await until(() => input().value === '分段返回' && !checkSpeech.disabled && checkSpeech.checked, '录音和转写均保留朗读勾选');
-    const streaming = ping('分段返回，请缓慢读');
-    check(streaming.payload.readAloud && checkSpeech.checked, '手动发送转写与改字后仍可朗读，提交不清除勾选');
+    const streaming = turns.at(-1);
+    check(streaming.payload.text === '分段返回' && streaming.payload.readAloud && checkSpeech.checked,
+      '松开时自动发送，保留朗读勾选');
     beginSpeech(streaming);
     await until(() => calls.length === 1, '回复仍在生成时已请求朗读');
     const current = () => log().querySelector('.assistant-current');
@@ -206,15 +205,6 @@
     finish(typedAfterSpeech);
     await until(() => !input().readOnly, '下一条键盘问题完成');
 
-    await speak('准备全部替换的转写');
-    input().setSelectionRange(0, input().value.length);
-    input().dispatchEvent(new InputEvent('beforeinput', {inputType: 'insertFromPaste'}));
-    const replaced = ping('粘贴来的新问题');
-    check(!replaced.payload.readAloud, '完全替换转写内容后按普通文字发送');
-    finish(replaced);
-    await until(() => !input().readOnly, '粘贴问题完成');
-
-    find('.assistant-composer-foot label:first-child input').click();
     check(checkSpeech.checked && !checkSpeech.disabled, '空白输入恢复朗读选项，自动发送前能确认选中');
     await speak('在收起前开始朗读');
     await until(() => turns.at(-1).payload.text === '在收起前开始朗读', '自动发送转写');
@@ -237,10 +227,9 @@
     check(calls[2].payload.part === 0 && !calls[2].beforeDone, '完整 JSON 回复仍从已保存文本读取');
     calls[2].deliver();
     await until(() => !popup().hidden, '已保存答复打开朗读小窗');
-    popup().querySelector('.assistant-reader-close').click();
-    await until(() => calls[2].signal.aborted, '退出停止朗读');
 
     await speak('打开运营总览');
+    check(calls[2].signal.aborted, '开启新录音时打断上一轮朗读，避免收进录音');
     const navigated = turns.at(-1);
     await until(() => location.hash === '#overview' && panel().hidden, '语音指令提前打开页面');
     beginSpeech(navigated);

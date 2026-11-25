@@ -81,6 +81,18 @@ class CampusTests(unittest.TestCase):
         )
         return self.store.login(name, self.password)
 
+    def test_risk_report_is_visible_and_writable_only_inside_clinical_scope(self):
+        report = self.store.snapshot(self.owner)["data"]["followups"][0]["riskReport"]
+        fields = {"subject": report["topic"], "finding": "分院演示观察", "riskReport": report}
+        with self.assertRaises(PermissionError):
+            self.cmd(self.staff, "care.screen", residentId="r001", **fields)
+        self.assertFalse(self.store.snapshot(self.staff)["data"]["followups"])
+        self.cmd(self.staff, "care.screen", residentId=self.rid, **fields)
+        rows = self.store.snapshot(self.staff)["data"]["followups"]
+        self.assertEqual([row["residentId"] for row in rows], [self.rid])
+        self.assertEqual(rows[0]["riskReport"], report)
+        self.assertEqual(rows[0]["openedBy"], self.employee["displayName"])
+
     def test_room_search_events_and_agent_history_respect_campus(self):
         results = self.store.facility_resource(self.owner, "search", q="101")["results"]
         self.assertEqual({self.main, self.east}, {r["campusId"] for r in results})

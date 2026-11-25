@@ -28,6 +28,8 @@ FEATURES = {
     "care.roundNarrative": "照护巡查 · 生活简报",
     "care.taskAsr": "照护工单 · 语音转写",
     "dossier.documentOcr": "医疗档案 · OCR",
+    "assistant.documentOcr": "健康助理 · 文件识别",
+    "assistant.documentClassify": "健康助理 · 文件分类",
     "access.resumeOcr": "员工简历 · OCR",
     "dossier.visitOcr": "就诊资料 · OCR",
     "dossier.visitExtraction": "就诊资料 · 病例整理",

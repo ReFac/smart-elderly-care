@@ -9,8 +9,8 @@ from threading import BoundedSemaphore, Lock
 LARGE_BODY = 512 * 1024
 SLOW_WRITES = frozenset({
     "/api/assistant/chat", "/api/assistant/chat/stream", "/api/assistant/voice",
-    "/api/agent/voice/transcriptions", "/api/staff/resume/preview",
-    "/api/public/visitor/register", "/api/auth/login", "/api/auth/verify", "/api/auth/reset-link/redeem", "/api/auth/reset-link/send",
+    "/api/agent/voice/transcriptions", "/api/staff/resume/preview", "/api/assistant/documents/preview",
+    "/api/public/visitor/wechat-contact", "/api/public/visitor/register", "/api/auth/login", "/api/auth/verify", "/api/auth/reset-link/redeem", "/api/auth/reset-link/send",
     "/api/auth/passkeys/enroll-options", "/api/auth/passkeys/revoke",
     "/api/updates/download", "/api/updates/install", "/api/backups/imports/preview",
 })
@@ -59,7 +59,7 @@ def heavy_request(method, path, content_length):
         large = int(content_length or 0) >= LARGE_BODY
     except ValueError:
         large = False
-    return large or path in SLOW_WRITES or path.startswith("/api/media/asr/") or path.endswith("/medical-visits/preview")
+    return large or path in SLOW_WRITES or path.startswith(("/api/media/asr/", "/api/assistant/documents/pages/")) or path.endswith("/medical-visits/preview")
 
 
 class CapacityServer(ThreadingHTTPServer):

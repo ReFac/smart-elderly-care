@@ -1,0 +1,10 @@
+page { background:#fbf8f0; color:#2c332e; }
+.card { margin:80rpx 36rpx; padding:48rpx 36rpx; background:white; border-radius:64rpx 20rpx 44rpx 20rpx; border:1px solid #e4dccb; }
+.title,.detail,.error { display:block; }
+.title { font-size:44rpx; font-weight:650; }
+.detail,.error { margin:24rpx 0; font-size:29rpx; line-height:1.65; }
+.error { color:#933b27; }
+input { padding:18rpx 22rpx; border:1px solid #b7b6a9; border-radius:12rpx; margin:24rpx 0; }
+button[type=primary] { background:#634416; margin-top:28rpx; }
+.quiet { background:transparent; color:#545e56; margin-top:22rpx; font-size:28rpx; }
+.quiet::after { border:0; }

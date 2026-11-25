@@ -1,3 +1,4 @@
+import { evaluationBars, evaluationHeader, evaluationResult } from './evaluation-report.js';
 import { staffLabel } from './people-labels.js';
 import {
   disclosure,
@@ -5,12 +6,11 @@ import {
   field,
   staffField,
   hasGrant,
-  kpis,
+  btn,
   memo,
   node,
   options,
   residentField,
-  residentName,
   section,
   select,
   today,
@@ -49,7 +49,10 @@ export function scaleForm(ctx, residentId = '') {
   }
   scoreBox.append(sum);
   const subject = residentField(ctx, { value: residentId });
-  subject.options.unshift({ value: '', label: '请选择本次评估的长辈' });
+  if (residentId) {
+    subject.options = subject.options.filter(option => option.value === residentId);
+    if (!subject.options.length) return;
+  } else subject.options.unshift({ value: '', label: '请选择本次评估的长辈' });
   const dialog = ctx.dialog({
     title: '标准量表评估',
     description:
@@ -121,21 +124,22 @@ export function scaleForm(ctx, residentId = '') {
 
 export function evaluationDetails(ctx, row) {
   const scale = row.scale;
-  const body = node('div', 'fx-profile', [
-    node(
-      'h3',
-      '',
-      residentName(ctx, row.residentId) + ' · ' + (scale ? scale.gradeName : row.level)
-    ),
-    section('评估结论', node('p', '', row.note)),
+  const day = scale?.assessedOn || row.date;
+  const inspector = staffLabel(ctx, row.recordedBy);
+  const body = node('div', 'risk-panel risk-report', [
+    evaluationHeader(ctx, row.residentId, [day, inspector, row.id], [row.level, row.source]),
+    evaluationResult({title: scale?.gradeName || row.level || '待评估', topic: '能力评估',
+      finding: row.note, score: scale?.total, maximum: scale?.version === 'GB/T 42195-2022' ? 90 : null}),
   ]);
   if (scale) {
-    body.append(
-      kpis(Object.entries(scale.subtotals).map(([label, value]) => [label, String(value)]))
-    );
+    const catalog = ctx.state.careScale;
+    const limits = catalog && scale.version === catalog.version
+      ? Object.fromEntries(Object.entries(catalog.groups).map(([label, items]) =>
+        [label, Object.values(items).reduce((sum, n) => sum + n, 0)]))
+      : null;
+    body.append(section('分项得分分布', evaluationBars(Object.entries(scale.subtotals || {}), limits)));
     body.append(
       facts([
-        ['能力总分', scale.total + ' / 90'],
         ['采用量表', scale.version],
         ['实际评估日期', scale.assessedOn],
         ...(scale.assessors ? [['评估人员', scale.assessors.join('、')]] : []),
@@ -149,7 +153,7 @@ export function evaluationDetails(ctx, row) {
         ['登记日期', row.date],
       ])
     );
-    body.append(
+    if (scale.scores) body.append(
       disclosure(
         '逐项评分',
         facts(Object.entries(scale.scores).map(([name, score]) => [name, score + ' 分'])),
@@ -166,5 +170,11 @@ export function evaluationDetails(ctx, row) {
       ])
     );
   }
-  ctx.detail('评估记录', body);
+  const dialog = ctx.detail('评估记录', body);
+  dialog.classList.add('risk-drawer');
+  dialog.dataset.roundsResidentId = row.residentId;
+  body.append(node('footer', 'plan-footer', [
+    btn(ctx, '关闭', () => dialog.close()),
+    btn(ctx, '打印报告', () => window.print(), 'primary'),
+  ]));
 }

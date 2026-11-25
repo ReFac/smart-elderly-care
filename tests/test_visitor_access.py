@@ -7,8 +7,9 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
-from platform_core import portal, reset_links, secure_storage, visitor_access
+from platform_core import portal, reset_links, secure_storage, visitor_access, wechat_tour
 from platform_core.store import SignedOut, Store
 from server import Handler
 
@@ -106,6 +107,34 @@ class VisitorAccessTests(TestCase):
             self.assertEqual(self.store.actor(db, owner)["kind"], "owner")
             self.assertEqual(db.execute("SELECT count(*) FROM accounts").fetchone()[0], 2)
             self.assertEqual(db.execute("SELECT count(*) FROM audit WHERE action='access.registerCustomer'").fetchone()[0], 1)
+
+    def test_wechat_enquiry_requires_consent_and_validates_issuer_before_recording(self):
+        config = {"NH_WECHAT_MINI_APP_ID": "wx-demo", "NH_WECHAT_MINI_APP_SECRET": "fixture-secret",
+                  "NH_WECHAT_TOUR_LINK": "https://wxaurl.cn/Tour-test"}
+        payload = {"code": "fixture-code", "consent": True}
+        owner, _ = self.store.login("owner", "visitor-test-only")
+        before = self.store.snapshot(owner)["data"].get("leadContacts", [])
+        phone = {"purePhoneNumber": "13900003333", "countryCode": "86", "watermark": {"appid": "wx-demo"}}
+        with patch.dict("os.environ", config), patch.object(wechat_tour, "_post") as call:
+            self.assertEqual(visitor_access.status(self.store, None, None)["wechatContactLink"], config["NH_WECHAT_TOUR_LINK"])
+            with self.assertRaises(ValueError):
+                wechat_tour.receive(self.store, {**payload, "consent": False}, "peer")
+            with self.assertRaises(ValueError):
+                wechat_tour.receive(self.store, {**payload, "phone": "13900001111"}, "peer")
+            call.assert_not_called()
+            for invalid in ({"watermark": []}, {"watermark": {"appid": "other"}}, {"countryCode": "1"}):
+                call.side_effect = [{"access_token": "test-token"}, {"phone_info": {**phone, **invalid}}]
+                with self.assertRaises(ValueError):
+                    wechat_tour.receive(self.store, payload, "peer")
+            self.assertEqual(self.store.snapshot(owner)["data"].get("leadContacts", []), before)
+            call.side_effect = [{"access_token": "test-token"}, {"phone_info": phone}]
+            self.assertEqual(wechat_tour.receive(self.store, payload, "peer"), {"received": True})
+            self.assertEqual(call.call_args.args,
+                             ("wxa/business/getuserphonenumber?access_token=test-token", {"code": "fixture-code"}))
+        leads = self.store.snapshot(owner)["data"]["leadContacts"]
+        self.assertEqual(sum(row["phone"] == phone["purePhoneNumber"] and row["source"] == "consent" for row in leads), 1)
+        with patch.dict("os.environ", {**config, "NH_WECHAT_TOUR_LINK": "https://other.invalid/"}):
+            self.assertEqual(wechat_tour.contact_link(), "")
 
     def test_public_branding_defaults_are_generic_and_preserve_configured_names(self):
         self.assertEqual(self.store.branding(), {

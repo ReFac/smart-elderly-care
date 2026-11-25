@@ -1,5 +1,6 @@
 import { stops, tourModel } from './roomtour-model.js';
 import { publicPage } from './public-site.js';
+import { inviteVisitor } from './roomtour-invite.js';
 
 publicPage('3D 环境导览');
 
@@ -77,3 +78,5 @@ const turns = {left:() => model.turn(-.31), right:() => model.turn(.31), in:() =
   out:() => model.zoom(-.16), reset:() => model.reset()};
 for (const control of document.querySelectorAll('[data-tour-turn]'))
   control.addEventListener('click', turns[control.dataset.tourTurn]);
+
+inviteVisitor(stage);

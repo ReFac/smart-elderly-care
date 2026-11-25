@@ -11,21 +11,29 @@ function input(form, title, type, name, required = true) {
   return element;
 }
 
-function contractForm(ctx, person) {
+export function contractForm(ctx, person, draft = null) {
   const form = node('form', 'dialog-form');
   const number = input(form, '合同编号（选填）', 'text', 'number', false);
   number.maxLength = 100;
+  number.value = draft?.fields.number || '';
   const signed = input(form, '签订日期', 'date', 'signedOn');
-  signed.value = signed.max = ctx.state.today;
+  signed.max = ctx.state.today;
+  signed.value = draft ? draft.fields.signedOn || '' : ctx.state.today;
   const start = input(form, '合同起始日期', 'date', 'startsOn');
-  start.value = ctx.state.today;
+  start.value = draft ? draft.fields.startsOn || '' : ctx.state.today;
   const term = node('select');
+  if (draft) term.add(new Option('请选择期限', ''));
+  term.required = true;
   term.add(new Option('无固定期限', 'open'));
   term.add(new Option('固定期限', 'fixed'));
   form.append(node('label', 'field', [node('span', '', '合同期限'), term]));
   const end = input(form, '合同结束日期', 'date', 'endsOn', false);
+  if (draft?.fields.endsOn) {
+    term.value = 'fixed';
+    end.value = draft.fields.endsOn;
+  }
   function range() {
-    end.disabled = term.value === 'open';
+    end.disabled = term.value !== 'fixed';
     end.required = !end.disabled;
     end.closest('label').hidden = end.disabled;
     end.min = start.value;
@@ -33,6 +41,11 @@ function contractForm(ctx, person) {
   term.onchange = start.onchange = range;
   range();
   const upload = input(form, '合同原件（PDF、JPEG 或 PNG，最多 8 MiB）', 'file', 'original');
+  if (draft) {
+    upload.required = false;
+    upload.closest('label').hidden = true;
+    form.append(node('p', 'fx-muted', '已带入原件「' + draft.file.name + '」。请核对员工、合同编号及各项日期。'));
+  }
   upload.accept = 'application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png';
   const error = node('p', 'form-error');
   error.setAttribute('role', 'alert');
@@ -45,7 +58,7 @@ function contractForm(ctx, person) {
     save.disabled = true;
     error.textContent = '';
     try {
-      const file = upload.files[0];
+      const file = draft?.file || upload.files[0];
       if (!file || !file.size || file.size > 8 * 1024 * 1024) throw new Error('请选择不超过 8 MiB 的有效原件。');
       const mime = file.type || (/\.pdf$/i.test(file.name) ? 'application/pdf' : /\.png$/i.test(file.name) ? 'image/png' : 'image/jpeg');
       const payload = {id: person.id, number: number.value.trim(), signedOn:signed.value,

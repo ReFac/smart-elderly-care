@@ -154,6 +154,7 @@ class PlanRevisions(unittest.TestCase):
         )
         with self.assertRaises(PermissionError):
             self.save("care.screen", p, staff)
+        before = len(self.snapshot()["followups"])
         self.save("care.screen", p)
         row = self.snapshot()["followups"][-1]
         self.assertEqual(row["riskReport"], report)
@@ -164,4 +165,51 @@ class PlanRevisions(unittest.TestCase):
                 "care.screen",
                 {**p, "riskReport": {**report, "score": 12, "maximum": 10}},
             )
-        self.assertEqual(len(self.snapshot()["followups"]), 1)
+        self.assertEqual(len(self.snapshot()["followups"]), before + 1)
+
+    def test_complete_risk_report_persists_without_replacing_earlier_observations(self):
+        sample = next(row for row in self.snapshot()["followups"] if row.get("riskReport"))
+        report = sample["riskReport"]
+        self.assertEqual(sample["residentId"], "r001")
+        self.assertEqual(report["score"], sum(row["score"] for row in report["dimensions"]))
+        self.assertEqual(report["maximum"], sum(row["maximum"] for row in report["dimensions"]))
+        for key in ("tags", "bands", "dimensions", "preventionSteps", "reviewer", "reviewNote"):
+            self.assertTrue(report[key])
+        self.assertTrue(report["bedside"]["recommended"] and report["bedside"]["avoid"])
+        payload = dict(residentId="r001", subject=report["topic"], finding="复核演示资料",
+                       riskReport={**report, "reviewNote": "不同日期的独立报告"})
+        self.save("care.screen", payload)
+        reopened = Store(self.store.path, now=lambda: self.now)
+        rows = reopened.snapshot(self.owner)["data"]["followups"]
+        self.assertIn(sample, rows)
+        self.assertEqual(rows[-1]["riskReport"], payload["riskReport"])
+        self.assertEqual(rows[-1]["openedBy"], "Owner")
+
+    def test_training_view_leaves_resident_records_and_revision_untouched(self):
+        from platform_core.care import risk_reports
+        before = self.snapshot()["followups"]
+        revision = self.store.version(self.owner)["revision"]
+        training = risk_reports.example(self.store, self.owner)
+        self.assertEqual(training["resident"]["id"], training["report"]["residentId"])
+        self.assertNotIn(training["resident"]["id"], {row["id"] for row in self.snapshot()["residents"]})
+        self.assertEqual(revision, self.store.version(self.owner)["revision"])
+        self.assertEqual(before, self.snapshot()["followups"])
+
+    def test_invalid_extensions_leave_no_partial_assessment(self):
+        rows = self.snapshot()["followups"]
+        report = rows[0]["riskReport"]
+        band = dict(level="低风险", min=1, max=None)
+        dimension = dict(group="维度", score=0, maximum=1)
+        for change in (
+            {"bands": [band, {"level": "中风险", "min": 4, "max": 8}]},
+            {"bands": [{**band, "max": 0}]}, {"dimensions": [{**dimension, "maximum": 0}]},
+            {"dimensions": [{**dimension, "score": True}]}, {"dimensions": [dimension, dimension]},
+            {"tags": ["测试"] * 13}, {"bedside": {"recommended": "未分项", "avoid": []}},
+            {"preventionSteps": [{"title": "", "detail": "缺少步骤名称"}]},
+            {"preventionSteps": [{"title":"核对", "detail": "记录"}] * 4},
+            {"reviewNote": "文" * 801}, {"unsignedExtraField": True},
+        ):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.save("care.screen", dict(residentId="r001", subject=report["topic"], finding="观察",
+                                               riskReport={**report, **change}))
+        self.assertEqual(self.snapshot()["followups"], rows)

@@ -70,6 +70,12 @@ npm run bundle
 
 小程序通过同域 H5 的登录页面建立机构员工或亲属会话。小程序首次启动时读取配置，未填写域名会显示配置提示，加载失败可点「重新连接」。
 
+### Roomtour 访客回电
+
+访客可匿名浏览官网。未登录访客在前台实际观看 3D 场景累计五秒后，会看到可关闭的联系卡。关闭后可在当前标签页继续参观。访客主动确认留号时，接待人员可在「意向客户」查看，沿用已入住免回访规则。
+
+要启用微信手机号，先发布小程序页面 `pages/tour-contact/index`，在微信后台申明机构联系访客的用途、开通手机号能力，并将 `workspaceOrigin` 加入 request 合法域名。为此页生成官方 URL Link，在机构服务端设置 `NH_WECHAT_TOUR_LINK`、`NH_WECHAT_MINI_APP_ID` 和 `NH_WECHAT_MINI_APP_SECRET`。小程序密钥只配置在服务器。URL Link 到期时更换。微信网页点击确认进入小程序，经原生按钮授权后，后台使用一次性动态令牌取号并登记。未开通、未授权或取号失败时可手动填写。[微信手机号授权](https://developers.weixin.qq.com/miniprogram/dev/framework/open-ability/getPhoneNumber.html) · [微信 URL Link](https://developers.weixin.qq.com/miniprogram/dev/framework/open-ability/url-link.html)
+
 ## 本次验证范围
 
 | 终端 | 已验证 | 机构现场待验收 |

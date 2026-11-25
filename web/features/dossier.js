@@ -1,6 +1,7 @@
 import { residentLabel, staffLabel } from './people-labels.js';
 import { residentInsights } from './resident-insights.js';
 import { healthProfile } from './resident-health.js';
+import { residentEvaluations } from './resident-evaluations.js';
 import { renderMedicationReports } from './medication-reports.js';
 import { dailyTimeline } from './daily-timeline.js';
 import { billDetail } from './billing.js';
@@ -419,6 +420,7 @@ function registrationDetails(ctx, resident, profile, archived, stay) {
 
 function medicalDetails(ctx, resident, archived, stay) {
   const content = node('div', 'fx-profile');
+  add(content, residentEvaluations(ctx, resident.id));
   const reopen = live => {
     const current = live.state.residents.find(row => row.id === resident.id);
     if (!current) return;

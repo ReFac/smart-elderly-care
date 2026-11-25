@@ -67,7 +67,7 @@
     launch.click(); await until(()=>!network().disabled,'打开助理');
     check(!pressed() && !calls.some(row=>row.url.includes('/probe')),'首次进入不会检测或开启联网');
     const foot=find('.assistant-composer-foot');
-    check(foot.firstElementChild.matches('.assistant-auto') && foot.lastElementChild===network(),'头像开关位于自动发送右侧');
+    check(foot.firstElementChild.matches('.assistant-read-option') && foot.lastElementChild===network(),'头像开关位于朗读选项右侧');
     check(network().getAttribute('aria-label')==='联网搜索' && network().tabIndex===0 && !!network().querySelector('.assistant-mark'),'头像开关可以通过键盘操作');
     mode='wait';network().click();
     await until(()=>probeStarted && network().getAttribute('aria-busy')==='true','检测中可取消');
@@ -100,7 +100,7 @@
     generation='another-tab';messages=[{role:'user',content:'新一轮'},{role:'assistant',content:'已更新'}];
     launch.click(); launch.click();await until(()=>!network().disabled && find('.assistant-log').textContent.includes('已更新'),'旧标签页与新会话同步');
     check(!pressed() && messages.length===2,'新一代会话不继承联网');
-    check(!find('.assistant-new') && !find('.assistant-composer-foot label:nth-child(2) input').checked,
+    check(!find('.assistant-new') && !find('.assistant-read-option input').checked,
       '健康助理仅有一个对话窗口，朗读初始关闭');
     network().click();await until(pressed,'区域切换前开启');
     openChat(()=>ctx,{roomId:'fixture-room',label:'演练房间'});await until(()=>!network().disabled,'切换到房间对话');

@@ -95,7 +95,7 @@ class StaffOnboarding(unittest.TestCase):
         employee, _ = self.store.login(actor["username"], "temporary-test-only-profile")
         with self.assertRaises(PermissionError):
             staff_resume.check(self.store, employee)
-        with patch.object(staff_resume.document_ocr, "recognize", return_value=(raw, 2, "test-id")) as recognize:
+        with patch.object(staff_resume.document_ocr, "recognize", return_value=raw) as recognize:
             result = staff_resume.preview(self.store, self.owner, b"%PDF-1.4")
             self.assertEqual(recognize.call_args.kwargs, {"feature": "access.resumeOcr"})
         self.assertEqual(result["fields"], {

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>健康助理文件分类回归</title>
+<output>运行中</output>
+<script type="module">
+import { openChat } from '../../web/features/assistant-chat.js';
+import { detail } from '../../web/lib/dialogs.js';
+import { button, icon } from '../../web/lib/ui.js';
+
+const output = document.querySelector('output');
+const state = {user: {id:'owner', kind:'owner'}, allowedActions:['access.create','dossier.confirmVisit','access.staffContract'],
+  uiSettings: {institutionName:'测试机构', hiddenRoutes:[]}, rolePresets: {护工:[]},
+  permissionOptions:{}, campusOptions:[], accessManagement:{staffDuties:[]}, accounts:[{id:'staff1',kind:'staff',displayName:'李护理',role:'护士',username:'nurse'}], today:'2026-11-25',
+  residents:[{id:'r1',name:'测试长辈',status:'在住'}]};
+const nav = [], network = [];
+const ctx = {state, available:()=>true, detail, ui:{button,icon}, go(route,tab,open){nav.push(route);open();},
+  toast:message=>{throw Error(message);}, refreshWorkspace:async()=>true};
+const findButton = (label, root=document) => [...root.querySelectorAll('button')].find(b=>b.textContent.trim()===label);
+function check(value,message){if(!value)throw Error(message);}
+async function waitFor(read) {
+  for(let i=0;i<100;i++){const result=read();if(result)return result;await new Promise(r=>setTimeout(r,20));}
+  throw Error('等待文件流程超时');
+}
+window.fetch=async (url, opts={})=>{
+  if(url==='/api/assistant/chat')return Response.json({scopeKey:'docs',generation:'',messages:[]});
+  if(url.startsWith('/api/assistant/documents/pages/')) return new Response(new Blob(['fixture']),{headers:{'X-Page-Count':'2','Content-Type':'image/png'}});
+  if(url==='/api/assistant/documents/preview'){
+    network.push(opts.body.name);
+    return Response.json(opts.body.name==='a.png' ? {category:'员工简历',excerpt:'个人简历',pageCount:1,
+      resume:{fields:{displayName:{page:1,line:1,value:'林小禾'}},ambiguous:[]}} :
+      opts.body.name==='c.png' ? {category:'劳动合同',contract:{number:'2026HY12',signedOn:'2026-09-01',startsOn:'2026-09-01'},pageCount:1} :
+      {category:'其他',excerpt:'检查结论',pageCount:2});
+  }
+  throw Error('意外请求 '+url);
+};
+try {
+  openChat(()=>ctx);
+  const panel=document.querySelector('#assistant-chat');
+  const picker=panel.querySelector('input[type=file]');
+  check(picker.multiple && findButton('上传图片',panel),'主对话应提供多文件入口');
+  const files=new DataTransfer();
+  files.items.add(new File(['a'],'a.png',{type:'image/png'}));
+  files.items.add(new File(['b'],'b.pdf',{type:'application/pdf'}));
+  files.items.add(new File(['c'],'c.png',{type:'image/png'}));
+  picker.files=files.files;picker.dispatchEvent(new Event('change'));
+  check(!network.length,'用户确认识别前禁止传原件');
+  findButton('识别并分类').click();
+  await waitFor(()=>findButton('确认分类'));
+  check(network.join('|')==='a.png|b.pdf|c.png' && !nav.length,'每份文件应只识别一次，并等候选择');
+  const review=panel.querySelector('.assistant-document-card');
+  const selects=review.querySelectorAll('select');check(selects.length===3,'每份文件应独立核对');
+  selects[1].value='检查报告';selects[1].dispatchEvent(new Event('change'));
+  findButton('查看原件', review.querySelectorAll('li')[1]).click();
+  const view=document.querySelector('dialog[open]');
+  await waitFor(()=>view.textContent.includes('第 1 / 2 页'));
+  findButton('下一页',view).click();await waitFor(()=>view.textContent.includes('第 2 / 2 页'));
+  view.close();
+  findButton('确认分类').click();
+  findButton('打开新增员工表单').click();
+  let form=await waitFor(()=>document.querySelector('dialog[open]'));
+  check(nav[0]==='access' && form.querySelector('[name=displayName]').value==='林小禾','简历应预填真实新增表单');
+  check(!form.querySelector('[name=role]').value,'岗位须手工选择');
+  form.close();
+  openChat(()=>ctx);
+  const employee=review.querySelector('select');
+  employee.value='staff1';employee.dispatchEvent(new Event('change'));
+  findButton('核对劳动合同').click();
+  form=await waitFor(()=>document.querySelector('dialog[open]'));
+  check(form.querySelector('[name=number]').value==='2026HY12' &&
+    form.querySelector('[name=signedOn]').value==='2026-09-01' &&
+    form.textContent.includes('c.png'),'应在所选员工的合同表单保留原件与明确字段');
+  form.close();
+  openChat(()=>ctx);
+  findButton('整理所选就诊资料').click();
+  form=await waitFor(()=>document.querySelector('dialog[open]'));
+  const personInput=form.querySelector('[role=combobox]');personInput.value='测试';personInput.dispatchEvent(new Event('input'));
+  form.querySelector('[role=option]').click();findButton('继续',form).click();findButton('继续',form).click();
+  form.querySelector('[name=eventDate]').value='2026-11-21';findButton('继续',form).click();
+  check(form.textContent.includes('b.pdf') && !form.textContent.includes('a.png') &&
+    form.querySelector('.medical-file select').value==='检查报告','应只将已核对类别的医疗原件带入就诊向导');
+  output.textContent='PASS';
+} catch(error) {output.textContent='FAIL '+error.stack;}
+</script></html>

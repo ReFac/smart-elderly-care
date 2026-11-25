@@ -6,7 +6,7 @@ import re
 import secrets
 from uuid import uuid4
 
-from . import access, activity, history, identity, portal
+from . import access, activity, history, identity, portal, wechat_tour
 
 DEMO_PHONE = "+8613900000000"
 CODE_TTL = 300
@@ -46,6 +46,7 @@ def status(store, visitor_token, account_token, *, demo=False):
         "signedIn": False,
         "phoneEnabled": "sms" in identity.senders(store),
         "wechatEnabled": False,
+        "wechatContactLink": wechat_tour.contact_link(),
         "demoEnabled": demo,
     }
     with closing(store.connect()) as db:

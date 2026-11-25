@@ -39,12 +39,10 @@ export async function capture(onReady, onStatus, stillOpen) {
     return;
   }
   let ac,
-    timer,
     finished = false;
   const close = () => {
     stream.getTracks().forEach((track) => track.stop());
     if (ac && ac.state !== 'closed') ac.close().catch(() => {});
-    clearInterval(timer);
   };
   try {
     ac = new AudioContext({ sampleRate: 16000 });
@@ -66,17 +64,17 @@ export async function capture(onReady, onStatus, stillOpen) {
       close();
       if (deliver) onReady(count ? pcmWave(chunks, count, ac.sampleRate) : null);
     }
+    const limit = 120 * ac.sampleRate;
     recorder.port.onmessage = (e) => {
-      if (finished) return;
+      if (finished || count === limit) return;
       chunks.push(e.data);
-      count = Math.min(120 * ac.sampleRate, count + e.data.length);
-      if (count === 120 * ac.sampleRate) finish();
+      count = Math.min(limit, count + e.data.length);
+      if (count === limit) {
+        close();
+        onStatus('已录满 120 秒，松开后发送。');
+      }
     };
     await ac.resume();
-    timer = setInterval(
-      () => onStatus('正在录音 · ' + Math.floor(count / ac.sampleRate) + ' / 120 秒'),
-      250,
-    );
     return finish;
   } catch (e) {
     close();

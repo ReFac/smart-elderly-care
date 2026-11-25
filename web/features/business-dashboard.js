@@ -221,6 +221,7 @@ export function businessDashboard(ctx, openOperations) {
   const root = node('section', 'biz-screen'),
     top = node('header', 'biz-header'),
     body = node('div', 'biz-body');
+  root.setAttribute('aria-label', '运营看板');
   const err = node('p', 'form-error');
   err.setAttribute('role', 'alert');
   const pick = node('select');
@@ -279,7 +280,6 @@ export function businessDashboard(ctx, openOperations) {
   });
   picker.append(first, ' 至 ', last);
   top.append(
-    node('h1', '', '医养经营管理大屏'),
     node('div', 'biz-controls', [
       node('div', 'biz-controls-group', ['时间范围', group]),
       node('label', 'biz-controls-group', ['对比方式', pick]),
@@ -469,7 +469,7 @@ export function businessDashboard(ctx, openOperations) {
       node('p', 'biz-hint', '按到账日归集，含预缴。账单核销按正向明细金额比例分摊。'),
     );
     const trend = card(
-      '趋势走势',
+      '运营趋势',
       ...[
         [0, 0],
         [2, 3],
@@ -496,8 +496,8 @@ export function businessDashboard(ctx, openOperations) {
         structure,
         node('div', 'biz-column', [bedPanel, rankPanel]),
         node('div', 'biz-column', [summary, financePanel]),
-        trend,
       ]),
+      trend,
       node('footer', 'biz-foot', [node('span', '', rangeText), action('查看日常运营明细', openOperations)]),
     );
   }

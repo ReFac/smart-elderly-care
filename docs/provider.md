@@ -51,7 +51,7 @@ python3 manage_plan.py --db .local/workspace.sqlite3 reconcile --actor ACCOUNT_I
 
 ## 公开网页搜索
 
-在助理对话框底部，点击「语音转写后自动发送」右侧的头像。工作台先以机构凭据访问 DeepSeek 官方模型列表，确认可以连接 Flash 后显示「已联网」。开启后可以检索养老机构运营、长护险、照护和相关医疗的公开资料，答复下方列出可点击的来源。连接失败可在同一位置重试。[DeepSeek 模型列表](https://api-docs.deepseek.com/api/list-models/)
+在助理对话框底部，点击「朗读」右侧的联网头像。工作台先以机构凭据访问 DeepSeek 官方模型列表，确认可以连接 Flash 后显示「已联网」。开启后可以检索养老机构运营、长护险、照护和相关医疗的公开资料，答复下方列出可点击的来源。连接失败可在同一位置重试。[DeepSeek 模型列表](https://api-docs.deepseek.com/api/list-models/)
 
 | 接口 | 用途 |
 | --- | --- |

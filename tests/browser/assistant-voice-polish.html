@@ -93,7 +93,6 @@
     oscillator.start();
     Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true,
       value: async () => stream.stream.clone() });
-    localStorage.removeItem('assistant:auto-send:' + userId);
     const launcher = chatLauncher(() => openChat(() => ctx, { ...region, label: '演示房间' }));
     document.body.append(launcher);
     launcher.click();
@@ -107,41 +106,36 @@
     const read = panel().querySelector('.assistant-read-option input');
     read.closest('label').click();
     const spokenId = await dictate(raw, polished);
-    check(input().value === polished && turns.length === 1, '整理结果先留在输入框');
-    check(control('查看原话'), '有可操作的原话查阅入口');
+    await until(() => turns.length === 2 && !input().readOnly, '转写完毕自动发送一条整理稿');
+    check(control('查看原话'), '发送后可读取转写原话');
     control('查看原话').click();
     await until(() => panel().innerText.includes(raw), '可以核对转写原话');
-    const cleaned = await send();
+    check(!control('使用原话'), '已发送的语音不能重复提交');
+    const cleaned = turns.at(-1);
     check(cleaned.text === polished && cleaned.readAloud && cleaned.voiceTranscriptId === spokenId,
       '整理稿仅发送一次并保留可朗读语音凭证');
     await until(() => readings.some(item => item.requestId === cleaned.requestId), '整理稿的答复仍可朗读');
 
     const prefix = '上一班备注';
     type(prefix);
-    const restoreId = await dictate(raw, polished);
-    check(input().value === prefix + '\n' + polished, '整理稿追加至已有草稿');
-    check(control('查看原话'), '追加语音也可查看原话');
-    control('查看原话').click();
-    const restore = control('使用原话') || control('恢复原话');
-    check(restore, '查看原话后可一键恢复');
-    restore.click();
-    check(input().value === prefix + '\n' + raw, '仅替换整理稿，保留已有草稿');
-    const restored = await send();
-    check(restored.text === prefix + '\n' + raw && restored.voiceTranscriptId === restoreId, '可以发送核对后的原话');
+    const appendedId = await dictate(raw, polished);
+    await until(() => turns.length === 3 && !input().readOnly, '包含前文的语音已发送');
+    check(turns.at(-1).text === prefix + '\n' + polished && turns.at(-1).voiceTranscriptId === appendedId,
+      '输入框已有的内容和这段语音只发送一次');
 
-    const auto = [...panel().querySelectorAll('label')].find(label => label.textContent.includes('语音转写后自动发送'));
-    check(auto, '可开启转写后自动发送');
-    auto.click();
-    const autoId = await dictate(raw, polished);
-    await until(() => turns.length === 4 && !input().readOnly, '自动发送一条整理后的语音');
-    check(turns.at(-1).text === polished && turns.at(-1).voiceTranscriptId === autoId && speech.length === 3,
-      '输入自动发送整理稿，复用已有转写凭证');
-    const preview = control('查看原话');
-    check(preview, '自动发送后仍可查看原话');
-    preview.click();
-    const original = document.getElementById(preview.getAttribute('aria-controls'));
-    check(!original.hidden && original.innerText.includes(raw) && !control('使用原话') && turns.length === 4,
-      '发送后可核对原话，查阅不会再次提交');
+    const oversized = '甲'.repeat(input().maxLength - polished.length);
+    type(oversized);
+    await dictate(raw, polished);
+    check(turns.length === 3 && input().value === oversized + '\n' + polished &&
+      panel().innerText.includes('请拆分后发送'), '过长时明确提示并保留完整草稿');
+    control('查看原话').click();
+    control('使用原话').click();
+    check(input().value === oversized + '\n' + raw, '未发出的语音支持恢复原话');
+    type('');
+    const autoId = await dictate(raw);
+    await until(() => turns.length === 4 && !input().readOnly, '仅有原话时自动发送');
+    check(turns.at(-1).text === raw && turns.at(-1).voiceTranscriptId === autoId && speech.length === 4,
+      '每段语音一个转写请求，自动发送沿用已有转写凭证');
     clearChat();
     oscillator.stop();
     await audio.close();

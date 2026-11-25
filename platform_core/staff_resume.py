@@ -46,7 +46,7 @@ def suggestions(result):
 def preview(store, token, raw):
     if not raw.startswith((b"%PDF-", b"\x89PNG", b"\xff\xd8")):
         raise ValueError("请选择 PDF、PNG 或 JPEG 简历")
-    result, _, _ = document_ocr.recognize(
+    result = document_ocr.recognize(
         store, token, raw, lambda db, current: authorize(store, db, current),
         feature="access.resumeOcr",
     )

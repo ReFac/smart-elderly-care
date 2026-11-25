@@ -1009,7 +1009,15 @@ function render() {
   shade.setAttribute('aria-label','收起业务导航'); shade.onclick = closeMenu;
   const rootViews = page.render ? null : main.querySelector('.fx-tabs[data-route="' + CSS.escape(route) + '"]');
   if (rootViews) rootViews.hidden = true;
-  root.replaceChildren(sidebar(),masthead(rootViews),shade,wrap);
+  const assistant = el('button', 'desk-assistant-float');
+  assistant.type = 'button';
+  assistant.title = '询问健康助理';
+  assistant.setAttribute('aria-label', assistant.title);
+  assistant.setAttribute('aria-haspopup', 'dialog');
+  assistant.setAttribute('aria-controls', 'assistant-chat');
+  assistant.append(icon('spark', 23));
+  assistant.onclick = () => openChat(context);
+  root.replaceChildren(sidebar(),masthead(rootViews),shade,wrap,assistant);
   root.querySelector('.nav-list').scrollTop = sidebarScroll;
   applyDeskSize();
   if (switching) window.scrollTo(0,page.scroll);

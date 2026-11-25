@@ -8,6 +8,7 @@ from .clinical import (
     review_medication,
     vital,
 )
+from .pathways import screen
 from .plans import assess
 from .records import LEVELS, iso_date, offset_date
 from .residency import make_card_code
@@ -17,6 +18,39 @@ WARD_NAMES = ("颐养一区", "颐养二区", "护理三区")
 
 
 STAFF = ("林晓", "陈悦", "周宁", "吴桐")
+
+
+def sample_risk_report(state, today, resident_id="r001"):
+    # This individual training form illustrates a fictional instrument and does not configure scoring rules.
+    screen(state, {
+        "residentId": resident_id, "subject": "跌倒/坠床", "operator": STAFF[2],
+        "finding": "交班记录显示，沈月兰夜间起身时曾坐在床边等待陪同。评估人员已与本人核对。",
+        "riskReport": {
+            "topic": "跌倒/坠床", "instrument": "床旁环境观察表（虚构演示量表）",
+            "level": "中风险", "score": 10, "maximum": 25,
+            "bands": [{"level": "低风险", "min": 0, "max": 6}, {"level": "中风险", "min": 7, "max": 13},
+                      {"level": "高风险", "min": 14, "max": None}],
+            "dimensions": [{"group": "夜间观察", "score": 3, "maximum": 9},
+                           {"group": "床边活动", "score": 5, "maximum": 11},
+                           {"group": "床旁环境", "score": 2, "maximum": 5}],
+            "factors": [{"group": "夜间观察", "finding": "本人提到夜间寻找呼叫铃", "points": 2},
+                        {"group": "夜间观察", "finding": "交班本记有一次夜间陪同请求", "points": 1},
+                        {"group": "床边活动", "finding": "起身前坐在床沿等候工作人员", "points": 3},
+                        {"group": "床边活动", "finding": "转移到座椅时希望有人陪同", "points": 2},
+                        {"group": "床旁环境", "finding": "床头柜移动后物品位置有变化", "points": 1},
+                        {"group": "床旁环境", "finding": "需重新核对夜间通道的物品摆放", "points": 1}],
+            "tags": ["夜间起身", "床旁呼叫", "陪同需求"],
+            "bedside": {"recommended": ["与本人确认呼叫铃及眼镜的放置位置", "交班时说明夜间陪同安排"],
+                        "avoid": ["未经告知移动日常用品", "让推车占用床旁通道"]},
+            "immediate": "当班人员与本人核对床旁呼叫铃的位置。", "follow": "下次交班核对此次观察的变化。",
+            "routine": "将本人表达的陪同需求记入当班记录。", "avoid": "避免床旁通道堆放杂物。",
+            "preventionSteps": [{"title": "交班确认", "detail": "核对本人偏好的起身时间和陪同安排。"},
+                                {"title": "床旁确认", "detail": "与本人一起确认呼叫铃和日用品的位置。"},
+                                {"title": "记录反馈", "detail": "记下夜间呼叫与床边活动情况，交给复评人员。"}],
+            "nextReview": offset_date(today, 7), "reviewer": STAFF[2],
+            "reviewNote": "复评时与本人和夜班人员核对床旁物品位置、呼叫及陪同记录。",
+        },
+    }, today)
 
 
 def seed(today: str) -> dict:
@@ -185,5 +219,6 @@ def seed(today: str) -> dict:
             },
             today,
         )
+    sample_risk_report(state, today)
     handover(state, {"assignee": STAFF[0], "note": "接班后关注待复核记录。"}, today)
     return state

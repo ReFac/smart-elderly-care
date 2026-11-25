@@ -7,13 +7,15 @@ export function holdToSpeak({ upload, onText, onState, available, record = captu
   const label = el('span', '', '按住说话');
   control.type = 'button';
   control.append(icon('mic', 19), label);
-  control.setAttribute('aria-label', '按住说话，松开转写');
+  control.setAttribute('aria-label', '按住说话，松开发送');
+  control.title = '按住说话，松开后自动转写并发送';
   control.setAttribute('aria-keyshortcuts', 'Space Enter');
   let phase = 'idle',
     generation = 0,
     held = false,
     stop,
     pointerId,
+    heldKey,
     controller;
   const active = (turn) => turn === generation && control.isConnected;
   function setPhase(value, status = '') {
@@ -21,9 +23,9 @@ export function holdToSpeak({ upload, onText, onState, available, record = captu
     control.dataset.phase = phase;
     label.textContent = {
       idle: '按住说话',
-      starting: '开启麦克风',
-      recording: '松开转写',
-      uploading: '正在转写…',
+      starting: '开启录音',
+      recording: '松开发送',
+      uploading: '正在转写',
     }[value];
     control.setAttribute('aria-pressed', String(phase === 'recording'));
     onState(phase, status);
@@ -52,6 +54,8 @@ export function holdToSpeak({ upload, onText, onState, available, record = captu
     if (phase !== 'idle' || control.disabled) return;
     const reason = available();
     if (reason) {
+      pointerId = null;
+      heldKey = null;
       onState('idle', reason);
       return;
     }
@@ -61,7 +65,7 @@ export function holdToSpeak({ upload, onText, onState, available, record = captu
     try {
       const finish = await record(
         (blob) => transcribe(blob, turn),
-        () => {},
+        (message) => { if (active(turn) && held) onState(phase, message); },
         () => active(turn) && held,
       );
       if (!active(turn) || !held) {
@@ -69,10 +73,12 @@ export function holdToSpeak({ upload, onText, onState, available, record = captu
         return;
       }
       stop = finish;
-      setPhase('recording', '正在听，松开即可转写。');
+      setPhase('recording', '正在听，松开后自动发送。');
     } catch (error) {
       if (!active(turn)) return;
       held = false;
+      pointerId = null;
+      heldKey = null;
       setPhase(
         'idle',
         error.name === 'NotAllowedError'
@@ -83,6 +89,7 @@ export function holdToSpeak({ upload, onText, onState, available, record = captu
   }
   function release() {
     pointerId = null;
+    heldKey = null;
     if (!held) return;
     held = false;
     if (phase === 'recording') stop?.();
@@ -95,6 +102,7 @@ export function holdToSpeak({ upload, onText, onState, available, record = captu
     ++generation;
     held = false;
     pointerId = null;
+    heldKey = null;
     stop?.(false);
     stop = null;
     controller?.abort();
@@ -124,12 +132,15 @@ export function holdToSpeak({ upload, onText, onState, available, record = captu
   control.addEventListener('keydown', (event) => {
     if (![' ', 'Enter'].includes(event.key)) return;
     event.preventDefault();
-    if (!event.repeat) begin();
+    if (!event.repeat && phase === 'idle' && !control.disabled) {
+      heldKey = event.key;
+      begin();
+    }
   });
   control.addEventListener('keyup', (event) => {
     if (![' ', 'Enter'].includes(event.key)) return;
     event.preventDefault();
-    release();
+    if (event.key === heldKey) release();
   });
   control.addEventListener('blur', () => {
     if (held) cancel();

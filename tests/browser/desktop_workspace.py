@@ -13,6 +13,13 @@ def verify(browser, port):
         form.elements.username.value='owner'; form.elements.password.value=""" + json.dumps(PASSWORD) + """;
         form.requestSubmit()}""")
     b.wait_for("!!document.querySelector('.desk-home')")
+    b.click('.desk-assistant-float')
+    b.wait_for("!!document.querySelector('#assistant-chat:not([hidden])')")
+    assert b.evaluate("getComputedStyle(document.querySelector('.desk-assistant-float')).display === 'none'")
+    b.click('#assistant-chat [aria-label="收起助理"]')
+    b.click('#assistant-launch')
+    assert b.evaluate("document.querySelectorAll('#assistant-chat:not([hidden])').length") == 1
+    b.click('#assistant-chat [aria-label="收起助理"]')
     tree = b.evaluate("""Object.fromEntries(Array.from(document.querySelectorAll('.desk-nav-section'),g=>
         [g.querySelector('button').title,Array.from(g.querySelectorAll('a'), a=>a.title)]))""")
     assert b.evaluate("""Array.from(document.querySelector('.nav-list').children,
