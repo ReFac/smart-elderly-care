@@ -12,7 +12,7 @@ from .. import access_policy as policy, faq, provider
 from ..provider import completions, deepseek, task_usage, token_receipt
 from ..store import Conflict, SignedOut
 from . import chat_context as ctx
-from . import chat_document_help, chat_math, community_skills, english, growth, mcp_plugins
+from . import chat_document_help, community_skills, english, growth, mcp_plugins
 from . import chat_forms, chat_navigation, chat_scope, chat_web, deerflow_chat, react, resident_status, view_filters, ward_brief
 
 CONTEXT_LIMIT = 100_000
@@ -626,7 +626,6 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             last and (last_location or ward_brief.topic(last["question"]) == "health")
         ), previous=last_location)
         plugins = () if page_target or location else mcp_plugins.tools_for(user, text)
-        arithmetic = bool(chat_math.WHEN.search(text) and chat_math.tools_for(user))
         skill_request = bool(re.search(r"工作方法|工作指南|指南模板|技能|skill|工作簿|电子表格|xlsx?|简报草稿|草拟|起草|周报|通报|整理.{0,5}(?:表格|材料|资料)", text, re.I))
         faq_request = None if location or page_target or manual_form or document_request or plugins or skill_request else faq.intent(text, last["question"] if last else "")
         faq_workflow = next((entry for entry in faq_request["items"] if entry.destinations), None) if faq_request else None
@@ -660,7 +659,7 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
         if early_action and area:
             early_action = {**early_action, "region": ctx.region.selection(area)}
 
-        brief = ((english.topic(text, store.deployment_language) if is_english else "") or ward_brief.topic(text)) if not (faq_request or manual_form or document_request or plugins or skill_request or arithmetic or actions) and requested_filters is None else ""
+        brief = ((english.topic(text, store.deployment_language) if is_english else "") or ward_brief.topic(text)) if not (faq_request or manual_form or document_request or plugins or skill_request or actions) and requested_filters is None else ""
         if location:
             if not ctx.institution_access(user) or not resident_status.can_read(user):
                 save_turn(db, "当前账号没有查阅院内长辈健康或照护汇总的权限。", {"kind": "scopeRefusal"})
@@ -677,7 +676,7 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
         # An unfamiliar expression is a conversation turn. Withhold records, tools
         # and public search until there is enough context to identify an authorized scope.
         clarify = not (
-            faq_request or manual_form or document_request or plugins or arithmetic or actions
+            faq_request or manual_form or document_request or plugins or actions
             or (skill_request and user["kind"] in {"owner", "staff"})
             or requested_filters is not None or brief or page_target or chat_navigation.local_question(text)
             or chat_scope.conversation_subject(text, last["question"] if last else "")
@@ -754,13 +753,13 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
                 }
             explicit_lookup = re.search(r"调用工具|用工具|核[对实]最新|查最新|重新查|实时核对|查询工具", topics)
             if (faq_request is None and manual_form is None and requested_filters is None and not actions and not web_enabled and ctx.institution_access(user)
-                and (progress is None or explicit_lookup or arithmetic)):
+                and (progress is None or explicit_lookup)):
                 builtin_reads = react.chat_actions(facts, read_latest, topics)
             if not (faq_request or manual_form or direct or actions) and requested_filters is None:
                 discover = progress is None or explicit_lookup
                 skill_tools = community_skills.tools_for(user, text) if skill_request or discover else ()
                 offered_plugins = plugins or (mcp_plugins.tools_for(user) if discover else ())
-                lookup_actions = (*builtin_reads, *offered_plugins, *skill_tools, *(chat_math.tools_for(user) if arithmetic else ()))
+                lookup_actions = (*builtin_reads, *offered_plugins, *skill_tools)
             body = build_body(
                 db,
                 model,
@@ -794,7 +793,7 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
                     "\n只根据本轮提供的公开常见问题回答。说明适用的操作步骤，"
                     "不推断本机构的记录、实际授权、已办结果或当地政策。无法据条目回答时如实说明。"
                 )
-            if (available is not None and lookup_actions and not (plugins or skill_request or explicit_lookup or arithmetic)
+            if (available is not None and lookup_actions and not (plugins or skill_request or explicit_lookup)
                     and token_allowance(body) > available):
                 lookup_actions = builtin_reads
                 if builtin_reads:
@@ -818,7 +817,7 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             and faq_request is None
             and manual_form is None
             and requested_filters is None
-            and not (brief or document_request or plugins or skill_request or arithmetic)
+            and not (brief or document_request or plugins or skill_request)
             and not chat_navigation.local_question(text)
             and chat_web.eligible(db, state, text, actions)
         )
@@ -886,16 +885,11 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             emit_delta, flush_delta = resident_wording_stream(progress.delta)
         if consider_search:
             try:
-                search_key = key if completions.provider_name() == "deepseek" else provider.read_key()
-            except (OSError, ValueError):
-                raise chat_web.SearchFailure("公开检索服务尚未配置，请联系管理员") from None
-            try:
                 network = chat_web.collect(
                     store,
                     uid,
                     request,
                     plan["id"],
-                    search_key,
                     text,
                     scope,
                     current_search_state,
@@ -955,7 +949,7 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
                 current_search_state(live)
                 actor = store.actor(live, token)
                 return (*builtin_reads, *(mcp_plugins.tools_for(actor, text) or mcp_plugins.tools_for(actor)),
-                        *community_skills.tools_for(actor, text), *chat_math.tools_for(actor))
+                        *community_skills.tools_for(actor, text))
 
         tool_turn = react.ToolTurn(lookup_actions, current_tools, trace)
 

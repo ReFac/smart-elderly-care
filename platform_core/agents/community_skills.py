@@ -1,6 +1,7 @@
 """Discover operator-installed Agent Skills and lazily read their Markdown for chat."""
 
 from dataclasses import dataclass
+from contextlib import ExitStack
 from functools import lru_cache
 from itertools import islice
 import logging
@@ -37,7 +38,21 @@ def _regular(path):
 def _read(path):
     # Open the checked leaf without following a replacement symlink. Bound reads
     # even if a package is replaced while the catalog is being refreshed.
-    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as stream:
+    root = next((p for p in _roots() if path.is_relative_to(p)), None)
+    if root is None:
+        raise ValueError("技能资料不在机构目录内")
+    parts = path.relative_to(root).parts
+    if not parts or ".." in parts:
+        raise ValueError("技能资料路径无效")
+    with ExitStack() as stack:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        directory = os.open(root, flags)
+        stack.callback(os.close, directory)
+        for folder in parts[:-1]:
+            directory = os.open(folder, flags, dir_fd=directory)
+            stack.callback(os.close, directory)
+        descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        stream = stack.enter_context(os.fdopen(descriptor, "rb"))
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise ValueError("技能资料必须为普通文件")
         content = stream.read(MAX_FILE + 1)
@@ -52,16 +67,18 @@ class Skill:
     name: str
     description: str
     grant: str
+    allowed_tools: tuple | None
 
 
 @lru_cache(maxsize=128)
 def _metadata(path, identity):
-    value = deerflow_chat.capability("describe_skill", {"name": path.parent.name, "source": _read(path)})
+    value = deerflow_chat.capability("skill_metadata", {"name": path.parent.name, "source": _read(path)})
     name, description, grant = value["name"], value["description"], value["grant"]
     if (name != path.parent.name or len(name) > 64 or not NAME.fullmatch(name)
             or not 1 <= len(description) <= 1024 or not isinstance(grant, str) or grant not in access_policy.PERMISSIONS):
         raise ValueError("请核对技能名称、说明和岗位授权")
-    return Skill(path, name, description, grant)
+    allowed = value["allowedTools"]
+    return Skill(path, name, description, grant, None if allowed is None else tuple(allowed))
 
 
 def _describe(path):
@@ -128,55 +145,80 @@ def _references(package):
     return names
 
 
+def _member(skill, reference=None):
+    package = skill.path.parent
+    if package.parent not in _roots() or package.parent.is_symlink() or package.is_symlink() or _describe(skill.path) != skill:
+        raise ValueError("技能已更新，请重新提问")
+    refs = _references(package)
+    if reference is not None and reference not in refs:
+        raise ValueError("请选择该技能列出的 Markdown 资料")
+    contents = _read(package / reference if reference else skill.path)
+    if _describe(skill.path) != skill:
+        raise ValueError("技能已更新，请重新提问")
+    return contents, refs
+
+
+def _instructions(skill):
+    source, _ = _member(skill)
+    parsed = deerflow_chat.capability("read_skill", {"source": source, "name": skill.name})
+    if parsed["grant"] != skill.grant:
+        raise ValueError("技能权限已更新，请重新提问")
+    return parsed["instructions"]
+
+
+@lru_cache(maxsize=1)
+def _sdk_tools():
+    return {spec["function"]["name"]: spec["function"] for spec in deerflow_chat.capability("skill_tools", {})}
+
+
 @dataclass(frozen=True)
-class ReadSkill:
+class ScopedSkillTool:
+    name: str
     skills: dict
-    name = "read_workflow_skill"
-    description = "查看院内已启用的工作方法或写作指南，必要时按返回的相对文件名读取示例。"
 
     def function(self):
-        offerings = "\n".join(f"{s.name} — {s.description}" for s in self.skills.values())
-        return {"type": "function", "function": {
-            "name": self.name, "description": self.description + "\n" + offerings,
-            "parameters": {"type": "object", "properties": {
-                "name": {"type": "string", "enum": list(self.skills)},
-                "reference": {"type": "string", "description": "可选，填写该技能返回的 references 或 examples 中的文件名。"},
-            }, "required": ["name"], "additionalProperties": False},
-        }}
+        definition = dict(_sdk_tools()[self.name])
+        if self.name == "describe_skill":
+            definition["description"] += "\n当前账号的技能：" + "、".join(self.skills)
+        else:
+            definition["description"] = "读取 describe_skill 列出的 SKILL.md 或该技能列出的 Markdown 附件，可按行号读取。"
+        return {"type": "function", "function": definition}
 
-    def execute(self, arguments):
-        if not isinstance(arguments, dict) or not set(arguments) <= {"name", "reference"}:
-            raise ValueError("请指定可用的工作方法")
-        name = arguments.get("name")
-        if not isinstance(name, str) or name not in self.skills:
-            raise ValueError("该工作方法未向当前账号开放")
+    def within_scope(self, other):
+        shared = {name: skill for name, skill in self.skills.items() if other.skills.get(name) == skill}
+        return ScopedSkillTool(self.name, shared) if shared else None
+
+    def execute(self, args):
+        if self.name == "describe_skill":
+            name = args.get("name")
+            if set(args) != {"name"} or not isinstance(name, str) or not 1 <= len(name) <= 1024:
+                raise ValueError("请填写需要查找的技能")
+            catalog = [(skill.name, skill.description, skill.allowed_tools) for skill in self.skills.values()]
+            return deerflow_chat.capability("skill_tools", {"query": name, "catalog": catalog})
+
+        path = args.get("path")
+        if not isinstance(path, str) or set(args) - {"path", "description", "start_line", "end_line"}:
+            raise ValueError("请使用技能目录返回的文件路径")
+        prefix = "/mnt/skills/public/"
+        name, slash, member = path.removeprefix(prefix).partition("/")
+        if not path.startswith(prefix) or not slash or name not in self.skills:
+            raise ValueError("该技能文件未向当前账号开放")
+        reference = None if member == "SKILL.md" else member
         skill = self.skills[name]
-        package = skill.path.parent
-        # Reload metadata at use time too. A hot-swapped skill may now have a different grant.
-        if package.parent not in _roots() or package.parent.is_symlink() or package.is_symlink() or _describe(skill.path) != skill:
-            raise ValueError("技能已更新，请重新提问")
-        references = _references(package)
-        if "reference" in arguments:
-            reference = arguments["reference"]
-            if not isinstance(reference, str) or reference not in references:
-                raise ValueError("请选择该技能列出的 Markdown 资料")
-            path = package / reference
-        else:
-            reference, path = None, skill.path
-        contents = _read(path)
+        source, refs = _member(skill, reference)
+        lines = {k: args[k] for k in ("start_line", "end_line") if args.get(k) is not None}
+        if any(type(n) is not int or n < 1 for n in lines.values()) or lines.get("start_line", 1) > lines.get("end_line", float("inf")):
+            raise ValueError("请核对起止行号")
+        request = {"source": source, **lines}
         if reference is None:
-            parsed = deerflow_chat.capability("read_skill", {"source": contents, "name": name})
-            if parsed["grant"] != skill.grant:
-                raise ValueError("技能权限已更新，请重新提问")
-            contents = parsed["instructions"]
-        else:
-            contents = contents.strip()
-        return {"name": name, "reference": reference, "references": references, "instructions": contents}
+            request.update(name=name, grant=skill.grant)
+        content = deerflow_chat.capability("read_skill_member", request)
+        return {"path": path, "content": content, "references": [prefix + name + "/" + ref for ref in refs]}
 
 
 def tools_for(user, text=""):
     skills = _discover(user)
-    return (ReadSkill(skills),) if skills else ()
+    return tuple(ScopedSkillTool(name, skills) for name in _sdk_tools()) if skills else ()
 
 
 def document_guidance(user):
@@ -184,7 +226,7 @@ def document_guidance(user):
     skills = _discover(user)
     if "xlsx" not in skills or skills["xlsx"].path != BUNDLED / "xlsx" / "SKILL.md":
         return ""
-    return ReadSkill(skills).execute({"name": "xlsx"})["instructions"]
+    return _instructions(skills["xlsx"])
 
 
 def scheduled_guidance(name):
@@ -195,4 +237,4 @@ def scheduled_guidance(name):
     skill = _describe(BUNDLED / name / "SKILL.md")
     if skill.name != name or skill.grant != grants[name]:
         raise ValueError("长辈定时技能与岗位范围不匹配")
-    return ReadSkill({name: skill}).execute({"name": name})["instructions"]
+    return _instructions(skill)

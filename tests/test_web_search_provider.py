@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 
+from platform_core.agents import deerflow_chat
 from platform_core.provider import web_search
 
 
@@ -17,6 +18,12 @@ class SearchProviderTests(unittest.TestCase):
         self.response = MagicMock()
         self.response.status = 200
         self.open.return_value.__enter__.return_value = self.response
+
+    def native_search(self):
+        capability = patch.object(deerflow_chat, "capability")
+        call = capability.start()
+        self.addCleanup(capability.stop)
+        return call
 
     def returns(self, payload):
         self.response.read.return_value = json.dumps(
@@ -58,24 +65,19 @@ class SearchProviderTests(unittest.TestCase):
             "site_icon": "http://127.0.0.1",
             "content": "private-test",
         }
-        self.returns({"results": [row, row, {"url": "javascript:alert(1)"}]})
+        call = self.native_search()
+        call.return_value = {"results": [row, row, {"url": "javascript:alert(1)"}]}
         self.assertEqual(
-            web_search.search("secret", " 养老公开政策 "),
+            web_search.search(" 养老公开政策 "),
             [{"title": "官方 文件", "url": row["url"], "snippet": "公开资料"}],
         )
-        request = self.open.call_args.args[0]
-        self.assertEqual(
-            (request.full_url, request.get_method()),
-            ("https://api.deepseek.com/v1/tools/search", "POST"),
-        )
-        self.assertEqual(
-            json.loads(request.data),
-            {"query": "养老公开政策", "count": 5, "need_content": False},
-        )
+        call.assert_called_once_with("web_search", {"query": "养老公开政策"})
+        self.open.assert_not_called()
 
     def test_explicit_charge_semantics_for_empty_filtered_and_bounded_sources(self):
-        self.returns({"results": []})
-        self.assertEqual(web_search.search("secret", "公开问题"), [])
+        call = self.native_search()
+        call.return_value = {"results": []}
+        self.assertEqual(web_search.search("公开问题"), [])
         for address in (
             "file:///a",
             "javascript:alert(1)",
@@ -91,71 +93,51 @@ class SearchProviderTests(unittest.TestCase):
             "https://example.org/a\nLocation:x",
         ):
             with self.subTest(address=address):
-                self.returns({"results": [{"url": address}]})
+                call.return_value = {"results": [{"url": address}]}
                 self.failure(
-                    lambda: web_search.search("secret", "公开问题"),
+                    lambda: web_search.search("公开问题"),
                     "invalid_sources",
                     True,
                 )
-        self.returns(
-            {
-                "results": [
-                    {
-                        "url": f"https://example.org/{i}" + ("片" * 1000),
-                        "title": "资" * 300,
-                        "snippet": "疗" * 400,
-                    }
-                    for i in range(8)
-                ]
-            }
-        )
-        data = web_search.search("secret", "公开问题")
+        call.return_value = {
+            "results": [
+                {
+                    "url": f"https://example.org/{i}" + ("片" * 1000),
+                    "title": "资" * 300,
+                    "snippet": "疗" * 400,
+                }
+                for i in range(8)
+            ]
+        }
+        data = web_search.search("公开问题")
         size = len(json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode())
         self.assertTrue(0 < len(data) <= 5)
         self.assertLessEqual(size, web_search.MAX_RESULTS_BYTES)
 
     def test_input_validation_and_safe_network_failures(self):
         for query in (None, {}, "   ", "资料\x00注入", "中" * 129, "\ud800"):
-            self.failure(lambda: web_search.search("secret", query), "query", False)
+            self.failure(lambda: web_search.search(query), "query", False)
         self.failure(lambda: web_search.probe(""), "credentials", False)
         self.open.assert_not_called()
-        for error, code, billed in (
-            (
-                HTTPError("private-test", 401, "private-test", {}, BytesIO()),
-                "credentials",
-                False,
-            ),
-            (
-                HTTPError("private-test", 402, "private-test", {}, BytesIO()),
-                "balance",
-                False,
-            ),
-            (
-                HTTPError("private-test", 429, "private-test", {}, BytesIO()),
-                "rate_limited",
-                False,
-            ),
-            (
-                HTTPError("private-test", 504, "private-test", {}, BytesIO()),
-                "timeout",
-                False,
-            ),
-            (URLError(socket.gaierror("private-test")), "network", False),
-            (URLError(TimeoutError("private-test")), "timeout", None),
-            (TimeoutError("private-test"), "timeout", None),
-            (ConnectionResetError("private-test"), "network", None),
+        call = self.native_search()
+        call.side_effect = deerflow_chat.Unavailable("private-test")
+        self.failure(lambda: web_search.search("private-test"), "network", False)
+        call.side_effect = ValueError("private-test")
+        self.failure(lambda: web_search.search("private-test"), "invalid_response", False)
+        call.side_effect = None
+        call.return_value = {"error": "private-test"}
+        self.failure(lambda: web_search.search("private-test"), "network", False)
+        for error, code in (
+            (HTTPError("private-test", 401, "private-test", {}, BytesIO()), "credentials"),
+            (HTTPError("private-test", 402, "private-test", {}, BytesIO()), "balance"),
+            (HTTPError("private-test", 429, "private-test", {}, BytesIO()), "rate_limited"),
+            (URLError(socket.gaierror("private-test")), "network"),
+            (TimeoutError("private-test"), "timeout"),
         ):
-            with self.subTest(code=code, billed=billed):
+            with self.subTest(code=code):
                 self.open.side_effect = error
-                self.failure(
-                    lambda: web_search.search("secret", "private-test"), code, billed
-                )
+                self.failure(lambda: web_search.probe("secret"), code, False)
         self.open.side_effect = None
-        for raw in (b"private-test", b"x" * (web_search.MAX_RESPONSE_BYTES + 1), b"{}"):
+        for raw in (b"private-test", b"x" * (web_search.MAX_RESPONSE_BYTES + 1), b"[]"):
             self.response.read.return_value = raw
-            self.failure(
-                lambda: web_search.search("secret", "private-test"),
-                "invalid_response",
-                None,
-            )
             self.failure(lambda: web_search.probe("secret"), "invalid_response", False)

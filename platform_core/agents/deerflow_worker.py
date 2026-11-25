@@ -81,6 +81,9 @@ for package, expected, subdir in (
 if any(version(name) != pin for name, pin in (p.split("==") for p in sys.argv[2:])):
     sys.exit(1)
 from deerflow.agents.factory import create_deerflow_agent
+from deerflow.community.ddg_search.tools import web_search_tool
+from deerflow.sandbox.tools import read_file_tool
+from deerflow.skills.describe import build_describe_skill_tool
 from deerflow.skills.mutations.validation import validate_candidate
 from langchain_mcp_adapters.tools import load_mcp_tools
 """

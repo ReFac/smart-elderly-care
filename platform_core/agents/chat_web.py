@@ -195,7 +195,7 @@ def public_response(answer, sources):
     ).strip()
 
 
-def collect(store, actor, request, plan_id, key, text, scope_key, check):
+def collect(store, actor, request, plan_id, text, scope_key, check):
     """Resolve a public topic, reserve this lookup, then settle it independently of synthesis."""
     from ..provider import search_usage
 
@@ -214,7 +214,7 @@ def collect(store, actor, request, plan_id, key, text, scope_key, check):
             return None
         search_usage.reserve(db, actor, request, plan_id, store.now())
     try:
-        hits = web_search.search(key, topic)
+        hits = web_search.search(topic)
     except web_search.WebSearchError as err:
         outcome = (
             "uncertain" if err.billed is None else "ok" if err.billed else "closed"

@@ -155,11 +155,12 @@ def _run(body, first, execute, synthesize, name):
     started = finished = False
     pending, issued = {}, set()
     tools = body.get("tools", [])
-    limit = len(tools) if name == "careops-supervisor" else 3
-    allowed = {entry["function"]["name"] for entry in tools}
+    roles = body.get("roles", []) if name == "careops-supervisor" else []
+    limit = len(roles) if name == "careops-supervisor" else 3
+    allowed = set(roles) if name == "careops-supervisor" else {entry["function"]["name"] for entry in tools}
     try:
         deadline = monotonic() + TURN_SECONDS
-        worker.send(ident, "start", agent=name, tools=tools, maxActions=limit,
+        worker.send(ident, "start", agent=name, tools=tools, roles=roles, maxActions=limit,
                     deadlineMs=int(TURN_SECONDS * 1000))
         while True:
             remaining = deadline - monotonic()
@@ -229,15 +230,8 @@ def run(body, first, execute, synthesize, *, name="careops-lead"):
 
 def delegate(roles, collect):
     """Submit a verified role plan to the upstream supervisor and its scoped children."""
-    tools = [
-        {"type": "function", "function": {
-            "name": role, "description": title,
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-        }}
-        for role, title in roles.items()
-    ]
     calls = [{"id": role, "name": role, "arguments": {}} for role in roles]
-    run({"tools": tools}, lambda: {"calls": calls}, lambda role, _: collect(role),
+    run({"roles": list(roles)}, lambda: {"calls": calls}, lambda role, _: collect(role),
         lambda: {"text": "completed"}, name="careops-supervisor")
 
 

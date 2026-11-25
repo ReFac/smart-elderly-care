@@ -1,11 +1,9 @@
-"""Authenticated DeepSeek search and connectivity checks with fixed destinations."""
+"""DeerFlow public search and the separate DeepSeek connectivity check."""
 
 from http.client import HTTPException
 from ipaddress import ip_address
 import json
 import re
-import socket
-import ssl
 import unicodedata
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -16,7 +14,6 @@ from .deepseek import NoRedirect
 
 
 MODELS_URL = "https://api.deepseek.com/models"
-SEARCH_URL = "https://api.deepseek.com/v1/tools/search"
 MAX_RESULTS = 5
 MAX_RESULTS_BYTES = 8192
 MAX_RESPONSE_BYTES = 192 * 1024
@@ -25,7 +22,7 @@ MESSAGES = {
     "credentials": "平台的 DeepSeek 凭据尚未配置或验证失败，请联系管理员。",
     "query": "请输入 1 至 128 个字符的公开搜索词。",
     "timeout": "连接 DeepSeek 超时，请稍后重试。",
-    "network": "无法连接 DeepSeek，请检查机构服务器的网络。",
+    "network": "无法完成公开检索，请检查机构服务器的网络后重试。",
     "rejected": "DeepSeek 拒绝了本次请求，请稍后重试或联系管理员。",
     "balance": "DeepSeek 平台余额不足，请联系管理员。",
     "rate_limited": "联网请求太频繁，请稍后再试。",
@@ -44,28 +41,19 @@ class WebSearchError(ValueError):
         self.billed = billed
 
 
-def _request(endpoint, key, payload=None):
+def _models(key):
     if not isinstance(key, str) or not key or not re.fullmatch(r"[!-~]+", key):
         raise WebSearchError("credentials")
-    data = (
-        json.dumps(payload, ensure_ascii=False).encode()
-        if payload is not None
-        else None
-    )
-    headers = {"Authorization": "Bearer " + key, "Accept": "application/json"}
-    if data is not None:
-        headers["Content-Type"] = "application/json"
-    request = Request(endpoint, headers=headers, data=data)
-    unknown = None if data is not None else False
+    request = Request(MODELS_URL, headers={"Authorization": "Bearer " + key, "Accept": "application/json"})
     try:
         with build_opener(NoRedirect()).open(
-            request, timeout=15 if data else 5
+            request, timeout=5
         ) as response:
             if response.status != 200:
                 raise WebSearchError("rejected")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
         if len(raw) > MAX_RESPONSE_BYTES:
-            raise WebSearchError("invalid_response", billed=unknown)
+            raise WebSearchError("invalid_response")
         result = json.loads(raw)
     except HTTPError as exc:
         exc.close()
@@ -76,33 +64,26 @@ def _request(endpoint, key, payload=None):
             429: "rate_limited",
             504: "timeout",
         }.get(exc.code, "rejected")
-        # A provider HTTP error is explicitly unbilled. A local connection loss may
-        # instead have happened after the provider completed the submitted search.
         raise WebSearchError(code) from None
     except URLError as exc:
         code = "timeout" if isinstance(exc.reason, TimeoutError) else "network"
-        if isinstance(
-            exc.reason,
-            (socket.gaierror, ssl.SSLCertVerificationError, ConnectionRefusedError),
-        ):
-            unknown = False
-        raise WebSearchError(code, billed=unknown) from None
+        raise WebSearchError(code) from None
     except TimeoutError:
-        raise WebSearchError("timeout", billed=unknown) from None
+        raise WebSearchError("timeout") from None
     except (HTTPException, OSError):
-        raise WebSearchError("network", billed=unknown) from None
+        raise WebSearchError("network") from None
     except WebSearchError:
         raise
     except (ValueError, RecursionError):
-        raise WebSearchError("invalid_response", billed=unknown) from None
+        raise WebSearchError("invalid_response") from None
     if not isinstance(result, dict):
-        raise WebSearchError("invalid_response", billed=unknown)
+        raise WebSearchError("invalid_response")
     return result
 
 
 def probe(key):
     """Check the TLS endpoint, authentication and configured model without inference."""
-    models = _request(MODELS_URL, key).get("data")
+    models = _models(key).get("data")
     if not isinstance(models, list):
         raise WebSearchError("invalid_response")
     model = DEFAULT_MODEL
@@ -159,8 +140,8 @@ def _label(value, limit):
     return " ".join(value.split())[:limit]
 
 
-def search(key, query):
-    """Send the explicit public search query only. An empty list is an unbilled miss."""
+def search(query):
+    """Send only the public search topic through the isolated DeerFlow worker."""
     if not isinstance(query, str):
         raise WebSearchError("query")
     query = query.strip()
@@ -168,9 +149,17 @@ def search(key, query):
         unicodedata.category(c) in ("Cc", "Cs") for c in query
     ):
         raise WebSearchError("query")
-    rows = _request(
-        SEARCH_URL, key, {"query": query, "count": MAX_RESULTS, "need_content": False}
-    ).get("results")
+    from ..agents import deerflow_chat
+
+    try:
+        reply = deerflow_chat.capability("web_search", {"query": query})
+    except deerflow_chat.Unavailable:
+        raise WebSearchError("network") from None
+    except ValueError:
+        raise WebSearchError("invalid_response") from None
+    if reply.get("error"):
+        raise WebSearchError("network")
+    rows = reply.get("results")
     if not isinstance(rows, list):
         raise WebSearchError("invalid_response", billed=None)
     visible, seen = [], set()

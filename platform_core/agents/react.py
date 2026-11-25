@@ -65,37 +65,38 @@ class ToolTurn:
         self.current_tools = current_tools
         self.trace = trace
         self.messages = []
-        self.observed = set()
+        self.observed = {}
         self.ids = set()
-        self.skill = None
         self.pending = {}
-        self.example_read = False
+
+    def current(self):
+        current = {}
+        for tool in self.current_tools():
+            original = self.offered.get(tool.name)
+            if original is None:
+                continue
+            if hasattr(tool, "within_scope"):
+                tool = tool.within_scope(original)
+                if tool is None:
+                    continue
+            current[tool.name] = tool
+        if any(name not in current or (hasattr(previous, "within_scope") and previous != previous.within_scope(current[name]))
+               for name, previous in self.observed.items()):
+            raise PermissionError("已经读取的资料范围发生变更")
+        return current
 
     def available(self):
-        current = {t.name: t for t in self.current_tools()}
-        if not self.observed <= current.keys():
-            raise PermissionError("已经读取的资料范围发生变更")
-        skill = self.skill
-        if skill and skill["name"] not in current["read_workflow_skill"].skills:
-            raise PermissionError("该工作方法的授权已变更")
+        current = self.current()
         if len(self.ids) >= MAX_ACTIONS:
             return {}
-        tools = {name: current[name] for name in self.offered if name in current and (
-            name not in self.observed or name != "read_workflow_skill" and hasattr(current[name], "execute")
+        return {name: current[name] for name in self.offered if name in current and (
+            name not in self.observed or hasattr(current[name], "execute")
         )}
-        if skill and skill.get("references") and not skill.get("reference") and not self.example_read:
-            tools["read_workflow_skill"] = current["read_workflow_skill"]
-        return tools
 
     def validate_calls(self, calls, allowed):
         selected = requested_calls(calls, allowed.values(), self.ids)
         if len(self.ids) + len(selected) > MAX_ACTIONS:
             raise ValueError("本轮工具调用已达上限")
-        skill = self.skill
-        if skill and "read_workflow_skill" in selected:
-            _, args = selected["read_workflow_skill"]
-            if args.get("name") != skill["name"] or args.get("reference") not in skill["references"]:
-                raise ValueError("请选择该技能列出的示例")
         return selected
 
     def dispatch(self, calls):
@@ -114,20 +115,15 @@ class ToolTurn:
 
     def read(self, name, args):
         call_id, expected = self.pending.pop(name)
-        current = {t.name: t for t in self.current_tools()}
-        if name not in current or name not in self.offered or expected != args:
+        current = self.current()
+        if name not in current or expected != args:
             raise PermissionError("工具授权或参数已变更")
         started = monotonic()
         ok = False
         try:
             tool = current[name]
             result = tool.execute(args) if hasattr(tool, "execute") else tool.read()
-            if name == "read_workflow_skill":
-                if self.skill is None:
-                    self.skill = {key: result[key] for key in ("name", "reference", "references")}
-                else:
-                    self.example_read = True
-            self.observed.add(name)
+            self.observed[name] = tool
             self.messages.append({"role": "tool", "tool_call_id": call_id,
                                   "content": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
             ok = True
@@ -138,13 +134,6 @@ class ToolTurn:
     def continue_model(self, store, actor, request, system, question, *, context, context_limit, on_delta=None):
         available = self.available()
         specs = {name: tool.function() for name, tool in available.items()}
-        skill = self.skill
-        if skill and "read_workflow_skill" in specs:
-            params = specs["read_workflow_skill"]["function"]["parameters"]
-            params["properties"]["name"]["enum"] = [skill["name"]]
-            params["properties"]["reference"]["enum"] = skill["references"]
-            params["required"] = ["name", "reference"]
-
         def validate(value):
             if isinstance(value, dict) and "tool_calls" in value:
                 selected = self.validate_calls(value["tool_calls"], available)

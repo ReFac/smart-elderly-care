@@ -18,6 +18,18 @@
 - 文字和语音共用一个对话窗口。按住说话，松开后自动转写并发送。录音前或按住期间可勾选「朗读」。语音提问凭转写回执经 `POST /api/assistant/chat/speech` 分段调用 DeepSeek TTS。朗读小窗可暂停、继续或退出。[语音接口](media.md)
 - “创建老人入住”会定位到入住管理名册。“护理用具怎么样”只查询；“创建护理用具工单”打开审核表，要求选择负责人；“发布全员通知”要求全机构通知发布权限。发布命令会重新核对建议来源、账号权限、目标区域和是否已办理。关闭审核窗可以继续聊天。
 
+## Agent 可调用的工具
+
+| 能力 | 实际入口 |
+| --- | --- |
+| 院内查询 | `care_evidence`、`finance_evidence`、`inventory_evidence`、`account_evidence` 和 `activity_evidence`。每次读取均按账号核对院区、岗位及记录范围。 |
+| 跨岗位简报 | DeerFlow 原生 `task` 调度照护、物资和财务专员。专员只调用本次获准的证据接口，结果保留源记录引用。 |
+| 技能目录和资料阅读 | DeerFlow 原生 `describe_skill` 与 `read_file`。读取范围是已获授权的技能正文及目录列出的 Markdown 示例。 |
+| 公开搜索与社区 MCP | DeerFlow 的 DuckDuckGo `web_search` 只接收核准的公开词。机构通过 MCP 注册的连接器仍使用只读工具和参数白名单，例如查询时区与换算通话时间。 |
+| 文书和定时照护 | 院务证据接口读取本次作业可用的 OCR 摘录、生活记录或健康资料。原件保存、按入住归档、排班、员工签认及家属投递由相应业务流程处理。 |
+
+[官方工具目录](https://github.com/bytedance/deer-flow/tree/v2.2.0/backend/packages/harness/deerflow/tools) · [已授权的业务接口](agent-protocol.md)
+
 ## 已落地的处理链
 
 | 环节 | 实现与核验方式 |

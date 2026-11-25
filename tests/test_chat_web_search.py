@@ -107,7 +107,7 @@ class NetworkChatTests(unittest.TestCase):
         self.assertIsNone(msg["action"])
         self.assertNotIn("evil.example.net", msg["content"])
         self.assertNotIn("https://", msg["content"])
-        self.search.assert_called_once_with("unit-test-credential", self.topic)
+        self.search.assert_called_once_with(self.topic)
         self.assertEqual(
             json.loads(self.classify.call_args.args[1]["messages"][-1]["content"]),
             {"本轮问题": "河南长期护理保险公开政策有哪些？"},
@@ -136,7 +136,7 @@ class NetworkChatTests(unittest.TestCase):
                 "requestId": "separate-keys", "text": "河南长期护理保险公开政策有哪些？", "webSearch": True,
             })
         self.assertTrue(result["messages"][-1]["webSearched"])
-        self.search.assert_called_once_with("unit-test-credential", self.topic)
+        self.search.assert_called_once_with(self.topic)
         self.classify.assert_not_called()
         self.assertEqual(remote.call_count, 2)
         for call in remote.call_args_list:

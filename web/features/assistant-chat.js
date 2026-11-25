@@ -402,8 +402,9 @@ function buildChat(getContext, actor, area, region, label) {
       const labels = {
         care_evidence:['照护记录','Care records'], finance_evidence:['收款与欠款','Receipts and balances'],
         inventory_evidence:['库存台账','Inventory'], account_evidence:['账号统计','Account totals'],
-        activity_evidence:['近期改动','Recent changes'], calculate_amount:['核对算式','Calculation'],
+        activity_evidence:['近期改动','Recent changes'],
         read_workflow_skill:['查阅工作方法','Workflow guide'],
+        describe_skill:['查找工作方法','Find a workflow guide'], read_file:['阅读技能资料','Read a skill document'],
       };
       const trace = document.createElement('details');
       trace.append(node('summary', 'muted', en ? 'Tools used' : '查看使用的工具'));

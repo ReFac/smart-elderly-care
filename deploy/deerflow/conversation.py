@@ -131,11 +131,17 @@ def capability(frame):
     try:
         import capabilities
         value = frame["value"]
-        if frame["name"] in ("read_skill", "describe_skill"):
-            result = capabilities.read_skill(value["source"], value["name"], metadata_only=frame["name"] == "describe_skill")
+        if frame["name"] in ("read_skill", "skill_metadata"):
+            result = capabilities.read_skill(value["source"], value["name"], metadata_only=frame["name"] == "skill_metadata")
+        elif frame["name"] == "skill_tools":
+            result = capabilities.skill_tools(value)
+        elif frame["name"] == "read_skill_member":
+            result = capabilities.read_skill_member(value)
         elif frame["name"] == "experience.review":
             from experience import review
             result = review(value)
+        elif frame["name"] == "web_search":
+            result = capabilities.public_search(value["query"])
         elif frame["name"] == "call_mcp":
             result = asyncio.run(capabilities.call_mcp(value))
         else:

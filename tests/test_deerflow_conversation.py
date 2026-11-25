@@ -9,6 +9,40 @@ from platform_core.agents import deerflow_chat
 
 
 class DeerFlowConversationTests(unittest.TestCase):
+    def test_native_supervisor_denies_builtin_roles_and_changed_plan_before_read(self):
+        for roles in (["general-purpose"], ["care", "care"]):
+            with self.subTest(roles=roles), self.assertRaises(ValueError):
+                deerflow_chat.delegate(roles, self.fail)
+
+        def reordered():
+            return {"calls": [{"name": role, "id": role, "arguments": {}} for role in ("finance", "care")]}
+
+        with self.assertRaises(ValueError):
+            deerflow_chat.run({"roles": ["care", "finance"]}, reordered, self.fail, self.fail,
+                              name="careops-supervisor")
+
+    def test_native_specialists_do_not_share_same_role_grants_between_runs(self):
+        callers = Barrier(2, timeout=15)
+
+        def submit(index):
+            reads = []
+
+            def collect(role):
+                callers.wait()
+                reads.append((index, role))
+                if index == 1:
+                    raise PermissionError("本次院区授权已撤回")
+
+            if index == 1:
+                with self.assertRaisesRegex(PermissionError, "授权已撤回"):
+                    deerflow_chat.delegate(["care"], collect)
+            else:
+                deerflow_chat.delegate(["care"], collect)
+            return reads
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            self.assertEqual(list(pool.map(submit, (1, 2))), [[(1, "care")], [(2, "care")]])
+
     def test_oversized_request_leaves_shared_worker_usable(self):
         worker = deerflow_chat._current()
         with self.assertRaisesRegex(ValueError, "请求过大"):

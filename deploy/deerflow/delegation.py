@@ -1,18 +1,43 @@
-"""Run the institution's approved delegations through DeerFlow's subagent executor."""
+"""Delegate a host-authorized plan through DeerFlow's registered task tool."""
 
+import asyncio
+from threading import Lock
 from uuid import uuid4
 
 from deerflow.agents.factory import create_deerflow_agent
 from deerflow.config import get_app_config
 from deerflow.config.paths import get_paths
 from deerflow.runtime.user_context import DEFAULT_USER_ID
-from deerflow.subagents.config import SubagentConfig
-from deerflow.subagents.executor import SubagentExecutor, SubagentStatus
+from deerflow.subagents.status_contract import read_subagent_result_metadata
+from deerflow.tools.builtins.task_tool import task_tool
+from deerflow.tools.types import Runtime
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langchain_core.tools import StructuredTool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool
 from langsmith import tracing_context
+
+
+# Only one child per run can read at a time. Each grant disappears on use or cancellation.
+_readers = {}
+_readers_lock = Lock()
+
+
+@tool
+def read_assigned_evidence(runtime: Runtime, config: RunnableConfig) -> str:
+    """核对当前岗位受托查阅的院内资料。"""
+    # Both values are injected by DeerFlow's executor. The tool has no model-supplied arguments.
+    roles = [tag.removeprefix("subagent:") for tag in config.get("tags", ()) if tag.startswith("subagent:")]
+    if len(roles) != 1:
+        raise PermissionError("无法核对受派岗位")
+    key = ((runtime.context or {}).get("thread_id"), roles[0])
+    with _readers_lock:
+        collect = _readers.pop(key, None)
+    if collect is None:
+        raise PermissionError("此次委派没有可用的资料授权")
+    collect()
+    return "本次授权的业务资料已核对"
 
 
 def result(message):
@@ -20,74 +45,83 @@ def result(message):
 
 
 class EvidenceTransport(BaseChatModel):
-    """Replay one authorized read. Reasoning and paid generation stay on the metered transport."""
+    """Replay the vetted plan. The institution meters reasoning and checks evidence in the host."""
 
     @property
     def _llm_type(self):
         return "careops-authorized-read"
 
     def bind_tools(self, tools, **kwargs):
+        if [item.name for item in tools] != [read_assigned_evidence.name]:
+            raise PermissionError("受派岗位的工具范围与授权不符")
         return self
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         if isinstance(messages[-1], ToolMessage):
             return result(AIMessage(content="资料核对完成"))
         return result(AIMessage(content="", tool_calls=[
-            {"name": "read_assigned_evidence", "args": {}, "id": uuid4().hex},
+            {"name": read_assigned_evidence.name, "args": {}, "id": uuid4().hex},
         ]))
 
 
 def run_supervisor(start, exchange):
-    registry = {spec["function"]["name"]: spec["function"] for spec in start["tools"]}
-    if not registry or set(registry) - {"care", "inventory", "finance"}:
-        raise ValueError("委派岗位未经授权")
+    roles = start["roles"]
     config = get_app_config()
-    selected = {}
+    registered = config.subagents.custom_agents
+    if not roles or any(role not in registered for role in roles) or len(set(roles)) != len(roles):
+        raise ValueError("委派岗位未经授权")
+    ident = start["id"]
+    pending = iter(())
     completed = set()
 
     class SupervisorTransport(EvidenceTransport):
+        def bind_tools(self, tools, **kwargs):
+            if [item.name for item in tools] != [task_tool.name]:
+                raise PermissionError("委派工具配置与授权不符")
+            return self
+
         def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-            if isinstance(messages[-1], ToolMessage):
-                if completed != set(registry):
-                    raise ValueError("委派未完成")
+            nonlocal pending
+            last = messages[-1]
+            if isinstance(last, ToolMessage):
+                receipt = read_subagent_result_metadata(last.additional_kwargs)
+                if (not receipt or receipt.get("status") != "completed" or receipt.get("stop_reason")
+                        or last.tool_call_id not in completed):
+                    raise ValueError("专员未完成此次资料核对")
+            else:
+                calls = exchange("model", phase="initial")["calls"]
+                if [call["name"] for call in calls] != roles or any(call["arguments"] != {} for call in calls):
+                    raise ValueError("委派计划与岗位授权不符")
+                pending = iter(calls)
+            call = next(pending, None)
+            if call is None:
                 exchange("model", phase="synthesis")
                 return result(AIMessage(content="完成"))
-            plan = exchange("model", phase="initial")["calls"]
-            for call in plan:
-                name = call["name"]
-                if name not in registry or name in selected or call["arguments"] != {}:
-                    raise ValueError("委派与本次授权不符")
-                selected[name] = call["id"]
-            return result(AIMessage(content="", tool_calls=[
-                {"name": name, "args": {}, "id": call_id} for name, call_id in selected.items()
-            ]))
 
-    def handoff(name, spec):
-        def invoke():
-            def read():
-                exchange("tool", name=name, args={}, callId=selected[name])
-                return "本次授权的业务记录已核对"
+            def collect():
+                exchange("tool", name=call["name"], args={}, callId=call["id"])
+                completed.add(call["id"])
 
-            evidence = StructuredTool.from_function(read, name="read_assigned_evidence", description=spec["description"])
-            role = SubagentConfig(name=name, description=spec["description"], tools=[evidence.name],
-                                  skills=[], model="scoped-read", max_turns=3, timeout_seconds=90)
-            thread_id = uuid4().hex
-            child = SubagentExecutor(role, [evidence], app_config=config, trace_id=start["id"],
-                                     run_id=uuid4().hex, thread_id=thread_id, user_id=DEFAULT_USER_ID)
-            try:
-                receipt = child.execute("核对此次委派的资料。")
-            finally:
-                # Each child owns a fresh temporary thread. Its durable receipt lives in the institution.
-                get_paths().delete_thread_dir(thread_id, user_id=DEFAULT_USER_ID)
-            if receipt.status is not SubagentStatus.COMPLETED or receipt.stop_reason:
-                raise RuntimeError("专员未完成此次资料核对")
-            completed.add(name)
-            return "已核对"
+            with _readers_lock:
+                _readers[ident, call["name"]] = collect
+            return result(AIMessage(content="", tool_calls=[{
+                "name": task_tool.name,
+                "args": {"subagent_type": call["name"], "prompt": "核对本次分配的资料。", "context_mode": "isolated"},
+                "id": call["id"],
+            }]))
 
-        return StructuredTool(name=name, description=spec["description"], args_schema=spec["parameters"], func=invoke)
-
-    with tracing_context(enabled=False):
-        graph = create_deerflow_agent(SupervisorTransport(), tools=[handoff(n, s) for n, s in registry.items()],
-                                      middleware=[], checkpointer=None, name="careops-supervisor")
-        graph.invoke({"messages": [("user", "执行本次已核对的委派计划。")]},
-                     {"max_concurrency": 1, "recursion_limit": 8})
+    try:
+        with tracing_context(enabled=False):
+            graph = create_deerflow_agent(SupervisorTransport(), tools=[task_tool], middleware=[],
+                                          checkpointer=None, name="careops-supervisor")
+            asyncio.run(graph.ainvoke(
+                {"messages": [("user", "执行此次已核对的委派计划。")]},
+                {"metadata": {"allowed_subagents": roles, "available_skills": [], "mcp_plugins": [],
+                              "tool_groups": ["institution-evidence"]}, "recursion_limit": 4 * len(roles) + 8},
+                context={"thread_id": ident, "run_id": ident, "user_id": DEFAULT_USER_ID, "app_config": config},
+            ))
+    finally:
+        with _readers_lock:
+            for role in roles:
+                _readers.pop((ident, role), None)
+        get_paths().delete_thread_dir(ident, user_id=DEFAULT_USER_ID)

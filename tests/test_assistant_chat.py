@@ -131,11 +131,10 @@ class ChatTests(unittest.TestCase):
         self.assertIsNone(denied["action"])
         self.assertNotIn("taskId", denied)
 
-    def test_observe_inventory_then_calculate_and_trace_without_arguments(self):
-        from platform_core.agents.chat_math import Arithmetic
+    def test_observe_inventory_then_finance_and_trace_without_arguments(self):
         def first(_key, body):
             names = [row["function"]["name"] for row in body["tools"]]
-            self.assertIn("calculate_amount", names)
+            self.assertIn("finance_evidence", names)
             return {"usage":{"total_tokens":50},"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[
                 {"type":"function","id":"provider-stock-207","function":{"name":"inventory_evidence","arguments":"{}"}}]}}]}
         self.transport.side_effect = first
@@ -144,25 +143,22 @@ class ChatTests(unittest.TestCase):
             if len(observed) == 1:
                 self.assertIn("物资", observed[0])
                 self.assertEqual(body["messages"][-1]["tool_call_id"], "provider-stock-207")
-                self.assertIn("calculate_amount", [tool["function"]["name"] for tool in body["tools"]])
+                self.assertIn("finance_evidence", [tool["function"]["name"] for tool in body["tools"]])
                 return {"usage": {"total_tokens": 23}, "choices": [{"finish_reason": "tool_calls", "message": {
-                    "tool_calls": [{"type": "function", "id": "provider-math-208", "function": {"name": "calculate_amount",
-                                   "arguments": '{"expression":"3 * 2.55"}'}}]}}]}
-            self.assertEqual(observed[1]["value"], "7.65")
-            self.assertEqual(body["messages"][-1]["tool_call_id"], "provider-math-208")
+                    "tool_calls": [{"type": "function", "id": "provider-finance-208", "function": {"name": "finance_evidence",
+                                   "arguments": "{}"}}]}}]}
+            self.assertIn("到账与欠款（元）", observed[1])
+            self.assertEqual(body["messages"][-1]["tool_call_id"], "provider-finance-208")
             return {"usage": {"total_tokens": 37}, "choices": [{"finish_reason": "stop", "message": {
-                "content": "按所给单价合计 7.65 元。"}}]}
+                "content": "已核对当前库存和财务到账。"}}]}
         with patch("platform_core.provider.deepseek.send", side_effect=decide):
-            answer = self.ask("核对库存，计算三份每份 2.55 元的总价")["messages"][-1]
-        self.assertIn("7.65 元", answer["content"])
+            answer = self.ask("请用工具核对库存和财务到账")["messages"][-1]
+        self.assertIn("财务到账", answer["content"])
         with closing(self.store.connect()) as db:
             self.assertEqual([r[0] for r in db.execute(
                 "SELECT charged FROM api_usage WHERE feature='assistant.toolAnswer' ORDER BY rowid")], [23, 37])
-        self.assertEqual([row["tool"] for row in answer["toolTrace"]], ["inventory_evidence","calculate_amount"])
+        self.assertEqual([row["tool"] for row in answer["toolTrace"]], ["inventory_evidence","finance_evidence"])
         self.assertNotIn("expression", str(answer["toolTrace"]))
-        for invalid in ("2**24", "1/0", "2 // 2", "sum(1,2)"):
-            with self.assertRaises(ValueError):
-                Arithmetic().execute({"expression":invalid})
 
     @international_only
     def test_english_institution_brief_form_and_draft(self):
@@ -274,21 +270,20 @@ class ChatTests(unittest.TestCase):
 
     def test_skill_arguments_and_permission_recheck(self):
         from platform_core.agents import community_skills
-        from importlib.util import find_spec
-
-        if not find_spec("yaml"):
-            self.skipTest("requires requirements-harness.txt")
         def choose(_key, body):
             names = [row["function"]["name"] for row in body["tools"]]
-            self.assertIn("read_workflow_skill", names)
-            return {"usage":{"total_tokens":50}, "choices":[{"finish_reason":"tool_calls", "message":{
-                "tool_calls":[{"type":"function", "function":{"name":"read_workflow_skill","arguments":'{"name":"xlsx"}'}}]}}]}
+            self.assertIn("describe_skill", names)
+            self.assertIn("read_file", names)
+            self.assertFalse(set(names) & {"bash", "write_file"})
+            return {"usage": {"total_tokens": 50}, "choices": [{"finish_reason": "tool_calls", "message": {
+                "tool_calls": [{"type": "function", "function": {"name": "describe_skill",
+                                "arguments": '{"name":"select:xlsx"}'}}]}}]}
         self.transport.side_effect = choose
         with patch("platform_core.provider.deepseek.send", return_value={
             "usage": {"total_tokens": 24}, "choices": [{"finish_reason": "stop", "message": {"content": "请先核对表头。"}}]
         }) as final:
             self.ask("工作表请用 xlsx 技能整理一下")
-        self.assertEqual(json.loads(final.call_args.args[1]["messages"][-1]["content"])["name"], "xlsx")
+        self.assertIn("/mnt/skills/public/xlsx/SKILL.md", json.loads(final.call_args.args[1]["messages"][-1]["content"]))
         first = community_skills.tools_for
         # Simulate withdrawing this extension after the initial cloud request.
         with patch.object(community_skills, "tools_for", side_effect=[first({"kind":"owner","permissions":[]}), ()]), \
@@ -298,32 +293,32 @@ class ChatTests(unittest.TestCase):
             final.assert_not_called()
 
     def test_model_reads_only_a_listed_skill_reference_in_a_later_graph_step(self):
-        skill = "internal-comms"
-        ref = "examples/faq-answers.md"
+        guide = "/mnt/skills/public/internal-comms/SKILL.md"
+        ref = "/mnt/skills/public/internal-comms/examples/faq-answers.md"
 
-        def call(arguments):
+        def call(name, arguments):
             return {"usage": {"total_tokens": 38}, "choices": [{"finish_reason": "tool_calls", "message": {
-                "tool_calls": [{"type": "function", "function": {
-                    "name": "read_workflow_skill", "arguments": json.dumps(arguments)}}]}}]}
+                "tool_calls": [{"type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}]}}]}
 
-        self.transport.return_value = call({"name": skill})
+        self.transport.return_value = call("describe_skill", {"name": "select:internal-comms"})
 
         def follow(_key, body, **kwargs):
             evidence = [json.loads(m["content"]) for m in body["messages"] if m["role"] == "tool"]
             if len(evidence) == 1:
-                self.assertIn(ref, evidence[0]["references"])
-                offered = next(t["function"] for t in body["tools"] if t["function"]["name"] == "read_workflow_skill")
-                self.assertEqual(offered["parameters"]["properties"]["name"]["enum"], [skill])
-                return call({"name": skill, "reference": ref})
-            self.assertEqual(evidence[-1]["reference"], ref)
-            self.assertIn("FAQ", evidence[-1]["instructions"])
+                self.assertIn(guide, evidence[0])
+                return call("read_file", {"path": guide})
+            if len(evidence) == 2:
+                self.assertIn(ref, evidence[-1]["references"])
+                return call("read_file", {"path": ref})
+            self.assertIn("FAQ", evidence[-1]["content"])
+            self.assertNotIn("tools", body)
             return {"usage": {"total_tokens": 27}, "choices": [{"finish_reason": "stop", "message": {
                 "content": "可以按这份示例草拟，发给同事前请核对。"}}]}
 
         with patch("platform_core.provider.deepseek.send", side_effect=follow):
             answer = self.ask("请使用 internal-comms 技能整理院内交班文稿")["messages"][-1]
-        self.assertEqual([item["tool"] for item in answer["toolTrace"]], ["read_workflow_skill"] * 2)
-        with patch("platform_core.provider.deepseek.send", return_value=call({"name": skill, "reference": "未列出.md"})):
+        self.assertEqual([item["tool"] for item in answer["toolTrace"]], ["describe_skill", "read_file", "read_file"])
+        with patch("platform_core.provider.deepseek.send", return_value=call("read_file", {"path": "/etc/passwd"})):
             with self.assertRaises(chat.Unavailable):
                 self.ask("请使用 internal-comms 技能整理院内交班文稿", "unknown-skill-reference")
 

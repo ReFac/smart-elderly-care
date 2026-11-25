@@ -11,6 +11,8 @@
 | 文书、在院健康复核与生活简报 | 证据图通过 `read_authorized_evidence` 读取这次作业的摘录，请院务服务调用机构模型。工作图核对输出的原文行号；生活简报另核对日期分组与遗漏。作业编号关联经办人、按页计量的 OCR 和模型费用。 |
 | 草稿、签认与家属投递 | 等候处理的文书与巡查作业留在加密库内。收到草稿后，院务服务重查状态、订阅和权限，再办理签认或投递并留下回执。 |
 
+员工询问工作方法时，院务服务按岗位筛选技能目录，DeerFlow 的 `describe_skill` 负责检索。例如，电子表格技能会返回 `/mnt/skills/public/xlsx/SKILL.md`。读取正文或已列出的 Markdown 示例时，服务先核对权限、路径和文件类型，再把该文件的临时副本交给原生 `read_file`，也可以指定起止行号。技能包里的工具声明不能授予命令执行或写入权限。[上游技能检索实现](https://github.com/bytedance/deer-flow/blob/58fc5bd5b8e6ea46538e9481ba06ca2a46e14e2a/backend/packages/harness/deerflow/skills/describe.py)
+
 ## 安装
 
 Linux 主机需有 Git 和 Python 3.12 或以上版本。在项目根目录建立专用环境。下例假定 `python3` 符合版本要求。如果院务服务仍用 Python 3.11，可用单独安装的较新解释器建立这个 venv。

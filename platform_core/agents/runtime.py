@@ -294,7 +294,7 @@ def execute(
 
     # Replay the vetted cloud plan (or one explicitly requested role) into the native
     # supervisor. Each child receives only an opaque, no-argument business read.
-    deerflow_chat.delegate({key: allowed[key].title for key in planned}, collect)
+    deerflow_chat.delegate(planned, collect)
     if set(artifacts) != set(planned):
         raise ValueError("专员未完成已授权的资料核对")
     return [artifacts[key] for key in planned]

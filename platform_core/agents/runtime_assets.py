@@ -61,7 +61,7 @@ def verify_candidate():
         if not ran:
             raise ValueError("DeerFlow 未执行自检对话")
         visited = []
-        deerflow_chat.delegate({"care": "核对虚构资料"}, visited.append)
+        deerflow_chat.delegate(["care"], visited.append)
         if visited != ["care"]:
             raise ValueError("DeerFlow 专员委派自检失败")
         deerflow_worker._start()

@@ -6,6 +6,8 @@ For each visit document extraction, daily-life summary or health review, CareOps
 
 DeerFlow also runs staff conversations. The conversation worker can ask for the tools available to the signed-in account while a separate worker prepares a document. The conversation runtime also reads approved skills, invokes configured read-only MCP tools and checks candidate writing rules before staff publish them. The institution service checks who signed in and which beds and residents they may access. It handles OCR, billing, original files, approval and audit. [Pinned upstream source](https://github.com/bytedance/deer-flow/tree/58fc5bd5b8e6ea46538e9481ba06ca2a46e14e2a)
 
+For a skill lookup, the controller gives DeerFlow’s `describe_skill` a catalogue filtered to the employee’s role. For example, a lookup can return `/mnt/skills/public/xlsx/SKILL.md`. The native `read_file` tool reads a temporary copy of that one approved document. It can also read a listed Markdown example or a range of lines. The host checks paths, permissions and file type before making a copy. Skill declarations cannot grant shell or write access. [Upstream skill catalogue and tool](https://github.com/bytedance/deer-flow/blob/58fc5bd5b8e6ea46538e9481ba06ca2a46e14e2a/backend/packages/harness/deerflow/skills/describe.py)
+
 From the repository root on Linux, use Git and Python 3.12 or newer to install the worker.
 
 ```bash
