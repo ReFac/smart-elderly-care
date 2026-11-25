@@ -2,7 +2,7 @@ import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { backupPanel } from './backups.js';
 import { roundsSettings } from './rounds-desk.js';
 import { passwordFlow, sendPasswordReset } from './identity.js';
-import { staffResumeFields } from './staff-resume.js';
+import { staffResumeEvidence, staffResumeFields } from './staff-resume.js';
 import { passkeyButton, passkeySignIn } from './passkeys.js';
 import { openDossier } from './dossier.js';
 import { openEmployment } from './staff-employment.js';
@@ -198,11 +198,17 @@ export function loginScreen(onLogin, branding = {}, onPasskey = null) {
   return main;
 }
 
-export function editAccount(ctx, kind, target = null, defaultRole = '护工') {
+export function openStaffResumeReview(ctx, draft) {
+  return editAccount(ctx, 'staff', null, '', draft);
+}
+
+export function editAccount(ctx, kind, target = null, defaultRole = '护工', resume = null) {
   const state = ctx.state;
   const family = kind === 'family';
   const form = node('form', 'access-form');
-  const [nameRow, name] = inputField('姓名', 'displayName', target?.displayName || '', { max: 60 });
+  const prefilled = resume?.result.fields;
+  if (resume) form.append(staffResumeEvidence(resume));
+  const [nameRow, name] = inputField('姓名', 'displayName', target?.displayName || prefilled?.displayName?.value || '', { max: 60 });
   const identity = node('div', 'access-field-pair', nameRow);
   form.append(identity);
   let username, inviteAddress, duties, resident, familyServices, portalIdentity;
@@ -220,11 +226,11 @@ export function editAccount(ctx, kind, target = null, defaultRole = '护工') {
   }
   if (!target || target.activationPending) {
     let row;
-    [row, inviteAddress] = inputField('本人手机号', 'destination', '', {
+    [row, inviteAddress] = inputField('本人手机号', 'destination', prefilled?.phone?.value || '', {
       type: 'tel', max: 18, autocomplete: 'tel', required: !target,
       placeholder: target ? '仅更正首次邀请时填写' : '中国大陆号码可直接填写',
     });
-    if (!target && !family) form.prepend(staffResumeFields(name, inviteAddress));
+    if (!target && !family && !resume) form.prepend(staffResumeFields(name, inviteAddress));
     form.append(row, node('p', 'fx-muted', '本人通过登记的手机号验证身份并设置密码。邮箱可在开通后由本人验证添加。'));
   }
   if(target)
@@ -304,8 +310,8 @@ export function editAccount(ctx, kind, target = null, defaultRole = '护工') {
   } else {
     const preset = target?.role || defaultRole;
     const [roleRow, roleSelect] = selectField(
-      '岗位模板',
-      Object.keys(state.rolePresets).map((x) => [x, x]),
+      resume ? '岗位' : '岗位模板',
+      [...(resume ? [['', '请选择岗位']] : []), ...Object.keys(state.rolePresets).map((x) => [x, x])],
       preset,
     );
     const campusOptions = (state.campusOptions || []).map((item) => [item.id, item.name]);
@@ -319,11 +325,12 @@ export function editAccount(ctx, kind, target = null, defaultRole = '护工') {
     campus.name = 'campusId';
     role = roleSelect;
     role.name = 'role';
+    role.required = Boolean(resume);
     grants = grantPicker(
       state.permissionOptions,
       target?.permissions || state.rolePresets[preset] || [],
     );
-    role.addEventListener('change', () => grants.write(state.rolePresets[role.value] || []));
+    if (!resume) role.addEventListener('change', () => grants.write(state.rolePresets[role.value] || []));
     duties = checkboxes(state.accessManagement.staffDuties.map(v=>[v,v]),target?.staffDuties||[]);
     form.append(
       roleRow,

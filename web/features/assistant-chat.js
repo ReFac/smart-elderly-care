@@ -7,6 +7,7 @@ import { holdToSpeak, voiceServiceReason } from './agent-voice.js';
 import { openPriorReports } from './assistants.js';
 import { assistantCommand, assistantPageLinks, openAssistantAction } from './assistant-actions.js';
 import { openVisitEditor } from './medical-visit-intake.js';
+import { recognizeStaffResume, staffResumeTypes } from './staff-resume.js';
 
 const path = '/api/assistant/chat';
 const dayLabel = new Intl.DateTimeFormat('zh-CN', {
@@ -57,6 +58,10 @@ function actorSignature(ctx, scoped) {
       ? (ctx.state.residents || []).map((r) => [r.id, r.bedId, r.status])
       : null;
   return JSON.stringify([ctx.state.user, ctx.state.uiSettings.hiddenRoutes, membership]);
+}
+
+function canUploadResume(ctx) {
+  return ctx.available('access') && ctx.state?.allowedActions?.includes('access.create');
 }
 
 export function chatLauncher(open) {
@@ -173,6 +178,7 @@ function buildChat(getContext, actor, area, region, label) {
     retry,
     lastFocused,
     destroyed = false;
+  let resumeRequest;
   let partial = '', partialRow, partialFrame, speechTurn, speechDismissed = false;
   const requestURL = path + (area ? '?' + area : '');
   let voice;
@@ -238,16 +244,41 @@ function buildChat(getContext, actor, area, region, label) {
   });
   const sendActions = node('div', 'assistant-send-actions', [keys, send]);
   const visit = !area && ctx.state.allowedActions?.includes('dossier.confirmVisit')
-    ? control('传就诊资料', 'folder', 'assistant-visit', () => openVisitEditor(getContext()))
+    ? control('传就诊资料', 'folder', 'assistant-attachment assistant-visit', () => openVisitEditor(getContext()))
     : null;
   if (visit) visit.title = '上传一位长辈的一组就诊图片或 PDF';
+  const resumePicker = !area && canUploadResume(ctx) ? el('input') : null;
+  const resumeButton = resumePicker ? control('传简历', 'file', 'assistant-attachment', () => resumePicker.click()) : null;
+  const resumeStatus = el('div', 'assistant-status');
+  resumeStatus.setAttribute('role', 'status');
+  if (resumePicker) {
+    resumePicker.type = 'file';
+    resumePicker.accept = staffResumeTypes;
+    resumePicker.hidden = true;
+    resumeButton.title = '选择或拖入一份简历 PDF 或照片，识别后打开新增员工表单';
+    resumePicker.addEventListener('change', () => {
+      const [file] = resumePicker.files;
+      resumePicker.value = '';
+      if (file) uploadResume(file);
+    });
+    resumeButton.addEventListener('dragover', (event) => event.preventDefault());
+    resumeButton.addEventListener('drop', (event) => {
+      event.preventDefault();
+      if (resumeButton.disabled || !event.dataTransfer.files.length) return;
+      if (event.dataTransfer.files.length !== 1) return problem('请一次上传一份简历。');
+      uploadResume(event.dataTransfer.files[0]);
+    });
+  }
   const tools = node('div', 'assistant-compose-tools', [
-    node('div', 'assistant-compose-inputs', [voice.control, visit]), sendActions,
+    node('div', 'assistant-compose-inputs', [voice.control, visit,
+      resumePicker ? node('span', 'assistant-resume-upload', [resumePicker, resumeButton]) : null,
+    ]), sendActions,
   ]);
   const composeBox = node('div', 'assistant-compose-box', [input, tools]);
   composer.append(
     error,
     note,
+    resumeStatus,
     network.status,
     reader.popup,
     composeBox,
@@ -257,7 +288,8 @@ function buildChat(getContext, actor, area, region, label) {
   document.body.append(panel);
 
   function sync() {
-    const blocked = !loaded || waiting || sending || network.probing;
+    const busy = sending || network.probing || Boolean(resumeRequest);
+    const blocked = !loaded || waiting || busy;
     network.button.disabled =
       !network.enabled && !network.probing && (blocked || voicePhase !== 'idle');
     input.placeholder = network.enabled
@@ -271,8 +303,10 @@ function buildChat(getContext, actor, area, region, label) {
       input.value.length > input.maxLength ||
       voicePhase !== 'idle';
     if (voice) voice.control.disabled = blocked;
-    if (visit) visit.disabled = sending || network.probing || voicePhase !== 'idle';
-    reader.enableForVoice(!blocked && !panel.hidden && (voicePhase !== 'idle' || voiceDraft));
+    if (visit) visit.disabled = busy || voicePhase !== 'idle';
+    if (resumeButton) resumeButton.disabled = busy || voicePhase !== 'idle';
+    const preparingVoice = !input.value.trim() && !voiceServiceReason(voiceService());
+    reader.enableForVoice(!blocked && !panel.hidden && Boolean(preparingVoice || voicePhase !== 'idle' || voiceDraft));
   }
   function adjustInput() {
     input.style.height = 'auto';
@@ -431,6 +465,46 @@ function buildChat(getContext, actor, area, region, label) {
     error.replaceChildren(el('span', '', message));
     if (callback) error.append(control(label, 'undo', 'assistant-retry', callback));
   }
+  async function uploadResume(file) {
+    if (resumeButton.disabled || panel.hidden || destroyed || !canUploadResume(getContext())) return;
+    const controller = new AbortController();
+    resumeRequest = controller;
+    resumeStatus.textContent = '正在识别简历…';
+    error.replaceChildren();
+    sync();
+    try {
+      const result = await recognizeStaffResume(file, controller.signal);
+      if (controller.signal.aborted || !(await getContext().refreshWorkspace()) || destroyed || panel.hidden) return;
+      if (!canUploadResume(getContext())) throw Error('当前账号没有新增员工的权限。');
+      const { openStaffResumeReview } = await import('./access.js');
+      if (controller.signal.aborted || destroyed || panel.hidden) return;
+      const draft = { filename: file.name, result };
+      const open = () => {
+        const live = getContext();
+        if (!canUploadResume(live)) return live.toast('当前账号没有新增员工的权限。');
+        if (document.querySelector('dialog[open]')) return live.toast('请先关闭当前窗口，再打开新增员工表单。');
+        hide();
+        live.go('access', null, () => openStaffResumeReview(getContext(), draft));
+      };
+      if (document.querySelector('dialog[open]')) {
+        resumeStatus.replaceChildren(el('span', '', '简历已识别。'),
+          control('打开新增员工表单', 'file', 'assistant-retry', open));
+      } else open();
+    } catch (cause) {
+      if (controller.signal.aborted || destroyed) return;
+      resumeStatus.textContent = '';
+      if (cause.status === 401) await getContext().refreshWorkspace().catch(() => false);
+      if (!destroyed) problem(cause.message || '简历识别失败，请重试。');
+    } finally {
+      if (resumeRequest === controller) {
+        resumeRequest = null;
+        if (!destroyed) {
+          if (resumeStatus.textContent === '正在识别简历…') resumeStatus.textContent = '';
+          sync();
+        }
+      }
+    }
+  }
   async function load() {
     waiting = true;
     const before = messages.at(-1);
@@ -467,6 +541,9 @@ function buildChat(getContext, actor, area, region, label) {
     if (!destroyed && loaded) problem(message);
   }
   function hide(keepPlayback = false) {
+    resumeRequest?.abort();
+    resumeRequest = null;
+    resumeStatus.replaceChildren();
     if (keepPlayback !== true) {
       reader.stop();
       speechDismissed = true;
@@ -510,6 +587,7 @@ function buildChat(getContext, actor, area, region, label) {
       !loaded ||
       waiting ||
       sending ||
+      resumeRequest ||
       network.probing ||
       voicePhase !== 'idle' ||
       !text ||
@@ -690,6 +768,7 @@ function buildChat(getContext, actor, area, region, label) {
     },
     destroy() {
       destroyed = true;
+      resumeRequest?.abort();
       reader.stop();
       reader.popup.remove();
       voice.cancel();

@@ -291,8 +291,9 @@
 }
 .assistant-exit-scope svg { width: 12px; height: 12px; }
 
-.assistant-send-actions { display: flex; align-items: center; gap: 8px; }
-.assistant-enter-hint { color: var(--muted); font-size: 11px; }
+.assistant-compose-inputs .assistant-hold { padding-inline: 12px; }
+.assistant-send-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.assistant-enter-hint { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .assistant-network {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 30px; flex: none; padding: 2px 9px 2px 3px;

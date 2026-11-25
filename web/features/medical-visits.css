@@ -1,6 +1,7 @@
 .assistant-compose-inputs { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-.assistant-visit { display:inline-flex; align-items:center; gap:5px; padding:6px 9px; border:1px solid var(--line); border-radius:20px; background:#fff; color:var(--accent); font-size:12px; font-weight:650; cursor:pointer; }
-.assistant-visit:hover,.assistant-visit:focus-visible { background:var(--soft); border-color:var(--accent); }
+.assistant-attachment { display:inline-flex; align-items:center; gap:5px; padding:6px 9px; border:1px solid var(--line); border-radius:20px; background:var(--surface, #fff); color:var(--accent); font-size:12px; font-weight:650; cursor:pointer; white-space:nowrap; }
+.assistant-attachment:is(:hover, :focus-visible):not(:disabled) { background:var(--soft); border-color:var(--accent); }
+.assistant-attachment:disabled { cursor:default; opacity:.57; }
 .dialog.medical-visit-dialog { width:min(870px,calc(100% - 32px)); }
 .medical-visit-form,.medical-visit-inputs,.medical-visit-fields,.medical-visit-detail { display:grid; gap:14px; min-width:0; }
 .medical-visit-form .field { min-width:0; }

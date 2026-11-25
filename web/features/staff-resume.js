@@ -2,11 +2,38 @@ import { node } from './shared.js';
 
 const labels = { displayName: '姓名', phone: '手机号' };
 const extensions = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
+export const staffResumeTypes = 'application/pdf,image/png,image/jpeg';
+
+export async function recognizeStaffResume(file, signal) {
+  const mime = extensions[file.name.split('.').pop().toLowerCase()];
+  if (typeof mime !== 'string' || !file.size || file.size > 8 * 1024 * 1024)
+    throw Error('请选择 8 MiB 以内的 PDF、PNG 或 JPEG 简历。');
+  const response = await fetch('/api/staff/resume/preview', {
+    method: 'POST', headers: { 'Content-Type': mime }, body: file, signal,
+  });
+  const result = await response.json();
+  if (!response.ok) throw Object.assign(Error(result.error || '简历识别失败'), { status: response.status });
+  return result;
+}
+
+export function staffResumeEvidence({ filename, result }) {
+  const sources = Object.entries(result.fields).map(([key, field]) =>
+    node('li', '', labels[key] + ' · 第 ' + field.page + ' 页第 ' + field.line + ' 行'),
+  );
+  const ambiguous = result.ambiguous.map((key) => labels[key]).join('、');
+  return node('section', 'access-resume-evidence', [
+    node('strong', '', '简历原件 · ' + filename),
+    node('p', 'fx-muted', sources.length ? '请对照原件核对已预填的字段，并选择岗位和权限。'
+      : '未识别到可以预填的字段，请对照原件手工填写。'),
+    sources.length ? node('ul', '', sources) : null,
+    ambiguous ? node('p', 'fx-muted', ambiguous + '有多个识别值，请手工填写。') : null,
+  ]);
+}
 
 export function staffResumeFields(name, phone) {
   const upload = node('input');
   upload.type = 'file';
-  upload.accept = 'application/pdf,image/png,image/jpeg';
+  upload.accept = staffResumeTypes;
   upload.hidden = true;
   const choose = node('button', 'btn btn-ghost', '选择简历');
   choose.type = 'button';
@@ -27,22 +54,13 @@ export function staffResumeFields(name, phone) {
   scan.addEventListener('click', async () => {
     const [file] = upload.files;
     if (!file) return;
-    const mime = extensions[file.name.split('.').pop().toLowerCase()];
-    if (!mime || !file.size || file.size > 8 * 1024 * 1024) {
-      status.textContent = '请选择 8 MiB 以内的 PDF、PNG 或 JPEG 简历。';
-      return;
-    }
     upload.disabled = true;
     choose.disabled = true;
     scan.disabled = true;
     review.replaceChildren();
     status.textContent = '正在识别简历…';
     try {
-      const response = await fetch('/api/staff/resume/preview', {
-        method: 'POST', headers: { 'Content-Type': mime }, body: file,
-      });
-      const result = await response.json();
-      if (!response.ok) throw Error(result.error || '简历识别失败');
+      const result = await recognizeStaffResume(file);
       const fields = Object.entries(result.fields);
       const set = { displayName: name, phone };
       status.textContent = fields.length ? '核对识别结果后，选择要填入的项目。' : '没有识别到可直接填入的字段，请按原件手工填写。';

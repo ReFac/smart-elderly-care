@@ -6,8 +6,8 @@ export function replyReader(report, exit) {
   check.type = 'checkbox';
   check.disabled = true;
   const label = node('label', 'assistant-auto assistant-read-option', [check, icon('speaker', 15), '朗读']);
-  let voicePreference = false;
-  check.addEventListener('change', () => { voicePreference = check.checked; });
+  label.title = '仅朗读按住说话的语音答复';
+  check.setAttribute('aria-description', label.title);
 
   const player = el('audio', 'assistant-audio');
   player.hidden = true;
@@ -147,11 +147,9 @@ export function replyReader(report, exit) {
 
   return {
     label, popup, stop,
-    get voicePreference() { return voicePreference; },
+    get voicePreference() { return check.checked; },
     enableForVoice(available) {
       check.disabled = !available;
-      check.checked = available && voicePreference;
-      label.title = available ? '朗读本次语音提问的答复' : '使用按住说话后可启用朗读';
     },
     enqueueSentence(sentence, context) {
       queue.push({ ...context, sentence });

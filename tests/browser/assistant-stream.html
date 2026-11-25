@@ -153,7 +153,7 @@
     launch.click();
     await until(() => input() && !input().disabled, '打开健康助理');
     const checkSpeech = find('.assistant-read-option input');
-    check(checkSpeech.disabled && !checkSpeech.checked, '普通文字时朗读默认关闭且不可勾选');
+    check(!checkSpeech.disabled && !checkSpeech.checked, '语音朗读默认关闭，可在录音前勾选');
     const typed = ping('普通文字答复');
     check(typed.payload.readAloud === false, '普通文字请求关闭朗读');
     beginSpeech(typed);
@@ -161,11 +161,12 @@
     await until(() => !input().readOnly, '文字请求完成');
     check(!calls.length && popup().hidden, '文字消息不发起朗读');
 
+    checkSpeech.closest('label').click();
+    check(checkSpeech.checked, '点击朗读标签可在按住说话前开启朗读');
     await speak('分段返回');
-    await until(() => input().value === '分段返回' && !checkSpeech.disabled, '转写草稿可以开启朗读');
-    checkSpeech.click();
+    await until(() => input().value === '分段返回' && !checkSpeech.disabled && checkSpeech.checked, '录音和转写均保留朗读勾选');
     const streaming = ping('分段返回，请缓慢读');
-    check(streaming.payload.readAloud, '手动发送转写与改字后仍可朗读');
+    check(streaming.payload.readAloud && checkSpeech.checked, '手动发送转写与改字后仍可朗读，提交不清除勾选');
     beginSpeech(streaming);
     await until(() => calls.length === 1, '回复仍在生成时已请求朗读');
     const current = () => log().querySelector('.assistant-current');
@@ -189,7 +190,10 @@
     await until(() => !input().readOnly && log().innerText.includes(last), '写回完整答复');
     check(!log().querySelector('.assistant-current') && calls.length === 1, '退出后同一回复不会再次朗读');
 
-    const typedAfterSpeech = ping('下一条键盘问题');
+    input().value = '下一条键盘问题';
+    input().dispatchEvent(new Event('input'));
+    check(checkSpeech.checked && checkSpeech.disabled, '输入文字时保留语音偏好，禁用朗读设置');
+    const typedAfterSpeech = ping(input().value);
     check(!typedAfterSpeech.payload.readAloud && checkSpeech.disabled, '打开过朗读的语音设置不会带到文字问题');
     finish(typedAfterSpeech);
     await until(() => !input().readOnly, '下一条键盘问题完成');
@@ -203,6 +207,7 @@
     await until(() => !input().readOnly, '粘贴问题完成');
 
     find('.assistant-composer-foot label:first-child input').click();
+    check(checkSpeech.checked && !checkSpeech.disabled, '空白输入恢复朗读选项，自动发送前能确认选中');
     await speak('在收起前开始朗读');
     await until(() => turns.at(-1).payload.text === '在收起前开始朗读', '自动发送转写');
     const folded = turns.at(-1);
@@ -233,6 +238,9 @@
     await until(() => calls.length === 4, '等待一段可中止的朗读');
     clearChat();
     check(!panel() && discarded.signal.aborted && calls[3].signal.aborted, '销毁助理时中止接收及朗读');
+    launch.click();
+    await until(() => !input().disabled, '再次打开健康助理');
+    check(!find('.assistant-read-option input').checked, '新面板默认不朗读');
     oscillator.stop();
     await audioContext.close();
     document.documentElement.dataset.result = 'pass';
