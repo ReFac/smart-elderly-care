@@ -407,6 +407,20 @@ class NetworkChatTests(unittest.TestCase):
         self.search.assert_not_called()
         self.assertFalse(self.prompts)
 
+    def test_unlimited_search_synthesizes_after_original_expiry_and_logs_both_calls(self):
+        with closing(self.store.connect()) as db, db:
+            provider.grant(db, "联调", 1, self.now.date().isoformat(), now=self.now)
+            provider.allow_unlimited(db, now=self.now)
+        self.now = self.now.replace(year=2027)
+        self.token, _ = self.store.login("owner", "network-fixture-password")
+        self.assertTrue(self.ask(webSearch=True)["messages"][-1]["webSearched"])
+        self.classify.assert_called_once()
+        self.search.assert_called_once()
+        self.assertEqual(self.receipts(), [("sample", "ok")])
+        with closing(self.store.connect()) as db:
+            plan = provider.latest(db)
+            self.assertEqual(provider.usage(db, plan["id"]), (126, 0))
+
     def test_small_budget_and_lost_permissions_do_not_send_an_unapproved_search(self):
         with closing(self.store.connect()) as db, db:
             provider.grant(db, "体验联网", 500, "2026-12-01", now=self.now)

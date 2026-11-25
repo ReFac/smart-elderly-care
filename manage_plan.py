@@ -25,6 +25,7 @@ def main():
     grant.add_argument(
         "--expires", required=True, help="到期日 YYYY-MM-DD（上海时区，含当日）"
     )
+    commands.add_parser("unlimited", help="取消本机构 AI 累计用量和期限限制，继续记录实际用量")
     commands.add_parser("status", help="查看套餐与用量")
     pages = commands.add_parser("ocr-quota", help="仅调整当前套餐的 OCR 总页数，保留其他额度和历史用量")
     pages.add_argument("--pages", type=int, required=True)
@@ -80,6 +81,9 @@ def main():
                     db, args.actor, args.request, args.calls, provider.local_time()
                 )
                 change = f"核对公开搜索用量 {args.calls} 次"
+            elif args.command == "unlimited":
+                if provider.allow_unlimited(db):
+                    change = "开通机构 AI 不限量，长期有效，保留历史用量和在途调用"
             elif args.command == "grant":
                 provider.grant(db, args.name, args.tokens, args.expires)
                 for kind, limit in (("ocr", args.ocr_pages), ("asr", args.asr_seconds)):

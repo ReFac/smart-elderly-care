@@ -26,7 +26,11 @@ def init(db):
     round_priorities.init(db)
     db.execute("""CREATE TABLE IF NOT EXISTS api_plans (
         id INTEGER PRIMARY KEY, name TEXT NOT NULL, tokenLimit INTEGER NOT NULL,
-        startsOn TEXT NOT NULL, expiresOn TEXT NOT NULL, enabled INTEGER NOT NULL)""")
+        startsOn TEXT NOT NULL, expiresOn TEXT NOT NULL, enabled INTEGER NOT NULL,
+        unlimited INTEGER NOT NULL DEFAULT 0 CHECK(unlimited IN (0,1)))""")
+    if "unlimited" not in {row[1] for row in db.execute("PRAGMA table_info(api_plans)")}:
+        db.execute("""ALTER TABLE api_plans ADD COLUMN unlimited INTEGER NOT NULL
+                       DEFAULT 0 CHECK(unlimited IN (0,1))""")
     db.execute("""CREATE TABLE IF NOT EXISTS api_usage (
         actor TEXT NOT NULL, request TEXT NOT NULL, planId INTEGER NOT NULL REFERENCES api_plans(id),
         fingerprint TEXT NOT NULL, model TEXT NOT NULL, createdAt INTEGER NOT NULL,
@@ -48,6 +52,11 @@ def latest(db):
     return db.execute("SELECT * FROM api_plans ORDER BY id DESC LIMIT 1").fetchone()
 
 
+def active(plan, day):
+    return bool(plan and plan["enabled"] and plan["startsOn"] <= day
+                and (plan["unlimited"] or day <= plan["expiresOn"]))
+
+
 def usage(db, plan_id):
     row = db.execute(
         """SELECT COALESCE(SUM(u.charged + COALESCE(l.verified-l.original,0)),0),
@@ -58,6 +67,26 @@ def usage(db, plan_id):
         (plan_id,),
     ).fetchone()
     return row[0], row[1]
+
+
+def remaining_tokens(db, plan):
+    if plan["unlimited"]:
+        return None
+    return plan["tokenLimit"] - sum(usage(db, plan["id"]))
+
+
+def allow_unlimited(db, now=None):
+    plan = latest(db)
+    if plan:
+        if plan["unlimited"] and plan["enabled"]:
+            return False
+        db.execute("UPDATE api_plans SET unlimited=1,enabled=1 WHERE id=?", (plan["id"],))
+    else:
+        # The original schema requires both a quota and a date. Only metered plans use them.
+        today = local_time(now).date().isoformat()
+        db.execute("""INSERT INTO api_plans(name,tokenLimit,startsOn,expiresOn,enabled,unlimited)
+                      VALUES('机构 AI 不限量',0,?,?,1,1)""", (today, today))
+    return True
 
 
 def grant(db, name, limit, expires, now=None):
@@ -74,11 +103,11 @@ def grant(db, name, limit, expires, now=None):
     ):
         raise ValueError("到期日期应为当日或之后的 YYYY-MM-DD")
     previous = latest(db)
-    if previous and previous["expiresOn"] >= today:
+    if previous and (previous["unlimited"] or previous["expiresOn"] >= today):
         if limit < sum(usage(db, previous["id"])):
             raise ValueError("套餐额度低于本期已用和预留的合计")
         db.execute(
-            "UPDATE api_plans SET name=?,tokenLimit=?,expiresOn=?,enabled=1 WHERE id=?",
+            "UPDATE api_plans SET name=?,tokenLimit=?,expiresOn=?,enabled=1,unlimited=0 WHERE id=?",
             (name.strip(), limit, expires, previous["id"]),
         )
     else:
@@ -226,17 +255,14 @@ def status(db, user, now=None):
     today = local_time(now).date().isoformat()
     plan = latest(db)
     used, held = usage(db, plan["id"]) if plan else (0, 0)
+    unlimited = bool(plan and plan["unlimited"])
     model = model_name()
     reason = "available"
     if not specialists(user):
         reason = "no_scope"
-    elif (
-        not plan
-        or not plan["enabled"]
-        or not plan["startsOn"] <= today <= plan["expiresOn"]
-    ):
+    elif not active(plan, today):
         reason = "inactive"
-    elif used + held >= plan["tokenLimit"]:
+    elif not unlimited and used + held >= plan["tokenLimit"]:
         reason = "exhausted"
     elif not model or not model_configured():
         reason = "unconfigured"
@@ -247,8 +273,9 @@ def status(db, user, now=None):
     if user["kind"] == "owner":
         result.update(
             planName=plan["name"] if plan else "",
-            expiresOn=plan["expiresOn"] if plan else "",
-            tokenLimit=plan["tokenLimit"] if plan else 0,
+            unlimited=unlimited,
+            expiresOn=None if unlimited else (plan["expiresOn"] if plan else ""),
+            tokenLimit=None if unlimited else (plan["tokenLimit"] if plan else 0),
             tokensUsed=used,
             tokensReserved=held,
             media=media_overview(db),
@@ -339,7 +366,8 @@ def plan(
             + completions.output_budget(body)
             + 128
         )
-        if sum(usage(db, entitlement["id"])) + allowance > entitlement["tokenLimit"]:
+        available = remaining_tokens(db, entitlement)
+        if available is not None and allowance > available:
             return decision("unavailable", "exhausted", model)
         db.execute(
             """INSERT INTO api_usage

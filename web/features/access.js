@@ -610,13 +610,14 @@ function settings(ctx) {
     facts([
       ['服务商', { deepseek: 'DeepSeek', openai: 'OpenAI', anthropic: 'Anthropic', google: 'Google' }[config.modelProvider] || '—'],
       ['服务模型', config.model || '—'],
-      ['本期额度', String(config.tokenLimit || 0) + ' tokens'],
+      ['本期额度', config.unlimited ? '不限量' : String(config.tokenLimit || 0) + ' tokens'],
       ['已用 / 预留', String(config.tokensUsed || 0) + ' / ' + String(config.tokensReserved || 0)],
       ['助理朗读', `已计费 ${config.readAloud?.characters || 0} 字符，待核对 ${config.readAloud?.held || 0} 字符`],
       ['公开搜索', `已计费 ${config.webSearch?.calls || 0} 次，待核对 ${config.webSearch?.pending || 0} 次`],
-      ['有效期至', config.expiresOn || '—'],
+      ['有效期', config.unlimited ? '长期有效' : config.expiresOn || '—'],
     ]),
-    node('p', 'fx-muted', '云端规划按机构另购套餐启用。开通、续期与额度调整由平台运营方办理。'),
+    node('p', 'fx-muted', config.unlimited ? '按实际调用统计用量，可在「AI 用量」查看明细。'
+      : '云端规划按机构另购套餐启用。开通、续期与额度调整由平台运营方办理。'),
   ]);
   if (config.media) {
     const fields = {};
@@ -627,7 +628,7 @@ function settings(ctx) {
       check.type = 'checkbox';
       check.checked = meter.enabled;
       fields[kind] = check;
-      const usage = meter.limit === null ? `不限累计时长，已用 ${meter.used} ${meter.unit}`
+      const usage = meter.limit === null ? `不限量，已用 ${meter.used} ${meter.unit}`
         : `已用 ${meter.used} / ${meter.limit} ${meter.unit}`;
       form.append(
         node('label', 'access-check', [check, title]),

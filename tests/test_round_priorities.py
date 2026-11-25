@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from platform_core import provider
-from platform_core.provider import round_priorities as priorities
+from platform_core.provider import generation, round_priorities as priorities
 from platform_core.store import Store, TIMEZONE
 from provider_fixture import isolate_credentials
 
@@ -96,6 +96,49 @@ class PriorityTests(unittest.TestCase):
         self.assertNotIn("PRIVATE", json.dumps(body))
         with closing(self.store.connect()) as db:
             self.assertEqual(provider.usage(db, provider.latest(db)["id"]), (44, 0))
+
+    def test_unlimited_site_keeps_receipts_for_routing_narratives_and_care_checks(self):
+        def completion(payload, tokens):
+            return {
+                "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(payload)}}],
+                "usage": {"total_tokens": tokens},
+            }
+
+        with closing(self.store.connect()) as db, db:
+            # Model an existing site's exhausted subscription from the preceding day.
+            plan_id = provider.latest(db)["id"]
+            db.execute("""UPDATE api_plans SET startsOn='2026-11-01', expiresOn='2026-11-23',
+                          tokenLimit=45 WHERE id=?""", (plan_id,))
+            db.execute("""INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,
+                          status,allowance,charged,feature) VALUES('worker','past',?,'past','test',0,
+                          'ok',45,45,'care.roundNarrative')""", (plan_id,))
+            provider.allow_unlimited(db, self.store.now())
+
+        routed = provider.plan(
+            self.store.connect, lambda db: self.store.actor(db, self.token),
+            "护理交班", "staff-routing", now=self.store.now(),
+            transport=Mock(return_value=completion({"ids": ["care"]}, 30)),
+        )
+        self.assertEqual(routed["specialistIds"], ["care"])
+        with patch.object(generation.completions, "send", return_value=completion({"text": "待交班"}, 32)):
+            summary = generation.generate(
+                self.store, "rounds-agent", "daily", "汇总护理交班情况", {"待核对": 2},
+                generation.narrative, feature="care.roundNarrative",
+            )
+        self.assertEqual(summary, {"text": "待交班"})
+        ranked = priorities.generate(
+            self.store, self.token, "r001", self.payload,
+            transport=Mock(return_value=completion({"ids": ["past_due", "upcoming"]}, 34)),
+        )
+        self.assertEqual(ranked["status"], "ok")
+        with closing(self.store.connect()) as db:
+            self.assertEqual(provider.usage(db, plan_id), (141, 0))
+            receipts = db.execute("""SELECT feature,charged,status FROM api_usage
+                                     WHERE planId=? AND request!='past' ORDER BY feature""", (plan_id,))
+            self.assertEqual([tuple(row) for row in receipts], [
+                ("agent.routing", 30, "ok"), ("care.roundNarrative", 32, "ok"),
+                ("care.roundPriorities", 34, "ok"),
+            ])
 
     def test_requires_consent_and_rejects_unapproved_output(self):
         transport = Mock(

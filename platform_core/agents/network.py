@@ -11,11 +11,7 @@ def _authorize(store, token):
         store.actor(db, token)
         plan = provider.latest(db)
         day = store.now().date().isoformat()
-        if (
-            not plan
-            or not plan["enabled"]
-            or not plan["startsOn"] <= day <= plan["expiresOn"]
-        ):
+        if not provider.active(plan, day):
             raise Unavailable("机构的云端 AI 套餐尚未开通或已经到期")
         return plan["id"]
 

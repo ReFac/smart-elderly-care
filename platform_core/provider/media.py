@@ -8,7 +8,7 @@ from uuid import uuid4
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from . import audio_adapters, deepseek, latest, local_time, read_key
+from . import active, audio_adapters, deepseek, latest, local_time, read_key
 
 ENDPOINT = "https://api.deepseek.com/v1/tools/"
 UNITS = {"ocr": "页", "asr": "秒"}
@@ -58,14 +58,16 @@ def amounts(db, plan, kind):
         FROM media_usage WHERE plan=? AND kind=?""",
         (plan, kind),
     ).fetchone()
-    quota = db.execute(
-        "SELECT units FROM media_quota WHERE plan=? AND kind=?", (plan, kind)
+    plan_unlimited, asr_unlimited, units = db.execute(
+        """SELECT p.unlimited, policy.asr_unlimited, coalesce(q.units,0)
+           FROM media_policy policy
+           LEFT JOIN api_plans p ON p.id=?
+           LEFT JOIN media_quota q ON q.plan=p.id AND q.kind=?
+           WHERE policy.id=1""",
+        (plan, kind),
     ).fetchone()
-    limit = quota[0] if quota else 0
-    if kind == "asr" and db.execute("SELECT asr_unlimited FROM media_policy WHERE id=1").fetchone()[0]:
-        limit = None
     return {
-        "limit": limit,
+        "limit": None if plan_unlimited or (kind == "asr" and asr_unlimited) else units,
         "used": used,
         "held": held,
         "unit": UNITS[kind],
@@ -271,11 +273,7 @@ def execute(
             raise ValueError("识别正在处理或待平台核对，请稍后查看")
         plan = latest(db)
         day = local_time(now).date().isoformat()
-        if (
-            not plan
-            or not plan["enabled"]
-            or not plan["startsOn"] <= day <= plan["expiresOn"]
-        ):
+        if not active(plan, day):
             raise ValueError("机构识别套餐尚未开通或已到期")
         if not db.execute("SELECT ocr,asr FROM media_policy WHERE id=1").fetchone()[
             kind

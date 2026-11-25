@@ -7,6 +7,7 @@ from io import BytesIO, StringIO
 import json
 import os
 from pathlib import Path
+import sqlite3
 import tempfile
 from threading import Event
 import unittest
@@ -91,6 +92,8 @@ class ProviderTests(unittest.TestCase):
             db.execute("INSERT INTO workspace VALUES(1, 7)")
         for args in (
             ["grant", "--name", "试点", "--tokens", "2500", "--expires", "2099-11-30"],
+            ["unlimited"],
+            ["unlimited"],
             ["status"],
             ["disable"],
         ):
@@ -101,7 +104,7 @@ class ProviderTests(unittest.TestCase):
                 self.assertEqual(manage_plan.main(), 0)
         with closing(self.connect()) as db:
             self.assertEqual(
-                db.execute("SELECT revision FROM workspace").fetchone()[0], 9
+                db.execute("SELECT revision FROM workspace").fetchone()[0], 10
             )
             entries = db.execute(
                 "SELECT action,actorId FROM audit ORDER BY revision"
@@ -110,9 +113,66 @@ class ProviderTests(unittest.TestCase):
                 [tuple(r) for r in entries],
                 [
                     ("platform.plan.grant", "platform-operator"),
+                    ("platform.plan.unlimited", "platform-operator"),
                     ("platform.plan.disable", "platform-operator"),
                 ],
             )
+
+    def test_existing_plan_migration_keeps_limits_until_operator_opts_in(self):
+        with closing(sqlite3.connect(":memory:")) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("""CREATE TABLE api_plans(id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+                tokenLimit INTEGER NOT NULL, startsOn TEXT NOT NULL,expiresOn TEXT NOT NULL,enabled INTEGER NOT NULL)""")
+            db.execute("INSERT INTO api_plans VALUES(4,'既有机构',123,'2026-01-01','2026-10-31',1)")
+            provider.init(db)
+            provider.init(db)
+            plan = provider.latest(db)
+            self.assertFalse(plan["unlimited"])
+            self.assertFalse(provider.active(plan, "2026-11-01"))
+            self.assertEqual(provider.remaining_tokens(db, plan), 123)
+            with patch.object(provider, "usage", side_effect=AssertionError("unlimited quota check should not scan usage")):
+                self.assertTrue(provider.allow_unlimited(db, DAY))
+                self.assertFalse(provider.allow_unlimited(db, DAY))
+                plan = provider.latest(db)
+                self.assertEqual(plan["id"], 4)
+                self.assertTrue(provider.active(plan, "2030-01-01"))
+                self.assertIsNone(provider.remaining_tokens(db, plan))
+
+    def test_unlimited_routes_past_expiry_and_old_limit_with_real_usage(self):
+        self.grant(tokens=1, expires="2026-11-24")
+        future = DAY + timedelta(days=365)
+        with closing(self.connect()) as db, db:
+            plan_id = provider.latest(db)["id"]
+            provider.allow_unlimited(db, future)
+        self.assertEqual(self.plan(now=future)["reason"], "ready")
+        self.assertEqual(self.plan(now=future)["reason"], "ready")
+        self.mock.assert_called_once()
+        status = self.status(now=future)
+        self.assertTrue(status["unlimited"])
+        self.assertTrue(status["available"])
+        self.assertIsNone(status["tokenLimit"])
+        self.assertIsNone(status["expiresOn"])
+        self.assertEqual((status["tokensUsed"], status["tokensReserved"]), (48, 0))
+        with closing(self.connect()) as db, db:
+            provider.disable(db)
+            self.assertFalse(provider.active(provider.latest(db), future.date().isoformat()))
+        self.assertEqual(self.plan(request="off", now=future)["reason"], "inactive")
+        with self.assertRaisesRegex(ValueError, "低于本期"):
+            self.grant(tokens=1, now=future, expires="2027-12-31")
+        self.grant(tokens=48, now=future, expires="2027-12-31")
+        with closing(self.connect()) as db:
+            self.assertEqual(provider.latest(db)["id"], plan_id)
+        status = self.status(now=future)
+        self.assertFalse(status["unlimited"])
+        self.assertEqual(status["state"], "exhausted")
+        self.assertEqual(status["tokensUsed"], 48)
+
+    def test_operator_can_enable_unlimited_for_an_empty_workspace(self):
+        with closing(self.connect()) as db, db:
+            provider.allow_unlimited(db, DAY)
+            self.assertTrue(provider.active(provider.latest(db), "2030-01-01"))
+            self.assertFalse(provider.active(provider.latest(db), "2026-01-01"))
+        self.assertTrue(self.status()["available"])
 
     def test_trial_needs_operator_grant_and_key_users_cannot_override(self):
         self.assertEqual(self.status()["state"], "inactive")

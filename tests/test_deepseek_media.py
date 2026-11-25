@@ -1,7 +1,7 @@
 """DeepSeek media is separately metered and its authenticated transcript is only a proposal."""
 
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 import tempfile
@@ -11,7 +11,8 @@ from urllib.error import HTTPError
 import wave
 
 from provider_fixture import isolate_credentials
-from platform_core import provider
+from platform_core import document_ocr, provider
+from platform_core.agents import network
 from platform_core.provider import media, speech
 from platform_core.store import Store
 
@@ -212,6 +213,39 @@ class MediaTests(unittest.TestCase):
             plan = provider.latest(db)["id"]
             self.assertNotEqual(plan, self.plan)
             self.assertIsNone(media.amounts(db, plan, "asr")["limit"])
+
+    def test_unlimited_plan_meters_ocr_and_voice_after_previous_term_ended(self):
+        from test_pdf_ocr import synthetic_pdf
+
+        now = self.store.now()
+        with closing(self.store.connect()) as db, db:
+            provider.grant(db, "旧套餐", 10, (now - timedelta(days=1)).date().isoformat(),
+                           now=now - timedelta(days=3))
+            provider.allow_unlimited(db, now=now)
+            plan = provider.latest(db)["id"]
+        pages = 3
+        raw = synthetic_pdf(pages)
+        response = {
+            "id": "test-ocr", "object": "ocr.result", "purpose": "text_recognition", "page_count": pages,
+            "pages": [{"index": i, "text": "测试资料", "finish_reason": "stop"} for i in range(pages)],
+        }
+        with (
+            patch.object(media, "invoke", side_effect=[self.reply, response]) as invoke,
+            patch.object(provider, "configured", return_value=True),
+            patch.object(provider, "read_key", return_value="test-key"),
+            patch("platform_core.provider.web_search.probe", return_value={"connected": True}),
+        ):
+            self.assertTrue(network.probe(self.store, self.token)["connected"])
+            self.assertEqual(self.store.snapshot(self.worker)["data"]["assistantVoice"]["state"], "available")
+            self.assertEqual(self.call()["text"], self.reply["text"])
+            self.assertEqual(document_ocr.recognize(self.store, self.token, raw, self.store.actor)["pageCount"], pages)
+            document_ocr.recognize(self.store, self.token, raw, self.store.actor)
+            self.assertEqual(invoke.call_count, 2)
+        with closing(self.store.connect()) as db, db:
+            self.assertEqual(media.amounts(db, plan, "ocr"), {"limit": None, "used": 3, "held": 0, "unit": "页"})
+            self.assertEqual(media.amounts(db, plan, "asr"), {"limit": None, "used": 2, "held": 0, "unit": "秒"})
+            provider.disable(db)
+            self.assertEqual(speech.agent_capability(db, now)["state"], "inactive")
 
     def test_uncertain_delivery_holds_allowance_until_operator_reconciles(self):
         self.grant()

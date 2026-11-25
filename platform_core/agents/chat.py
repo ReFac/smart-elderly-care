@@ -338,7 +338,7 @@ def token_allowance(body):
 
 
 def fit_private_context(body, available, pages, topics, current_page, actions, *, follow_up):
-    if token_allowance(body) <= available:
+    if available is None or token_allowance(body) <= available:
         return
     prompt = body["messages"][1]
     envelope = json.loads(prompt["content"])
@@ -584,11 +584,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             save_turn(db, chat_scope.REFUSAL, {"kind": "scopeRefusal"})
             return view(db, uid, scope, thread, pages, selected)
         plan, model = provider.latest(db), provider.model_name()
-        if (
-            not plan
-            or not plan["enabled"]
-            or not plan["startsOn"] <= now.date().isoformat() <= plan["expiresOn"]
-        ):
+        if not provider.active(plan, now.date().isoformat()):
             raise Unavailable("机构的云端 AI 套餐尚未开通或已经到期，请联系管理员")
         if not model:
             raise Unavailable("云端模型配置无效，请联系管理员")
@@ -685,14 +681,14 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
         )
         # The public excerpt size is unknown. Hold the baseline now, then resize the
         # reservation under a write transaction once the exact selected excerpts are known.
-        available = plan["tokenLimit"] - sum(provider.usage(db, plan["id"]))
+        available = provider.remaining_tokens(db, plan)
         body = (
             chat_web.public_body(model, text, [], OUTPUT_LIMIT, now)
             if consider_search
             else private_body(db, state, available)
         )
         allowance = token_allowance(body)
-        if allowance > available:
+        if available is not None and allowance > available:
             raise Unavailable(quota_message(available, allowance))
         db.execute(
             """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance,feature)
@@ -727,16 +723,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
         ).fetchone():
             raise chat_web.SearchFailure("本轮用量已进入对账，请重新发送")
         live_plan = provider.latest(db)
-        if (
-            not live_plan
-            or live_plan["id"] != plan["id"]
-            or not live_plan["enabled"]
-            or not (
-                live_plan["startsOn"]
-                <= store.now().date().isoformat()
-                <= live_plan["expiresOn"]
-            )
-        ):
+        if not provider.active(live_plan, store.now().date().isoformat()) or live_plan["id"] != plan["id"]:
             raise chat_web.SearchFailure("机构云端 AI 套餐已经变化，请重新提问")
         return visible
 
@@ -770,11 +757,9 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                 with closing(store.connect()) as db, db:
                     db.execute("BEGIN IMMEDIATE")
                     current_search_state(db)
-                    available = (
-                        provider.latest(db)["tokenLimit"]
-                        - sum(provider.usage(db, plan["id"]))
-                        + allowance
-                    )
+                    available = provider.remaining_tokens(db, provider.latest(db))
+                    if available is not None:
+                        available += allowance  # This turn is replacing its existing reservation.
                     if network is None:
                         raise chat_web.UnverifiedTopic
                     feature = "assistant.webAnswer"
@@ -783,7 +768,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                     body = chat_web.public_body(
                         model, topic, hits, OUTPUT_LIMIT, now
                     )
-                    while len(hits) > 1 and token_allowance(body) > available:
+                    while available is not None and len(hits) > 1 and token_allowance(body) > available:
                         hits = hits[:-1]
                         body = chat_web.public_body(
                             model, topic, hits, OUTPUT_LIMIT, now
@@ -793,7 +778,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                         for item in hits
                     ]
                     allowance = token_allowance(body)
-                    if allowance > available:
+                    if available is not None and allowance > available:
                         raise chat_web.SearchFailure(quota_message(available, allowance))
                     changed = db.execute(
                         "UPDATE api_usage SET allowance=?,feature=? WHERE actor=? AND request=? AND status='pending'",

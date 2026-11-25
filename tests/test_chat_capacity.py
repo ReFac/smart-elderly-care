@@ -43,6 +43,23 @@ class ChatCapacityTests(unittest.TestCase):
                               transport=self.cloud)
         return response["messages"][-1]
 
+    def test_unlimited_chat_continues_past_old_cap_and_expiry_and_counts_actual_usage(self):
+        self.grant(1)
+        with closing(self.store.connect()) as db, db:
+            provider.allow_unlimited(db, now=self.now)
+        self.now = self.now.replace(year=2027)
+        self.token, _ = self.store.login("owner", "local-test-credential")
+        self.cloud.return_value = result()
+        self.cloud.return_value["choices"][0]["message"]["content"] = "已核对。"
+        for number in range(2):
+            answer = self.ask("查询护理用具库存", f"unlimited-{number}")
+            self.assertEqual(answer["content"], "已核对。")
+        self.assertEqual(self.cloud.call_count, 2)
+        with closing(self.store.connect()) as db:
+            plan = provider.latest(db)
+            self.assertIsNone(provider.remaining_tokens(db, plan))
+            self.assertEqual(provider.usage(db, plan["id"]), (256, 0))
+
     def test_lighter_prompt_keeps_evidence_and_requires_explicit_work_order(self):
         self.grant(100_000)
         self.cloud.return_value = result()

@@ -38,7 +38,7 @@ def generate(
     image=None,
 ):
     """Reserve before sending, persist confirmed billing even if the returned JSON is unusable."""
-    from . import late_usage, latest, model_name, read_model_key, usage
+    from . import active, late_usage, latest, model_name, read_model_key, remaining_tokens
 
     now = store.now()
     model = model_name()
@@ -112,13 +112,10 @@ def generate(
                 ).fetchone()[0]
             )
         plan = latest(db)
-        if (
-            not plan
-            or not plan["enabled"]
-            or not plan["startsOn"] <= now.date().isoformat() <= plan["expiresOn"]
-        ):
+        if not active(plan, now.date().isoformat()):
             raise ValueError("机构的云端 AI 套餐尚未开通或已到期")
-        if size + sum(usage(db, plan["id"])) > plan["tokenLimit"]:
+        remaining = remaining_tokens(db, plan)
+        if remaining is not None and size > remaining:
             raise ValueError("机构的云端 AI 套餐额度不足")
         key = read_model_key()
         db.execute(

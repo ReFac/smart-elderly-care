@@ -141,16 +141,12 @@ def recognize(store, token, task_id, raw, consent):
 
 
 def agent_capability(db, now):
-    from . import configured, latest, local_time
+    from . import active, configured, latest, local_time
 
     plan = latest(db)
     today = local_time(now).date().isoformat()
     status = "available"
-    if (
-        not plan
-        or not plan["enabled"]
-        or not plan["startsOn"] <= today <= plan["expiresOn"]
-    ):
+    if not active(plan, today):
         status = "inactive"
     elif not db.execute("SELECT asr FROM media_policy WHERE id=1").fetchone()[0]:
         status = "disabled"

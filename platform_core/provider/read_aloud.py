@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener
 from uuid import uuid4
 
-from . import audio_adapters, deepseek, latest, local_time, read_key
+from . import active, audio_adapters, deepseek, latest, local_time, read_key
 from .media import ENDPOINT, record_late_charge
 
 CHUNK = 600
@@ -82,13 +82,7 @@ def listen(store, token, payload, *, transport=None):
         if not piece:
             raise ValueError("已到答复结尾")
         plan = latest(db)
-        if (
-            not plan
-            or not plan["enabled"]
-            or not plan["startsOn"]
-            <= local_time(now).date().isoformat()
-            <= plan["expiresOn"]
-        ):
+        if not active(plan, local_time(now).date().isoformat()):
             raise chat.Unavailable("机构云端套餐未启用，暂时无法朗读")
         try:
             service = audio_adapters.options("tts")

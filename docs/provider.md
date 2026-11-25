@@ -39,6 +39,17 @@ python3 manage_plan.py --db .local/workspace.sqlite3 status
 
 额度是当前服务期的 token 总量。有效期内再次执行 `grant` 将调整本期总额并保留原有用量。到期日按上海时区计算，含当日。到期后再次开通产生新服务期，旧用量保留在其原期。额度与供应商账户的人民币余额分别核算。
 
+### 院区不限量
+
+平台运营方可为单个院区开通长期不限量。对话、后台 AI 任务、OCR、语音识别、朗读和联网检索继续按员工、功能记录实际用量。供应商按实际调用计费。切换后可在机构设置中查看「不限量」及累计使用量。
+
+```bash
+python3 manage_plan.py --db .local/workspace.sqlite3 unlimited
+python3 manage_plan.py --db .local/workspace.sqlite3 status
+```
+
+命令只作用于指定的机构数据库，原有用量和待对账记录继续保留。对外销售的机构可以通过 `grant` 按其订单设置服务期和额度。
+
 ```bash
 python3 manage_plan.py --db .local/workspace.sqlite3 disable
 python3 manage_plan.py --db .local/workspace.sqlite3 unsettled

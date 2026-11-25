@@ -121,7 +121,8 @@ def generate(store, token, rid, data, *, transport=None):
         }
         plan = provider.latest(db)
         hold = len(json.dumps(body["messages"]).encode()) + completions.output_budget(body) + 128
-        if sum(provider.usage(db, plan["id"])) + hold > plan["tokenLimit"]:
+        remaining = provider.remaining_tokens(db, plan)
+        if remaining is not None and hold > remaining:
             raise ValueError("本期套餐可用额度不足")
         key = provider.read_model_key()
         request = "rounds/" + uuid4().hex
