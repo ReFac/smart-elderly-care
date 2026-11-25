@@ -125,7 +125,8 @@ def _visible(store, token, draft_id, retry, attachment_id):
             access.require(actor, permission)
         state, revision = db.execute("SELECT data,revision FROM workspace WHERE id=1").fetchone()
         state = json.loads(state)
-        fields = "d.id, d.resident_id, d.resident_name, j.state, j.error, j.taskId"
+        fields = ("d.id, d.resident_id, d.resident_name, j.state, j.error, j.taskId,"
+                  " json_extract(d.result,'$.draftRuntime') AS draft_runtime")
         if draft_id:
             fields += ", d.result, d.attachments"
         query = f"""SELECT {fields} FROM dossier_visit_drafts d
@@ -142,6 +143,8 @@ def _visible(store, token, draft_id, retry, attachment_id):
                 continue
             item = {"draftId": row["id"], "taskId": row["taskId"], "state": row["state"],
                     "residentId": row["resident_id"], "error": row["error"]}
+            if row["state"] == "ready" and row["draft_runtime"]:
+                item["draftRuntime"] = row["draft_runtime"]
             if draft_id:
                 if retry and row["state"] == "failed":
                     db.execute("UPDATE dossier_visit_jobs SET state='queued',error='',sessionHash=? WHERE draft=?",

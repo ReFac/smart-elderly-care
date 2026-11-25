@@ -2,11 +2,11 @@
 
 [Documentation](README.md) · [中文](../quick-deploy.md) · [Owner console](deployment-console.md) · [Clinical readiness](medical-commercial.md) · [User manual](workspace-manual.md)
 
-Use a separate instance, domain, service account, database and recovery keys for each contracted institution. Configure branches and staff access within that instance. A systemd service behind a TLS reverse proxy serves desktop and mobile browsers and the mobile app shells.
+Give each contracted institution its own instance, domain, service account, database and recovery keys. Set up the branches and assign staff access inside that instance. The same systemd service, behind a TLS reverse proxy, serves desktop and mobile browsers and the mobile app shells.
 
 ## 1. Prepare a host
 
-These commands assume an apt-based Linux host with systemd and Python 3.11 or newer. Install Node.js 22.19+ and npm on the service account’s system path. Pi starts with the first conversation and loads the pinned dependencies from the release directory. Install your reviewed release in /opt/care-workspace. Rehearse upgrades and rollback on a Simplified Chinese staging installation.
+Start with an apt-based Linux host, systemd and Python 3.11 or newer. Install Python 3.12 or newer for the isolated DeerFlow worker. Put the reviewed release in /opt/care-workspace. Use a Simplified Chinese staging installation to rehearse upgrades and rollback.
 
 ```sh
 sudo apt-get install python3-venv python3-dev build-essential pkg-config libsqlcipher-dev poppler-utils caddy
@@ -16,22 +16,25 @@ sudo install -d -m 750 /etc/care-workspace
 cd /opt/care-workspace
 sudo python3 -m venv .venv
 sudo .venv/bin/pip install -r requirements-storage.txt -r requirements-payments.txt -r requirements-harness.txt -r requirements-a2a.txt
-sudo npm ci --prefix runtimes/pi --omit=dev --ignore-scripts
 sudo install -m 600 deploy/linux/service.env.example /etc/care-workspace/service.env
 sudoedit /etc/care-workspace/service.env
 ```
 
-Set NH_PUBLIC_ORIGIN to the institution's HTTPS origin. Set NH_DEPLOYMENT_LANGUAGE to en, zh-CN, fr or es. Initialization fixes this choice in the encrypted database. Existing Chinese installations remain Chinese. Each institution can deploy its own locale. The China edition uses Amap. Other locales inherit Google Maps from the international edition. Configure the institution's map provider for online hospital suggestions. Submit only the hospital name or city and review the selection. Original clinical text, names and staff notes stay in their original language. The current finance ledger uses CNY and Shanghai business dates. Institutions requiring other accounting currencies, time zones or tax rules need a local acceptance review.
+Set NH_PUBLIC_ORIGIN to the institution’s HTTPS origin. Choose en, zh-CN, fr or es for NH_DEPLOYMENT_LANGUAGE before initialisation. The encrypted database keeps that choice for the life of the instance. Each institution makes its own selection. Existing Chinese installations keep Chinese.
 
-Install the pinned DeerFlow 2.0 document and rounds worker before commissioning and review both runtimes in the Owner console. [Worker setup](../../deploy/deerflow/README.en.md) · [Component responsibilities](agent-components.md)
+The China edition uses Amap. Other locales inherit Google Maps from the international edition. Configure the appropriate map provider for online hospital suggestions. Search by hospital name or city only and check the selected result. Names, staff notes and original clinical text keep their original language. The finance ledger uses CNY and Shanghai business dates. If an institution needs another accounting currency, time zone or tax regime, review those requirements during local acceptance.
 
-Signed updates include the Pi bridge, the DeerFlow worker, its configuration and both dependency manifests. The updater uses offline dependencies from the original installation if the locks match. Before it admits traffic, the candidate exercises Pi with a synthetic turn and starts the enabled DeerFlow worker. This readiness check uses no cloud credentials or records. A failed check restores the previous version and its snapshot.
+Install the pinned DeerFlow worker for staff conversations, visit documents and rounds. Before commissioning, check the installed SDK version in the Owner deployment console. [Worker setup](../../deploy/deerflow/README.en.md) · [Component responsibilities](agent-components.md)
 
-For a new dependency lock, set `NH_AGENT_RUNTIME_STORE` to an absolute path readable by the service account. Under `pi/<sha256-of-package-lock.json>/`, provision the release's two npm manifests and production `node_modules` using the locked install above. Under `deerflow/<sha256-of-requirements.txt-followed-by-sdk.txt>/`, place both original manifests and the prepared `venv/bin/python`. Compute the hash over the concatenated file bytes in that order. Keep both the current and previous dependency directories available for rollback. Only the deployment operator needs write access.
+A signed update includes the DeerFlow worker, its configuration and dependency manifests. If the locks match, the updater reads dependencies offline from the original installation. Before admitting traffic, the candidate release runs a synthetic DeerFlow conversation and starts the evidence worker. This check needs neither cloud credentials nor institution records. If it fails, the updater restores the previous version and its snapshot.
+
+When upgrading a managed installation whose launcher still requires both older runtimes, first run the new release’s `manage_updates.py verify-package --manifest <path>` with the institution’s trusted signing configuration. Then start its launcher with `run --install-root <original-installation>` and keep the existing database and service arguments. This lets the new launcher validate the signed package against the original deployment and restore its prior release if needed.
+
+When a release changes a dependency lock, set `NH_AGENT_RUNTIME_STORE` to an absolute path that the service account can read. In `deerflow/<sha256-of-requirements.txt-followed-by-sdk.txt>/`, place both original manifests and the prepared `venv/bin/python`. For the DeerFlow hash, concatenate the original file bytes in that order. Keep the current and previous dependency directories available for rollback. Only the deployment operator needs write access.
 
 ## 2. Initialize and start
 
-This example creates an English licensed-medical installation. Set the same profile and language in the service environment. For residential care, use residential. The initialization command prompts for the first Owner password and requires a new database path.
+For this English licensed-medical installation, use the same profile and language in the service environment as in the command. Use residential for a residential care institution. Provide a new database path. Initialisation prompts for the first Owner password.
 
 ```sh
 sudo -u care-workspace .venv/bin/python manage_deployment.py init --db /var/lib/care-workspace/institution.sqlite3 --profile licensed-medical --language en
@@ -41,7 +44,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now care-workspace.service
 ```
 
-Add your site's hostname and upstream port to Caddy using the supplied Caddyfile.example. Validate the proxy configuration and reload it. Once DNS and TLS are ready, check the public service.
+Add the institution’s hostname and upstream port to Caddy using the supplied Caddyfile.example. Validate and reload the proxy configuration. Once DNS and TLS are ready, check the public endpoints and service log.
 
 ```sh
 curl --fail https://care.example.org/api/health
@@ -49,22 +52,24 @@ curl --fail https://care.example.org/api/public/deployment
 journalctl -u care-workspace.service -n 60
 ```
 
-The staff workspace is at /?workspace=1 and the visitor website at /visit. Sign in as owner using the password set at initialization. Open System management → Deployment to review the model, plan, listener and device connections. Managed customers use their platform plan. Operators who run their own credentials can explicitly enable NH_DEPLOYMENT_MODE=operator at service startup. When a port is pinned in systemd, update the listener and proxy together. Follow the client guide for WeChat and Douyin domain registration, app identifiers and release approval. [Client compatibility](client-compatibility.md)
+Staff sign in at /?workspace=1. Visitors use /visit. Sign in as owner with the password set at initialisation and open System management → Deployment to check the model, plan, listener and device connections. Managed customers use the platform plan. Operators who supply their own credentials can explicitly enable NH_DEPLOYMENT_MODE=operator at startup. If systemd pins the port, change the listener and proxy together. WeChat and Douyin also require domain registration, app identifiers and platform release approval. [Client compatibility](client-compatibility.md)
 
 ## 3. Commission and recover
 
-Run acceptance in an isolated Simplified Chinese (`zh-CN`) installation. Use test accounts to exercise admission, beds, care signatures, role and branch isolation, payment reconciliation and alert receipts. Use synthetic documents to test OCR, Agent drafts and billing receipts. Keep the snapshot recovery key, external platform vault keys and device credentials under separate custody. Business snapshots exclude external credentials. Practice restoring originals and operational records on a separate host. Document offsite targets, snapshot intervals, recovery time and downtime contacts. The signed updater verifies a full snapshot before changing versions. Commission each live model, messaging service, payment terminal and clinical device with its supplier. [Owner operations](deployment-console.md) · [Agent integration](agent-handbook.md)
+Use an isolated Simplified Chinese (`zh-CN`) installation and test accounts to check admission, beds, care signatures, role and branch restrictions, payment reconciliation and alert receipts. Use fictional documents to test OCR, Agent drafts and billing receipts.
+
+Keep the snapshot recovery key, external platform vault keys and device credentials under separate custody. Business snapshots exclude external credentials. Restore original files and operational records on a separate host. Record the offsite destinations, snapshot intervals, recovery time and whom to contact during downtime. The signed updater verifies a full snapshot before it changes versions. Commission each live model, messaging service, payment terminal and clinical device with its supplier. [Owner operations](deployment-console.md) · [Agent integration](agent-handbook.md)
 
 ### Locales and business rules
 
-A new institution may select zh-CN, en, fr or es. French and Spanish include starter translations for sign-in, navigation and names. Remaining interface messages use English. Theme and typeface are personal preferences. The institution locale stays fixed.
+Choose zh-CN, en, fr or es when creating the institution. French and Spanish have starter translations for sign-in, navigation and names. Remaining interface messages use English. Staff can set their own theme and typeface. The installation language stays fixed.
 
 To ship another locale, add its tag and display name to the [locale manifest](../../web/assets/deployment-locales.json) and supply a web/assets/locales/<tag>.json interface catalogue. The international edition is the default for additional languages and includes global hospital lookup, Google Maps and international names and postal addresses. The China edition selects Amap and the domestic directory. The browser loads local catalogues and preserves original resident data. Ship locale changes in a signed release. Repository regression and browser acceptance use only the Simplified Chinese edition and language-independent cases. Inspect the effective installation at /api/public/deployment. For online suggestions set NH_GOOGLE_PLACES_KEY or NH_AMAP_WEB_KEY in the service environment.
 
 ### Hospital map services
 
-Staff can enter the hospital as printed on the original encounter record. The China edition's local directory prioritizes Henan. Its online search uses AMap. International editions use Google Places to search worldwide in the deployment language. Staff can open a public map search without a service key. [AMap search URI](https://lbs.amap.com/api/uri-api/guide/search/search) · [Google Maps search URLs](https://developers.google.com/maps/documentation/urls/get-started)
+Enter the hospital name as it appears on the encounter record. The local directory in the China edition prioritises Henan, with AMap for online search. International editions use Google Places for worldwide results in the installation language. Staff can open a public map search without a service key. [AMap search URI](https://lbs.amap.com/api/uri-api/guide/search/search) · [Google Maps search URLs](https://developers.google.com/maps/documentation/urls/get-started)
 
-For results inside the form, enable AMap Web Service and set `NH_AMAP_WEB_KEY` for China, or enable Places API (New) with billing and set `NH_GOOGLE_PLACES_KEY` for an international deployment. Keep keys on the server and restrict each key to its API and your server addresses. Restart the service after changing provider settings. For Chinese acceptance, use a public or synthetic hospital name to check its address, the Amap browser handoff and the provider receipt. Manual chart entry is available offline. [AMap Places search](https://lbs.amap.com/api/webservice/guide/api-advanced/newpoisearch) · [Google Places Text Search](https://developers.google.com/maps/documentation/places/web-service/text-search)
+For suggestions inside a form in China, enable AMap Web Service and set `NH_AMAP_WEB_KEY`. For international deployments, enable billing for Places API (New) and set `NH_GOOGLE_PLACES_KEY`. Keep each key on the server and restrict it to the relevant API and server addresses. Restart after changing provider settings. During Chinese acceptance, use a public or fictional hospital name to verify the address, the Amap link in the browser and the provider receipt. Staff can enter the chart manually offline. [AMap Places search](https://lbs.amap.com/api/webservice/guide/api-advanced/newpoisearch) · [Google Places Text Search](https://developers.google.com/maps/documentation/places/web-service/text-search)
 
-The desktop client opens staff-selected hospital map links in the system browser. Results are displayed temporarily for verification. The Google Maps attribution image is the unmodified `GoogleMaps_Logo_DarkGray_2x.png` from Google's official asset bundle. Its use alongside Places results is governed by Google's attribution rules. The project licence grants no rights to the Google Maps trademark. [Google Maps attribution policy](https://developers.google.com/maps/documentation/places/web-service/policies) · [Official attribution assets](https://developers.google.com/static/maps/documentation/images/Google_Maps_Attribution_Assets.zip)
+When staff select a hospital map link in the desktop client, it opens in the system browser. Results appear temporarily for verification. Places results use Google’s unmodified `GoogleMaps_Logo_DarkGray_2x.png` attribution image from its official asset bundle. Google’s attribution rules govern its use. The project licence grants no rights to the Google Maps trademark. [Google Maps attribution policy](https://developers.google.com/maps/documentation/places/web-service/policies) · [Official attribution assets](https://developers.google.com/static/maps/documentation/images/Google_Maps_Attribution_Assets.zip)

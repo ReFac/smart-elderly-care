@@ -1,4 +1,4 @@
-"""Join Pi, DeerFlow and workspace provider receipts without copying patient data."""
+"""Join current and historical task receipts without copying patient data."""
 
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -22,13 +22,19 @@ def identifier(kind, *parts):
 @contextmanager
 def scope(runtime, task_id):
     """The caller supplies the business task across a handoff, never a browser grant."""
-    if runtime not in ("pi", "deerflow", "platform") or not TASK_ID.fullmatch(task_id):
+    if runtime not in ("deerflow", "platform") or not TASK_ID.fullmatch(task_id):
         raise ValueError("任务归属无效")
     marker = _current.set((runtime, task_id))
     try:
         yield task_id
     finally:
         _current.reset(marker)
+
+
+def current_task_id():
+    """Keep child model receipts on the employee’s original business task."""
+    current = _current.get()
+    return current[1] if current else None
 
 
 def init(db):

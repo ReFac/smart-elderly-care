@@ -4,10 +4,10 @@
 
 | What are you trying to do? | Start here |
 | --- | --- |
-| Sign in and try the assistant | [Choose an entry point](workspace-manual.md#choose-an-entry-point) |
+| Sign in and ask for a handover summary | [Choose an entry point](workspace-manual.md#choose-an-entry-point) |
 | Create a resident record and allocate a bed | [Admissions and beds](workspace-manual.md#admissions-and-beds) |
 | Review a resident’s day before handover | [Day-to-day care](workspace-manual.md#day-to-day-care) |
-| Connect an authorised agent to the workspace | [Agent handbook](agent-handbook.md) |
+| Let an external agent query the records it can access | [Agent handbook](agent-handbook.md) |
 | Set up a new institution | [Prepare the host and initialise the database](quick-deploy.md) |
 
 ## Staff and family
@@ -24,8 +24,8 @@
 
 | Task | Guide |
 | --- | --- |
-| Trace a conversation, document handoff or scheduled brief | [Pi, DeerFlow 2.0 and workspace responsibilities](agent-components.md) |
-| Understand responsibilities, evidence and staff approval | [Agent handbook](agent-handbook.md) |
+| Find which agent handles a reply, a visit document or a scheduled summary | [DeerFlow tasks and staff sign-off](agent-components.md) |
+| Check the evidence behind a draft and who can sign it | [Agent handbook](agent-handbook.md) |
 | Connect the assistant to a trusted MCP tool server | [MCP and community skills](agent-handbook.md#extend-with-an-existing-mcp-or-community-skill) |
 | Discover and call the A2A service | [Agent Card and protocol](agent-protocol.md) |
 | Install a community skill, connect a model or enable OCR | [Agent handbook](agent-handbook.md) · [Owner console](deployment-console.md) |
@@ -40,4 +40,4 @@
 | Plan backup, recovery and handover | [Recovery and delivery checks](workspace-manual.md#recovery-updates-and-delivery-checks) · [Production deployment](quick-deploy.md) |
 | Prepare a licensed medical institution for acceptance | [Clinical readiness and evidence](medical-commercial.md) |
 
-The [Chinese technical library](../README.md) also contains detailed subsystem notes, architecture decisions and historical performance measurements. [Release test policy](../../AGENTS.md)
+For individual subsystems, architecture decisions and past performance measurements, see the Chinese technical library. Release reports identify which Chinese and language-independent checks ran. [Chinese technical library](../README.md) · [Release test policy](../../AGENTS.md)

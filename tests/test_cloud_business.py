@@ -53,12 +53,15 @@ class CloudBusinessTests(unittest.TestCase):
         # Obtain an exclusive writer lock while the real transport would be waiting.
         with closing(self.store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
+        content = {"text": "本次测试由云端返回。"}
+        if body.get("messages") and "allowed" in json.loads(body["messages"][1]["content"]):
+            content = {"ids": ["inventory", "care"]}
         return {
             "usage": {"total_tokens": 58},
             "choices": [
                 {
                     "finish_reason": "stop",
-                    "message": {"content": '{"text":"本次测试由云端返回。"}'},
+                    "message": {"content": json.dumps(content)},
                 }
             ],
         }
@@ -77,7 +80,7 @@ class CloudBusinessTests(unittest.TestCase):
             "platform_core.provider.deepseek.send", side_effect=self.reply
         ) as transport:
             self.send("agent.start", fields)
-            self.assertEqual(transport.call_count, 2)
+            self.assertEqual(transport.call_count, 3)
             record = self.store.agent_resource(self.token, "runs")["runs"][0]
             result = self.store.agent_resource(self.token, "runs", record["id"])
             self.assertTrue(
@@ -88,9 +91,9 @@ class CloudBusinessTests(unittest.TestCase):
                 )
             )
             self.send("agent.start", fields)
-            self.assertEqual(transport.call_count, 2)
-            self.send("ops.suggest", {"category": "运营分析"})
             self.assertEqual(transport.call_count, 3)
+            self.send("ops.suggest", {"category": "运营分析"})
+            self.assertEqual(transport.call_count, 4)
             prompts = str(transport.call_args_list)
             self.assertNotIn("residentId", prompts)
             self.assertNotIn("password_hash", prompts)

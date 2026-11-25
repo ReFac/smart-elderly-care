@@ -1,4 +1,4 @@
-"""Provider-neutral extension contracts. The installed implementation runs in-process."""
+"""Permission-scoped evidence tools for the DeerFlow supervisor."""
 
 from dataclasses import dataclass, replace
 from typing import Protocol
@@ -74,12 +74,6 @@ REVENUE_TOOL = replace(
 )
 
 
-class Planner(Protocol):
-    """Return specialist IDs. The host validates every ID against the actor's grants."""
-
-    def plan(self, goal: str, allowed: tuple[Specialist, ...]) -> list[str]: ...
-
-
 class ToolProvider(Protocol):
     """Provider receives only its declared collections; output is a reviewable draft."""
 
@@ -92,16 +86,6 @@ class TraceSink(Protocol):
     def append(
         self, agent: str, event: str, message: str, parent: str = ""
     ) -> None: ...
-
-
-class LocalPlanner:
-    def plan(self, goal, allowed):
-        matches = [
-            item for item in SPECIALISTS if any(k in goal for k in item.keywords)
-        ]
-        if matches and not any(item in allowed for item in matches):
-            raise PermissionError("任务涉及的业务域未获授权")
-        return [item.key for item in (matches or allowed) if item in allowed]
 
 
 def contract(user, available):
@@ -166,7 +150,7 @@ def contract(user, available):
     ]
     return {
         "version": "1.0",
-        "runtime": "deepseek-flash",
+        "runtime": "deerflow",
         "coordinator": "coordinator",
         "maxSteps": len(SPECIALISTS),
         "tools": tools,

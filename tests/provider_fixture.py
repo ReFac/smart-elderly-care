@@ -23,8 +23,18 @@ def isolate_credentials(case, folder):
     case.addCleanup(override.stop)
 
 
+def simulated_route(connect, authorize, goal, request, *, allowed_specs, **kwargs):
+    """Synthetic cloud decisions for business workflows. The routing transport is tested separately."""
+    domains = [
+        spec.key for spec in allowed_specs
+        if any(keyword in goal for keyword in spec.keywords)
+    ]
+    return {"mode": "deepseek", "reason": "ready", "specialistIds": domains, "model": "test-cloud"}
+
+
 def simulate_narration(case):
     """Keep workflow tests deterministic. Cloud billing/dispatch have dedicated transport tests."""
+    case.enterContext(patch("platform_core.agents.narrative.route_domains", side_effect=simulated_route))
     model = patch(
         "platform_core.provider.generation.summarize",
         return_value="云端测试回执，请核对所列记录。",

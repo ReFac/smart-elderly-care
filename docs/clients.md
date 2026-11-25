@@ -2,11 +2,11 @@
 
 [文档导航](README.md)
 
-三端打开同一个机构 Web 工作台，共用后端会话、岗位授权、人工确认和审计。服务端为每次请求重新检查当前账号的权限。手机 App 和小程序的会话分别保存在各自的 WebView，各终端独立登录后可以同时办事。数据库与设备密钥放在机构服务端。手机和小程序工程只需要机构网站地址。
+PC、手机 App 和微信小程序访问同一个机构工作台。三端沿用同一套后端会话机制、岗位授权、人工确认和审计规则。服务器每次请求都重新检查当前账号的权限。手机 App 和小程序的会话各自保存在宿主 WebView，独立登录后可与 PC 同时办事。手机和小程序工程只需要机构网站地址，数据库和设备密钥留在机构服务器。
 
 ## 连接机构服务
 
-本机演示的固定入口是 [工作台登录页](http://localhost:8765/?workspace=1)。旧预览标签显示“连接被拒绝”时，可先在服务所在电脑打开[健康检查](http://localhost:8765/api/health)。如果这里返回 `status: ok`，再检查标签页使用的端口。通过 SSH 开发的预览还依赖浏览器所在电脑的本地端口转发；重连后用当前转发的地址打开工作台。
+本机演示使用固定的[工作台登录页](http://localhost:8765/?workspace=1)。旧预览页提示“连接被拒绝”时，先在运行服务的电脑打开[健康检查](http://localhost:8765/api/health)。如果能看到 `status: ok`，检查预览页的端口号。使用 SSH 开发时，浏览器所在电脑还需要本地端口转发。重新连接后，请使用当前的转发地址。
 
 同一台 PC 调试可先执行 `python3 server.py`。服务监听 `127.0.0.1:8765`。手机、微信和其他 PC 需要可达的正式 HTTPS 地址及有效证书。机构反向代理应把该域名的请求转给本地 Python 服务，并转发实际的 `Host`。服务启动时设置同一外部源，例如：
 
@@ -28,7 +28,7 @@ npm start
 
 若使用机构后端，在启动时设置 `NH_APP_URL` 为机构完整 HTTPS 地址。主窗口和用于打印床头卡、查看授权图片的子窗口共用登录会话。渲染页面启用 Electron 沙箱、上下文隔离和同源导航约束。
 
-助理的联网回答会列出网页来源。点击来源标题后，桌面端会核对链接和域名解析地址，再用系统默认浏览器打开公开网页。床头卡打印和医疗原件继续在机构桌面窗口内打开。在 `clients/desktop` 运行 `npm test` 可检查来源点击和地址约束。[Electron 安全指南](https://www.electronjs.org/docs/latest/tutorial/security)
+助理在联网答复中列出网页来源。点击来源标题，桌面端先核对链接和域名解析地址，再用系统默认浏览器打开公开网页。打印床头卡、查看医疗原件仍使用机构桌面窗口。在 `clients/desktop` 运行 `npm test` 可检查来源链接及其地址限制。[Electron 安全指南](https://www.electronjs.org/docs/latest/tutorial/security)
 
 创建当前操作系统及 CPU 架构的独立桌面目录：
 
@@ -61,7 +61,7 @@ npm run ios
 npm run bundle
 ```
 
-导出后两个平台的资源写入 `dist/_expo/`，`dist/metadata.json` 记录各自的入口。安装到设备需要对应原生构建，Android 使用 Android SDK 与 JDK，iOS 使用 Xcode 及相应签名。框架已声明医疗照片拍摄和选片所需的应用配置。拍照、选片、后台返回与登录失效提示仍需在目标机型验收。[Expo 本地原生构建](https://docs.expo.dev/guides/local-app-development/) [Expo CLI 导出](https://docs.expo.dev/more/expo-cli/)
+两端的导出资源都写到 `dist/_expo/`，入口记录在 `dist/metadata.json`。要在设备上安装，Android 需用 Android SDK 和 JDK 做原生构建，iOS 需用 Xcode 构建并签名。工程已声明拍摄和选取医疗照片所需的应用配置。拍照、选片、从后台返回和登录失效提示还要在目标机型上验收。[Expo 本地原生构建](https://docs.expo.dev/guides/local-app-development/) [Expo CLI 导出](https://docs.expo.dev/more/expo-cli/)
 
 ## 微信小程序
 
@@ -74,7 +74,7 @@ npm run bundle
 
 ### Roomtour 访客回电
 
-访客可匿名浏览官网。未登录访客在前台实际观看 3D 场景累计五秒后，会看到可关闭的联系卡。关闭后可在当前标签页继续参观。访客主动确认留号时，接待人员可在「意向客户」查看，沿用已入住免回访规则。
+访客可以匿名参观官网。未登录的访客在前台实际观看 3D 场景累计五秒后，会看到一张联系卡，关闭即可在当前标签页继续看。只有访客主动确认留号，接待人员才会在「意向客户」里看到这次登记。已入住者沿用免回访规则。
 
 要启用微信手机号，先发布小程序页面 `pages/tour-contact/index`，在微信后台申明机构联系访客的用途、开通手机号能力，并将 `workspaceOrigin` 加入 request 合法域名。为此页生成官方 URL Link，在机构服务端设置 `NH_WECHAT_TOUR_LINK`、`NH_WECHAT_MINI_APP_ID` 和 `NH_WECHAT_MINI_APP_SECRET`。小程序密钥只配置在服务器。URL Link 到期时更换。微信网页点击确认进入小程序，经原生按钮授权后，后台使用一次性动态令牌取号并登记。未开通、未授权或取号失败时可手动填写。[微信手机号授权](https://developers.weixin.qq.com/miniprogram/dev/framework/open-ability/getPhoneNumber.html) · [微信 URL Link](https://developers.weixin.qq.com/miniprogram/dev/framework/open-ability/url-link.html)
 

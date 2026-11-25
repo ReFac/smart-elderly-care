@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .. import access_policy
 from ..agents import specialists
-from . import completions, deepseek, late_receipts, search_usage, task_usage, token_receipt
+from . import completions, deepseek, late_receipts, search_usage, specialist_dispatch, task_usage, token_receipt
 from .late_receipts import late_usage as late_usage, unsettled as unsettled
 
 DEFAULT_MODEL = "deepseek-flash"
@@ -317,6 +317,7 @@ def replay(row, allowed, fingerprint, now):
     return decision("unavailable", row["reason"] or "uncertain", row["model"])
 
 
+@specialist_dispatch.hosted
 def plan(
     connect,
     authorize,
@@ -327,6 +328,7 @@ def plan(
     transport=None,
     allowed_specs=None,
     scope_key="",
+    required_care=False,
 ):
     when = local_time(now)
     if not isinstance(goal, str) or not 1 <= len(goal.strip()) <= 500:
@@ -335,6 +337,8 @@ def plan(
         raise ValueError("规划请求编号无效")
     goal, request_id = goal.strip(), request_id.strip()
     identity = json.dumps([goal, scope_key], ensure_ascii=False) if scope_key else goal
+    if required_care:
+        identity = json.dumps([identity, "care"], ensure_ascii=False)
     fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     with closing(connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
@@ -345,6 +349,8 @@ def plan(
             granted = {s.key for s in allowed_specs}
             specs = tuple(s for s in specs if s.key in granted)
         allowed = tuple(s.key for s in specs)
+        if required_care and "care" not in allowed:
+            raise PermissionError("指定长辈的任务需要照护权限")
         if not allowed:
             raise PermissionError("尚未分配协作业务域")
         uid = user["id"]
@@ -357,7 +363,7 @@ def plan(
         model = cap["model"]
         if not cap["available"]:
             return decision("unavailable", cap["state"], model)
-        body = deepseek.request_body(model, goal, specs)
+        body = deepseek.request_body(model, goal, specs, required_care=required_care)
         if body is None:
             return decision("unavailable", "no_signal", model)
         try:
@@ -374,6 +380,7 @@ def plan(
         available = remaining_tokens(db, entitlement)
         if available is not None and allowance > available:
             return decision("unavailable", "exhausted", model)
+        specialist_dispatch.before_reservation("agent.routing", uid, request_id)
         db.execute(
             """INSERT INTO api_usage
             (actor,request,planId,fingerprint,model,createdAt,status,allowance,feature)
@@ -391,7 +398,8 @@ def plan(
         task_usage.attach(db, "tokens", uid, request_id)
     # The network call never holds a workspace transaction. Unknown billing keeps its reservation.
     outcome = deepseek.complete(
-        transport or completions.send, key, body, allowed, allowance=allowance
+        transport or completions.send, key, body, allowed, allowance=allowance,
+        required=("care",) if required_care else (),
     )
     with closing(connect()) as db, db:
         receipt = db.execute(

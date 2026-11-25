@@ -57,7 +57,7 @@ class FrequentlyAskedQuestions(unittest.TestCase):
     def test_computer_question_does_not_use_faq_or_provider(self):
         with patch("platform_core.agents.chat_web.collect") as search:
             reply = self.ask("FAQ里有电脑什么配置比较好吗？", "not-care")
-        self.assertIn("只处理养老", reply["content"])
+        self.assertIn("院务范围", reply["content"])
         self.assertFalse(reply["pageLinks"])
         self.assertFalse(reply["webSearched"])
         self.transport.assert_not_called()

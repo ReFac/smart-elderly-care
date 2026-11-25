@@ -22,7 +22,6 @@ def install_root():
 
 def dependencies(kind):
     relative, names = {
-        "pi": ("runtimes/pi", ("package-lock.json",)),
         "deerflow": ("deploy/deerflow", ("requirements.txt", "sdk.txt")),
     }[kind]
     signed = sources(relative)
@@ -44,25 +43,28 @@ def dependencies(kind):
 
 
 def verify_candidate():
-    """Exercise both enabled workers using a synthetic turn before the HTTP readiness gate."""
-    from . import deerflow_worker, pi_runtime
+    """Start the signed DeerFlow worker before opening the candidate HTTP service."""
+    from . import deerflow_chat, deerflow_worker
 
-    checked = []
+    ran = False
 
-    def offline_reply():
-        checked.append(True)
+    def synthetic_reply():
+        nonlocal ran
+        ran = True
         return {"text": "就绪"}
 
     def unexpected(*_):
         raise ValueError("运行时自检不应调用机构工具")
 
     try:
-        pi_runtime.run({"model": "自检", "messages": [{"role": "user", "content": "连通性检查"}]},
-                       offline_reply, unexpected, unexpected)
-        if checked != [True]:
-            raise ValueError("Pi 对话运行时未通过自检")
-        if deerflow_worker.backend() == "deerflow":
-            deerflow_worker._start()
+        deerflow_chat.run({}, synthetic_reply, unexpected, unexpected)
+        if not ran:
+            raise ValueError("DeerFlow 未执行自检对话")
+        visited = []
+        deerflow_chat.delegate({"care": "核对虚构资料"}, visited.append)
+        if visited != ["care"]:
+            raise ValueError("DeerFlow 专员委派自检失败")
+        deerflow_worker._start()
     finally:
-        pi_runtime.close()
+        deerflow_chat.close()
         deerflow_worker._stop()

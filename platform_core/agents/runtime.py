@@ -1,14 +1,12 @@
 """Dispatch bounded specialist work, then return evidence and a human-review checkpoint."""
 
 from dataclasses import replace
-from . import react
+from . import deerflow_chat
 
 from .contracts import (
     CARE_PLAN_TOOL,
     HANDOVER_TOOL,
     REVENUE_TOOL,
-    LocalPlanner,
-    Planner,
     SPECIALISTS,
     Specialist,
     ToolProvider,
@@ -235,20 +233,18 @@ def execute(
     resident_id: str,
     day: str,
     trace: TraceSink,
-    planner: Planner | None = None,
     tools: ToolProvider | None = None,
     provider_plan: dict | None = None,
     member_ids: frozenset | None = None,
     actor_id: str | None = None,
 ):
     allowed = {s.key: s for s in available}
-    planned = (
-        (planner or LocalPlanner()).plan(goal, available)
-        if scope == "auto"
-        else [scope]
-    )
-    if provider_plan and provider_plan["mode"] == "deepseek":
+    if scope == "auto":
+        if not provider_plan or provider_plan.get("mode") != "deepseek":
+            raise ValueError("自动委派需要经过授权核对的云端计划")
         planned = provider_plan["specialistIds"]
+    else:
+        planned = [scope]
     if (
         not planned
         or len(planned) > len(SPECIALISTS)
@@ -262,9 +258,10 @@ def execute(
     trace.append(
         "coordinator", "plan.created", "、".join(allowed[k].title for k in planned)
     )
-    artifacts = []
+    artifacts = {}
     provider = tools or LocalTools(goal)
-    for key in planned:
+
+    def collect(key):
         spec = allowed[key]
         if key == HANDOVER_TOOL.key and any(
             word in goal for word in HANDOVER_TOOL.keywords
@@ -289,12 +286,15 @@ def execute(
             name: {row["id"] for row in rows} for name, rows in inputs.items()
         }
         trace.append(key, "tool.called", spec.tool, "coordinator")
-        action = react.Action(
-            spec.tool, spec.title, lambda: provider.collect(spec, inputs, target, day)
-        )
-        output = react.observe((action,), [spec.tool])[spec.tool]
+        output = provider.collect(spec, inputs, target, day)
         artifact = validate_artifact(output, spec, target, allowed_ids)
         trace.append(key, "tool.observed", "已核对资料引用范围", "coordinator")
-        artifacts.append(artifact)
+        artifacts[key] = artifact
         trace.append(key, "artifact.created", artifact["title"], "coordinator")
-    return artifacts
+
+    # Replay the vetted cloud plan (or one explicitly requested role) into the native
+    # supervisor. Each child receives only an opaque, no-argument business read.
+    deerflow_chat.delegate({key: allowed[key].title for key in planned}, collect)
+    if set(artifacts) != set(planned):
+        raise ValueError("专员未完成已授权的资料核对")
+    return [artifacts[key] for key in planned]

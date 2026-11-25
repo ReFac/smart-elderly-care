@@ -4,11 +4,11 @@
 
 | 我现在想做什么 | 第一步 |
 | --- | --- |
-| 第一次登录，试用健康助理 | [在工作台选择入口](workspace-manual.md#从哪里开始) |
+| 第一次登录，想问问今天的院况 | [在工作台选择入口](workspace-manual.md#从哪里开始) |
 | 给一位长辈建档并办理入住 | [从档案选择床位、试住或正式入住](workspace-manual.md#入住床位与档案) |
-| 交班时查看一位长辈的健康变化或今日生活 | [在档案中看巡查结果](rounds.md) |
-| 让另一个 Agent 接入，查询它有权看的资料 | [开发 Agent 的交接入口](agent-handbook.md#开发与交付-agent-从哪里接手) |
-| 把系统部署到一家机构 | [准备主机并创建独立加密库](quick-deploy.md) |
+| 交班前看看这位长辈今天吃了什么、有没有新增异常 | [在档案中看巡查结果](rounds.md) |
+| 让外部 Agent 按授权查院务资料 | [开发 Agent 的交接入口](agent-handbook.md#开发与交付-agent-从哪里接手) |
+| 为一家新机构开设工作台 | [准备主机并创建独立加密库](quick-deploy.md) |
 
 ## 员工与家属
 
@@ -26,7 +26,7 @@
 
 | 任务 | 操作说明 |
 | --- | --- |
-| 查清 Pi、DeerFlow 2.0 和院务系统分别做什么 | [组件分工、签认和回执](agent-components.md) |
+| 查看 DeerFlow 主对话、文书整理、巡查与员工签认的分工 | [组件分工、签认和回执](agent-components.md) |
 | 了解主助理与专业 Agent 如何分工、如何验收 | [Agent 手册](agent-handbook.md) · [运行时与检查点](agent-runtime.md) |
 | 接入 MCP、Excel 或经审核的社区技能 | [工具与技能配置](assistant-harness.md) · [技能来源](../skills/UPSTREAM.md) |
 | 让另一个 Agent 查询院内只读统计 | [A2A Agent Card 与调用方法](agent-protocol.md) |
@@ -39,8 +39,8 @@
 | --- | --- |
 | 首次部署、选语种、开启持证机构保全 | [部署指南](quick-deploy.md) · [持证机构上线验收](medical-commercial.md) |
 | 配置服务器、端口和设备，接入移动端 | [Owner 控制台](deployment-console.md) · [手机、桌面与小程序](client-compatibility.md) · [客户端运行](clients.md) |
-| 做异地加密快照、恢复或签名升级 | [备份与恢复](backups.md) · [存储及密钥](storage.md) · [版本更新](updates.md) |
-| 找一笔业务改动或核对审计 | [最近改动与操作记录](history.md) |
+| 从异地快照恢复资料，或在升级前备份 | [备份与恢复](backups.md) · [存储及密钥](storage.md) · [版本更新](updates.md) |
+| 查一位员工何时改过某份档案 | [最近改动与操作记录](history.md) |
 | 验收 200 床交付、查既往测试结果 | [商用验收清单](commercial-acceptance.md) · [商用设计](commercial-design.md) · [性能验收](performance-validation.md) · [200 床阶段报告](soak-200-beds-2026-11-25-partial.md) |
 
 [开发规划](roadmap.md) · [中文测试范围](../AGENTS.md) · [项目维护日志](../LOG.md)

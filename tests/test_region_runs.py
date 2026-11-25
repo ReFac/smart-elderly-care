@@ -64,8 +64,10 @@ class RegionRuns(unittest.TestCase):
         check = agents.preflight(db, self.data, actor, body)
         planning = None
         if not check["prior"]:
+            from provider_fixture import simulated_route
+            plan = simulated_route(None, None, body["goal"], None, allowed_specs=check["specs"])
             artifacts, log = narrative.collect(
-                check, self.data, actor, self.now.date().isoformat()
+                check, self.data, actor, self.now.date().isoformat(), plan if body.get("scope", "auto") == "auto" else None
             )
             planning = {
                 "mode": "deepseek",

@@ -1,40 +1,42 @@
 # CareOps Agent SaaS
 
-A multi-agent workspace for residential and integrated medical care. Staff can ask about a shift, dictate a care observation or upload the documents from a visit. The assistant uses records within the caller’s scope and opens drafts for staff to review and sign.
+CareOps is a multi-agent workspace for residential care, including facilities that provide medical care. At handover, staff can ask how the shift went, dictate a care observation or upload paperwork from a medical visit. The assistant can read the records available to the person asking. Staff review and sign drafts in the workspace.
 
 [Documentation](docs/en/README.md) · [Deploy an institution](docs/en/quick-deploy.md) · [Agent handbook](docs/en/agent-handbook.md) · [简体中文](README.md)
 
 ## Try a shift handover
 
-| Ask or upload | What to expect |
+| In the workspace | What you can check |
 | --- | --- |
-| “How are things today?” | Occupancy, outstanding care work, recorded health exceptions and receipts available to your account. |
-| Open a resident’s daily summary | Meals, activities and care from that resident’s signed records, with evidence references. |
-| Upload visit photos or a registration worksheet | Confirm the person and document type, open a prefilled form and review it before saving. |
+| Ask “How are things today?” | Find out how many residents are staying, which care tasks are outstanding, what changes staff have flagged and which payments have come in. The answer follows your account permissions. |
+| Open a resident’s daily summary | Read what staff recorded about meals, activities and care. Each part of the summary points back to the signed record. |
+| Upload photos from one medical visit or import a registration worksheet | Choose the resident, confirm the document type and check the prefilled fields before saving. |
 
 ![The Chinese workspace showing a shift summary alongside occupancy, care tasks and a link to the inventory ledger](docs/previews/agent-workspace.webp)
 
-*Captured from the Chinese demo with fictional records and a simulated model response.*
+*Chinese demo with fictional records and a simulated model response.*
 
-The main assistant handles conversation. Care and supply specialists can look up evidence for a handover. Scheduled rounds use the institution’s configured interval to prepare individual summaries from signed care records and documented observations. Staff can follow each summary back to its source. [Agent handbook](docs/en/agent-handbook.md)
+DeerFlow runs the lead assistant and the agents that organise visit documents, write daily living summaries and review health observations. Ask about residents to see what staff have recorded, or give a bed number to narrow the scope. After you upload visit documents, open the task list to review the draft against the originals. [Component responsibilities](docs/en/agent-components.md) · [Agent handbook](docs/en/agent-handbook.md)
 
-[See how Pi, DeerFlow 2.0 and the workspace share a task](docs/en/agent-components.md)
+To follow a request in code, start with the conversation loop. It can call tools up to three times in total for one staff message. For a cross-department brief, the supervisor delegates the authorised care, inventory or finance checks to separate specialists. [Conversation loop](deploy/deerflow/conversation.py) · [Specialist delegation](deploy/deerflow/delegation.py)
 
 ## Run locally
 
-Start with Linux, Python 3.11+, Node.js 22.19+ with npm, the SQLCipher development library and Poppler. From the repository root, create a fictional institution in a separate database. The first interactive launch prompts for the `owner` account password.
+On Linux, install Python 3.12+, Git, the SQLCipher development library and Poppler. Run the following commands from the repository root to create a fictional institution in its own database. At the first interactive launch, the terminal asks you to set the password for `owner`.
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements-storage.txt -r requirements-payments.txt -r requirements-harness.txt -r requirements-a2a.txt
-npm ci --prefix runtimes/pi --omit=dev --ignore-scripts
+python3 -m venv .local/deerflow-venv
+.local/deerflow-venv/bin/python -m pip install -r deploy/deerflow/requirements.txt
+.local/deerflow-venv/bin/python -m pip install --no-deps -r deploy/deerflow/sdk.txt
 NH_DEPLOYMENT_LANGUAGE=en python server.py --db .local/careops-demo-en.sqlite3 --initial-data demo --port 8765
 ```
 
-For visit documents and scheduled resident summaries, install the pinned DeerFlow worker in a separate Python 3.12+ environment. The Owner deployment console shows the status of both Pi and DeerFlow. [Worker installation](deploy/deerflow/README.en.md)
+Open the [local workspace](http://localhost:8765/?workspace=1) to browse the sample records, beds and work orders. Select **AI** or **Health assistant** to start a conversation. Model replies, OCR and voice require an enabled provider. [Service configuration](docs/en/deployment-console.md)
 
-Open the [local workspace](http://localhost:8765/?workspace=1) and select **AI** or **Health assistant**. You can browse sample records, beds and work orders before configuring paid services. Model answers, OCR and voice need an enabled provider. Start a production installation with an empty encrypted database, HTTPS and separate recovery keys. [Service configuration](docs/en/deployment-console.md) · [Production deployment](docs/en/quick-deploy.md)
+Chat and background tasks use the same DeerFlow v2.2.0 installation. The Owner can check the installed version in the deployment console and trace calls by task in the usage report. For a live institution, start with an empty encrypted database, HTTPS and separate recovery keys. [Worker installation](deploy/deerflow/README.en.md) · [Production deployment](docs/en/quick-deploy.md)
 
 ## Find your guide
 

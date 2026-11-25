@@ -27,7 +27,7 @@ class WorkerTests(TestCase):
         )
 
     @skipUnless(
-        worker.installation()["installed"], "需要在独立环境安装官方 DeerFlow 2.0.0 SDK"
+        worker.installation()["installed"], "需要在独立环境安装官方 DeerFlow 2.2.0 SDK"
     )
     def test_graph_checks_evidence_and_forgets_previous_resident(self):
         with patch.dict("os.environ", {"NH_DEERFLOW_BACKEND": "deerflow"}):
@@ -58,7 +58,7 @@ class WorkerTests(TestCase):
                 )
 
     @skipUnless(
-        worker.installation()["installed"], "需要在独立环境安装官方 DeerFlow 2.0.0 SDK"
+        worker.installation()["installed"], "需要在独立环境安装官方 DeerFlow 2.2.0 SDK"
     )
     def test_revocation_is_checked_immediately_before_cloud_dispatch(self):
         def revoked():
@@ -89,13 +89,13 @@ class WorkerTests(TestCase):
             self.assertFalse(worker.installation()["ready"])
             with (
                 patch.object(worker.generation, "generate") as paid,
-                self.assertRaisesRegex(ValueError, "DeerFlow 2.0 未就绪"),
+                self.assertRaisesRegex(ValueError, "DeerFlow 2.2.0 未就绪"),
             ):
                 self.request("daily-life", {"事实": []})
             paid.assert_not_called()
 
     @skipUnless(
-        worker.installation()["installed"], "需要在独立环境安装官方 DeerFlow 2.0.0 SDK"
+        worker.installation()["installed"], "需要在独立环境安装官方 DeerFlow 2.2.0 SDK"
     )
     def test_scheduled_health_review_runs_one_scoped_graph_for_unchanged_sources(self):
         from contextlib import closing

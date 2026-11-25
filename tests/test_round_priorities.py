@@ -69,7 +69,7 @@ class PriorityTests(unittest.TestCase):
                 "choices": [
                     {
                         "finish_reason": "stop",
-                        "message": {"content": '{"ids":["upcoming","past_due"]}'},
+                        "message": {"content": '{"ids":["upcoming","past_due","completed"]}'},
                     }
                 ],
             }
@@ -128,7 +128,7 @@ class PriorityTests(unittest.TestCase):
         self.assertEqual(summary, {"text": "待交班"})
         ranked = priorities.generate(
             self.store, self.token, "r001", self.payload,
-            transport=Mock(return_value=completion({"ids": ["past_due", "upcoming"]}, 34)),
+            transport=Mock(return_value=completion({"ids": ["past_due", "upcoming", "completed"]}, 34)),
         )
         self.assertEqual(ranked["status"], "ok")
         with closing(self.store.connect()) as db:
@@ -139,6 +139,27 @@ class PriorityTests(unittest.TestCase):
                 ("agent.routing", 30, "ok"), ("care.roundNarrative", 32, "ok"),
                 ("care.roundPriorities", 34, "ok"),
             ])
+
+    def test_missing_check_does_not_become_a_locally_completed_ai_ranking(self):
+        response = {
+            "choices": [{"finish_reason": "stop", "message": {"content": '{"ids":["upcoming"]}'}}],
+            "usage": {"total_tokens": 26},
+        }
+        result = priorities.generate(self.store, self.token, "r001", self.payload, transport=Mock(return_value=response))
+        self.assertEqual((result["items"], result["reason"]), ([], "invalid_output"))
+
+
+    def test_old_report_separates_unranked_business_checks_from_the_model_response(self):
+        report_id = self.payload["reportId"]
+        with closing(self.store.connect()) as db, db:
+            db.execute("INSERT INTO rounds_priorities VALUES (?,?,?,?,?)", (report_id, "legacy", "rank", "2026-11-24", ""))
+            db.execute("""INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,
+                allowance,specialistIds) VALUES('legacy','rank',?,'fixture','fixture',0,'ok',100,'["upcoming"]')""",
+                (provider.latest(db)["id"],))
+        saved = priorities.read(self.store, self.token, "r001", report_id)
+        self.assertEqual(saved["items"], [priorities.CHECKS["upcoming"]])
+        self.assertEqual(saved["unrankedItems"], [priorities.CHECKS["past_due"], priorities.CHECKS["completed"]])
+
 
     def test_requires_consent_and_rejects_unapproved_output(self):
         transport = Mock(

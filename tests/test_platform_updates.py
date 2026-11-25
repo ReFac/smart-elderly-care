@@ -19,7 +19,7 @@ import manage_updates
 from platform_core import secure_storage, updates
 from platform_core.store import Store
 from platform_core.update_deploy import (
-    BUNDLED, DEERFLOW_ASSETS, PI_ASSETS, Launcher, app_file, protection, restore_previous, unpack_archive,
+    BUNDLED, BUNDLE_ASSETS, Launcher, app_file, protection, restore_previous, unpack_archive,
 )
 
 
@@ -142,6 +142,26 @@ class PlatformUpdateTests(unittest.TestCase):
             unpack_archive(archive, self.signed(archive.read_bytes())["release"], self.root / "code")
         self.assertFalse((self.root / "code").exists())
 
+    def test_separate_launcher_starts_the_original_installation_and_uses_its_database(self):
+        legacy = self.root / "previous"
+        (legacy / "platform_core").mkdir(parents=True)
+        (legacy / "platform_core/store.py").write_text("")
+        old_app = legacy / "server.py"
+        old_app.write_text("# 上一版程序")
+        seen = []
+
+        def inspect(launcher):
+            seen.append((launcher.root, launcher.database, launcher.installed()))
+            self.assertEqual(launcher.options, ["--initial-data", "empty"])
+
+        with patch.object(sys, "argv", ["manage_updates.py", "run", "--install-root", str(legacy),
+                                        "--initial-data", "empty"]), patch.object(Launcher, "run", inspect):
+            manage_updates.main()
+        self.assertEqual(seen, [(legacy, legacy / ".local/workspace.sqlite3", (legacy, updates.BASE_VERSION))])
+        self.assertEqual(old_app.read_text(), "# 上一版程序")
+        with self.assertRaisesRegex(ValueError, "原机构安装"):
+            manage_updates.install_root(self.root / "未知安装")
+
     def test_signed_worker_bundle_runs_from_release_and_previous_release_without_network_install(self):
         key = self.root / "private.pem"
         key.write_bytes(self.key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
@@ -149,15 +169,29 @@ class PlatformUpdateTests(unittest.TestCase):
         manage_updates.build("0.2.1", output, key, "中文候选版本")
         manifest = updates.ReleaseSource(self.url, self.keyfile).verify(updates.read_json(output / "latest.json"))
         package = output / manifest["artifact"]
+        # A legacy launcher cannot admit new signed Python entry points.
+        # The operator preflights the same package using the independently deployed launcher.
+        with patch.dict(os.environ, NH_UPDATE_MANIFEST_URL=self.url, NH_UPDATE_PUBLIC_KEY_FILE=str(self.keyfile)):
+            checked = subprocess.run([sys.executable, str(manage_updates.ROOT / "manage_updates.py"),
+                                      "verify-package", "--manifest", str(output / "latest.json")],
+                                     capture_output=True, text=True, timeout=20)
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        self.assertIn("0.2.1", checked.stdout)
+        self.assertEqual(manage_updates.install_root(manage_updates.ROOT), manage_updates.ROOT)
         with ZipFile(package) as files:
             names = set(files.namelist())
-            self.assertTrue({BUNDLED + asset for asset in (*PI_ASSETS, *DEERFLOW_ASSETS)} <= names)
+            self.assertTrue({BUNDLED + asset for asset in BUNDLE_ASSETS} <= names)
             self.assertFalse(any("node_modules" in name or ".local/" in name for name in names))
         # Match the long-running launcher's cwd and isolation while importing
         # the actual newly unpacked application's code at both cutover and rollback.
         script = ("import sys;sys.path.insert(0,sys.argv[1]);"
                   "from platform_core.agents import runtime_assets as r;"
-                  "assert str(r.ROOT)==sys.argv[1];r.verify_candidate()")
+                  "from platform_core.agents import mcp_plugins as m,community_skills as s;"
+                  "assert str(r.ROOT)==sys.argv[1];r.verify_candidate();"
+                  "assert m.DEFAULT_CONFIG==r.BUNDLED/'workspace-mcp.json';"
+                  "assert s.BUNDLED==r.BUNDLED/'skills';"
+                  "assert 'mcp_time_get_current_time' in {t['name'] for t in m.catalog({'kind':'owner'})};"
+                  "assert s.document_guidance({'kind':'owner'})")
         env = {"PATH": os.environ["PATH"], "LANG": "C.UTF-8", "NH_UPDATE_MANAGED": "1"}
         launcher = Launcher(manage_updates.ROOT, self.store.path, 8765)
         launcher.source = updates.ReleaseSource(self.url, self.keyfile)
@@ -173,6 +207,8 @@ class PlatformUpdateTests(unittest.TestCase):
                                      capture_output=True, env=env, timeout=40)
             attempts.append((version, checked.returncode == 0))
             if checked.returncode:
+                if version == "0.2.1":
+                    self.fail(checked.stderr.decode(errors="replace")[-1500:])
                 raise updates.UpdateError("候选运行时未通过启动检查")
 
         # Exercise the production staging, signature, snapshot, activation and recovery
@@ -188,7 +224,7 @@ class PlatformUpdateTests(unittest.TestCase):
             with ZipFile(package) as source, ZipFile(newer, "w", ZIP_DEFLATED) as target:
                 for name in source.namelist():
                     data = source.read(name)
-                    if name == BUNDLED + "runtimes/pi/package-lock.json":
+                    if name == BUNDLED + "deploy/deerflow/requirements.txt":
                         data += b"\n"
                     target.writestr(name, data)
             updates.atomic_json(launcher.staged, self.signed(newer.read_bytes(), version="0.2.2"))
@@ -201,7 +237,7 @@ class PlatformUpdateTests(unittest.TestCase):
 
     def test_missing_worker_source_and_private_or_unlisted_files_are_rejected(self):
         for name in ("web/node_modules/runtime.js", "web/tenant.sqlite3", "web/key.pem",
-                     BUNDLED + "runtimes/pi/surprise.js", BUNDLED + "deploy/deerflow/worker.env"):
+                     BUNDLED + "skills/xlsx/private.md", BUNDLED + "runtimes/unlisted.js", BUNDLED + "deploy/deerflow/worker.env"):
             self.assertFalse(app_file(name))
         archive = self.root / "release.zip"
         with ZipFile(archive, "w") as files:

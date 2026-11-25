@@ -106,18 +106,18 @@ class ChatTests(unittest.TestCase):
                 self.store, self.owner, picked, sample_wav(), True, conversation=True
             )["transcriptId"]
 
-    def test_missing_pi_never_spends_the_initial_model_reservation(self):
-        with patch.object(chat.pi_runtime, "_current", side_effect=chat.pi_runtime.Unavailable(chat.pi_runtime.SETUP)):
-            with self.assertRaisesRegex(chat.Unavailable, "Pi 对话服务"):
+    def test_missing_deerflow_never_spends_the_initial_model_reservation(self):
+        with patch.object(chat.deerflow_chat, "_current", side_effect=chat.deerflow_chat.Unavailable(chat.deerflow_chat.SETUP)):
+            with self.assertRaisesRegex(chat.Unavailable, "DeerFlow 对话服务"):
                 self.ask("今天院里怎么样", "missing-runtime")
         self.transport.assert_not_called()
         with closing(self.store.connect()) as db:
             row = db.execute("SELECT status,charged,reason FROM api_usage WHERE request='chat/missing-runtime'").fetchone()
-        self.assertEqual(tuple(row), ("closed", 0, "pi_unavailable"))
+        self.assertEqual(tuple(row), ("closed", 0, "deerflow_unavailable"))
 
     def test_visit_button_correlates_only_its_signed_in_origin(self):
         message = self.ask("帮我整理这次就诊资料", "visit-origin")["messages"][-1]
-        self.assertEqual(message["runtime"], "pi")
+        self.assertEqual(message["runtime"], "deerflow")
         self.assertEqual(message["action"]["kind"], "uploadVisitRecords")
         self.ask("库存情况", "stock")
         with closing(self.store.connect()) as db:
@@ -137,16 +137,27 @@ class ChatTests(unittest.TestCase):
             names = [row["function"]["name"] for row in body["tools"]]
             self.assertIn("calculate_amount", names)
             return {"usage":{"total_tokens":50},"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[
-                {"type":"function","function":{"name":"inventory_evidence","arguments":"{}"}}]}}]}
+                {"type":"function","id":"provider-stock-207","function":{"name":"inventory_evidence","arguments":"{}"}}]}}]}
         self.transport.side_effect = first
-        def decide(_store, _uid, _req, _system, facts, validate, **opts):
-            if opts["feature"] == "assistant.nextTool":
-                self.assertIn("inventory_evidence", facts["observation"])
-                return validate({"tool":"calculate_amount","arguments":{"expression":"3 * 2.55"}})
-            self.assertEqual(facts["最新工具观察"]["calculate_amount"]["value"], "7.65")
-            return validate({"text":"按所给单价合计 7.65 元。"})
-        with patch.object(chat.react.generation, "generate", side_effect=decide):
-            answer = self.ask("核对库存，然后计算三份每份 2.55 元的总价")["messages"][-1]
+        def decide(_key, body, **opts):
+            observed = [json.loads(m["content"]) for m in body["messages"] if m["role"] == "tool"]
+            if len(observed) == 1:
+                self.assertIn("物资", observed[0])
+                self.assertEqual(body["messages"][-1]["tool_call_id"], "provider-stock-207")
+                self.assertIn("calculate_amount", [tool["function"]["name"] for tool in body["tools"]])
+                return {"usage": {"total_tokens": 23}, "choices": [{"finish_reason": "tool_calls", "message": {
+                    "tool_calls": [{"type": "function", "id": "provider-math-208", "function": {"name": "calculate_amount",
+                                   "arguments": '{"expression":"3 * 2.55"}'}}]}}]}
+            self.assertEqual(observed[1]["value"], "7.65")
+            self.assertEqual(body["messages"][-1]["tool_call_id"], "provider-math-208")
+            return {"usage": {"total_tokens": 37}, "choices": [{"finish_reason": "stop", "message": {
+                "content": "按所给单价合计 7.65 元。"}}]}
+        with patch("platform_core.provider.deepseek.send", side_effect=decide):
+            answer = self.ask("核对库存，计算三份每份 2.55 元的总价")["messages"][-1]
+        self.assertIn("7.65 元", answer["content"])
+        with closing(self.store.connect()) as db:
+            self.assertEqual([r[0] for r in db.execute(
+                "SELECT charged FROM api_usage WHERE feature='assistant.toolAnswer' ORDER BY rowid")], [23, 37])
         self.assertEqual([row["tool"] for row in answer["toolTrace"]], ["inventory_evidence","calculate_amount"])
         self.assertNotIn("expression", str(answer["toolTrace"]))
         for invalid in ("2**24", "1/0", "2 // 2", "sum(1,2)"):
@@ -273,16 +284,48 @@ class ChatTests(unittest.TestCase):
             return {"usage":{"total_tokens":50}, "choices":[{"finish_reason":"tool_calls", "message":{
                 "tool_calls":[{"type":"function", "function":{"name":"read_workflow_skill","arguments":'{"name":"xlsx"}'}}]}}]}
         self.transport.side_effect = choose
-        with patch.object(chat.react, "answer", return_value="请先核对表头。") as final:
+        with patch("platform_core.provider.deepseek.send", return_value={
+            "usage": {"total_tokens": 24}, "choices": [{"finish_reason": "stop", "message": {"content": "请先核对表头。"}}]
+        }) as final:
             self.ask("工作表请用 xlsx 技能整理一下")
-        self.assertEqual(final.call_args.args[5]["read_workflow_skill"]["name"], "xlsx")
+        self.assertEqual(json.loads(final.call_args.args[1]["messages"][-1]["content"])["name"], "xlsx")
         first = community_skills.tools_for
         # Simulate withdrawing this extension after the initial cloud request.
         with patch.object(community_skills, "tools_for", side_effect=[first({"kind":"owner","permissions":[]}), ()]), \
-                patch.object(chat.react, "answer") as final:
+                patch("platform_core.provider.deepseek.send") as final:
             with self.assertRaises(chat.Unavailable):
                 self.ask("工作表请用 xlsx 技能整理一下", "revoked")
             final.assert_not_called()
+
+    def test_model_reads_only_a_listed_skill_reference_in_a_later_graph_step(self):
+        skill = "internal-comms"
+        ref = "examples/faq-answers.md"
+
+        def call(arguments):
+            return {"usage": {"total_tokens": 38}, "choices": [{"finish_reason": "tool_calls", "message": {
+                "tool_calls": [{"type": "function", "function": {
+                    "name": "read_workflow_skill", "arguments": json.dumps(arguments)}}]}}]}
+
+        self.transport.return_value = call({"name": skill})
+
+        def follow(_key, body, **kwargs):
+            evidence = [json.loads(m["content"]) for m in body["messages"] if m["role"] == "tool"]
+            if len(evidence) == 1:
+                self.assertIn(ref, evidence[0]["references"])
+                offered = next(t["function"] for t in body["tools"] if t["function"]["name"] == "read_workflow_skill")
+                self.assertEqual(offered["parameters"]["properties"]["name"]["enum"], [skill])
+                return call({"name": skill, "reference": ref})
+            self.assertEqual(evidence[-1]["reference"], ref)
+            self.assertIn("FAQ", evidence[-1]["instructions"])
+            return {"usage": {"total_tokens": 27}, "choices": [{"finish_reason": "stop", "message": {
+                "content": "可以按这份示例草拟，发给同事前请核对。"}}]}
+
+        with patch("platform_core.provider.deepseek.send", side_effect=follow):
+            answer = self.ask("请使用 internal-comms 技能整理院内交班文稿")["messages"][-1]
+        self.assertEqual([item["tool"] for item in answer["toolTrace"]], ["read_workflow_skill"] * 2)
+        with patch("platform_core.provider.deepseek.send", return_value=call({"name": skill, "reference": "未列出.md"})):
+            with self.assertRaises(chat.Unavailable):
+                self.ask("请使用 internal-comms 技能整理院内交班文稿", "unknown-skill-reference")
 
     def test_short_sentence_is_authorized_before_complete_chat_turn(self):
         events, clips = [], []
@@ -439,12 +482,14 @@ class ChatTests(unittest.TestCase):
         self.transport.side_effect = choose
         with patch("platform_core.provider.deepseek.send", return_value={
             "usage": {"total_tokens": 42},
-            "choices": [{"finish_reason": "stop", "message": {"content": '{"text":"已核对库存。"}'}}],
+            "choices": [{"finish_reason": "stop", "message": {"content": '已核对库存。'}}],
         }) as final:
             result = self.ask("护理用具库存怎么样")
         self.assertEqual(result["messages"][-1]["content"], "已核对库存。")
-        observed = json.loads(final.call_args.args[1]["messages"][1]["content"])["最新工具观察"]
-        self.assertEqual(list(observed), ["inventory_evidence"])
+        transcript = final.call_args.args[1]["messages"]
+        self.assertEqual(transcript[-2]["tool_calls"][0]["function"]["name"], "inventory_evidence")
+        self.assertEqual(transcript[-1]["tool_call_id"], transcript[-2]["tool_calls"][0]["id"])
+        self.assertIn("物资", json.loads(transcript[-1]["content"]))
         with closing(self.store.connect()) as db:
             rows = dict(db.execute("SELECT feature,charged FROM api_usage WHERE feature LIKE 'assistant.%'"))
         self.assertEqual(rows, {"assistant.chat": 80, "assistant.toolAnswer": 42})

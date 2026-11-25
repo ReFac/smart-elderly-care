@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from .. import access, access_policy as policy, campus_access, facility, history
-from . import chat_navigation, region, revenue, ward_brief
+from . import chat_navigation, region, resident_status, revenue, ward_brief
 
 
 ROUTES = {
@@ -129,6 +129,38 @@ def history_counts(store, db, actor, chosen, start, end):
                 continue
         counts[row["action"]] += 1
     return dict(sorted(counts.items()))
+
+
+def resident_status_lines(db, actor, state, chosen, location, today):
+    """Collect only the requested residents' authorized health or care counts."""
+    located = bool(location.bed or location.room)
+    if located:
+        beds, label, clarification = resident_status.select(db, state, actor, chosen, location)
+        if clarification:
+            return "", [clarification]
+    else:
+        allowed = campus_access.allowed_beds(db, actor, include_rooms=True)
+        beds = set(chosen["bedIds"]) if chosen else allowed
+        label = chosen["label"] if chosen else "你负责的范围" if allowed is not None else "全院"
+    current = {p["id"] for p in state["residents"] if p.get("status") == "在住"
+               and (beds is None or p.get("bedId") in beds)}
+    if chosen:
+        current &= set(chosen["residentIds"])
+    if not current:
+        return label, ["这里目前没有在住长辈。"]
+    health = ward_brief.health(db, actor, state, current, {"bedIds": beds} if beds is not None else None, today)
+    if health is not None:
+        lines = ward_brief.phrases("health", {"今日已登记健康情况": health})
+        if location.bed and policy.has(actor, "clinical"):
+            readings = [r for r in state["vitals"] if r.get("residentId") in current
+                        and r.get("date") == today and r.get("metric") and r.get("value") is not None]
+            if readings:
+                values = [f"{r['metric']} {r['value']}{r.get('unit', '')}" for r in readings[-3:]]
+                lines.append("该床今天登记的体征：" + "、".join(values) + "。")
+        return label, lines
+    tasks = Counter(t["status"] for t in state["tasks"] if t.get("residentId") in current and t.get("date") == today)
+    return label, [f"在住 {len(current)} 人，今天有 {tasks['已完成']} 项照护已完成，{tasks['待执行']} 项待执行。",
+                   "当前账号可以查看照护执行记录。查看体征和健康异常需要健康查阅权限。"]
 
 
 def evidence(store, db, actor, state, chosen, hours, topics):

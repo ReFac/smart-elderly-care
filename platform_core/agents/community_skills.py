@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from functools import lru_cache
-from importlib.util import find_spec
 from itertools import islice
 import logging
 import os
@@ -11,13 +10,13 @@ import re
 import stat
 
 from .. import access_policy
+from . import deerflow_chat
 
 BUNDLED = Path(__file__).resolve().parents[2] / "skills"
 if not BUNDLED.is_dir():
     BUNDLED = Path(__file__).parent / "bundled/skills"
 MAX_SKILLS = 32
 MAX_FILE = 64 * 1024
-MAX_HEADER = 8 * 1024
 MAX_REFERENCES = 48
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 logger = logging.getLogger(__name__)
@@ -35,18 +34,16 @@ def _regular(path):
     return info
 
 
-def _head(stream):
-    if stream.readline(6).rstrip(b"\r\n") != b"---":
-        raise ValueError("技能缺少 YAML 元数据")
-    header = bytearray()
-    while len(header) <= MAX_HEADER:
-        line = stream.readline(MAX_HEADER - len(header) + 1)
-        if line.rstrip(b"\r\n") == b"---":
-            return bytes(header)
-        if not line:
-            break
-        header.extend(line)
-    raise ValueError("技能元数据不完整或过长")
+def _read(path):
+    # Open the checked leaf without following a replacement symlink. Bound reads
+    # even if a package is replaced while the catalog is being refreshed.
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("技能资料必须为普通文件")
+        content = stream.read(MAX_FILE + 1)
+    if len(content) > MAX_FILE:
+        raise ValueError("技能资料过长")
+    return content.decode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -59,40 +56,21 @@ class Skill:
 
 @lru_cache(maxsize=128)
 def _metadata(path, identity):
-    # The file identity invalidates the cache when the operator updates a package.
-    import yaml
-
-    with path.open("rb") as stream:
-        header = _head(stream)
-    values = yaml.safe_load(header)
-    if not isinstance(values, dict):
-        raise ValueError("技能元数据须为 YAML 映射")
-    name, description = values.get("name"), values.get("description")
-    if (not isinstance(name, str) or name != path.parent.name or len(name) > 64 or not NAME.fullmatch(name)
-            or not isinstance(description, str) or not 1 <= len(description.strip()) <= 1024):
-        raise ValueError("请核对技能名称、目录和用途说明")
-    metadata = values.get("metadata", {})
-    if not isinstance(metadata, dict):
-        raise ValueError("请核对技能 metadata")
-    grant = metadata.get("workspace-permission", "assistants")
-    if not isinstance(grant, str) or grant not in access_policy.PERMISSIONS:
-        raise ValueError("技能所需岗位权限无效")
-    return Skill(path, name, description.strip(), grant)
+    value = deerflow_chat.capability("describe_skill", {"name": path.parent.name, "source": _read(path)})
+    name, description, grant = value["name"], value["description"], value["grant"]
+    if (name != path.parent.name or len(name) > 64 or not NAME.fullmatch(name)
+            or not 1 <= len(description) <= 1024 or not isinstance(grant, str) or grant not in access_policy.PERMISSIONS):
+        raise ValueError("请核对技能名称、说明和岗位授权")
+    return Skill(path, name, description, grant)
 
 
 def _describe(path):
     info = _regular(path)
-    import yaml
-    try:
-        return _metadata(path, (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_size))
-    except (yaml.YAMLError, RecursionError) as error:
-        raise ValueError("技能 YAML 元数据无效") from error
+    return _metadata(path, (info.st_dev, info.st_ino, info.st_ctime_ns, info.st_size))
 
 
 def _discover(user):
     if not user or user.get("kind") not in ("staff", "owner") or not access_policy.has(user, "assistants"):
-        return {}
-    if find_spec("yaml") is None:
         return {}
     skills = {}
     seen = set()
@@ -108,6 +86,8 @@ def _discover(user):
                 continue
             try:
                 skill = _describe(child / "SKILL.md")
+            except deerflow_chat.Unavailable:
+                return {}
             except FileNotFoundError:
                 continue
             except (OSError, ValueError):
@@ -183,14 +163,15 @@ class ReadSkill:
             path = package / reference
         else:
             reference, path = None, skill.path
-        _regular(path)
-        with path.open("rb") as stream:
-            if reference is None:
-                _head(stream)
-            body = stream.read(MAX_FILE + 1)
-        if len(body) > MAX_FILE:
-            raise ValueError("技能资料过长")
-        return {"name": name, "reference": reference, "references": references, "instructions": body.decode("utf-8").strip()}
+        contents = _read(path)
+        if reference is None:
+            parsed = deerflow_chat.capability("read_skill", {"source": contents, "name": name})
+            if parsed["grant"] != skill.grant:
+                raise ValueError("技能权限已更新，请重新提问")
+            contents = parsed["instructions"]
+        else:
+            contents = contents.strip()
+        return {"name": name, "reference": reference, "references": references, "instructions": contents}
 
 
 def tools_for(user, text=""):

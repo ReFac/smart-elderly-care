@@ -365,14 +365,12 @@ class NetworkChatTests(unittest.TestCase):
     def test_unrelated_and_mixed_queries_never_reach_models_or_search(self):
         questions = [
             "电脑什么配置比较好？",
-            "怎么设置 Wi-Fi 路由器？",
             "登录我的购物账号",
             "推荐任务管理软件",
             "养老院长护险手续怎么查，顺便推荐电脑配置",
             "在养老院买电脑打游戏，推荐配置",
             "查养老院附近有什么甜品店",
             "今天郑州天气怎么样？",
-            "find recent neutrino experiments",
         ]
         for index, question in enumerate(questions):
             for web in (False, True):

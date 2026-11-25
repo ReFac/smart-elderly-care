@@ -157,7 +157,7 @@
   top: var(--assistant-y, calc(100dvh - 82px)); border-radius: 12px;
 }
 .assistant-compact .assistant-header { padding: 8px 10px; border: 0; }
-.assistant-compact :is(.assistant-log,.assistant-composer,.assistant-header .assistant-titles + .assistant-icon-control) { display:none; }
+.assistant-compact :is(.assistant-log,.assistant-composer,.assistant-task-control,.assistant-history-control) { display:none; }
 .assistant-compact .assistant-expand { display:inline-flex; align-items:center; gap:4px; background:transparent; color:var(--accent); border:0; white-space:nowrap; }
 .assistant-page .assistant-log, .assistant-page .assistant-composer {
   padding-inline: max(16px, calc((100% - 800px) / 2));
@@ -183,7 +183,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.assistant-icon-control, .assistant-retry {
+.assistant-icon-control, .assistant-task-control, .assistant-retry {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -194,6 +194,22 @@
   border-radius: 7px;
 }
 .assistant-icon-control { width: 32px; }
+.assistant-task-control {
+  flex: none;
+  width: max-content;
+  height: auto;
+  min-height: 32px;
+  padding: .25em .65em;
+  border: 1px solid var(--line);
+  color: var(--accent);
+  background: var(--soft);
+  white-space: nowrap;
+  line-height: 1.35;
+}
+.assistant-task-control svg { flex: none; }
+.assistant-task-control:hover { border-color: currentColor; }
+.assistant-task-receipt { overflow-wrap: anywhere; }
+.assistant-task-receipt summary { cursor: pointer; }
 .assistant-retry { padding: 3px 7px; font-size: 0.8rem; }
 .assistant-icon-control:hover, .assistant-retry:hover { background: var(--soft); }
 .assistant-log {
@@ -293,6 +309,8 @@
   .account-name { max-width: 57px; }
 }
 @media (max-width: 600px) {
+  .assistant-header { gap: 6px; padding-inline: 10px; }
+  .assistant-header .assistant-task-control { min-height: 44px; }
   .assistant-drawer { inset: var(--header-height) 0 0; width: 100%; border: 0; border-radius: 0; }
   .assistant-launch { font-size: 0.8rem; padding: 4px 8px; gap: 4px; }
   .masthead { gap: 4px; padding-inline: 6px; }
@@ -307,6 +325,20 @@
   .assistant-header { padding-block: 7px; }
 }
 @media (max-width: 440px) {
+  .assistant-drawer:not(.assistant-compact) .assistant-header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    row-gap: 6px;
+    padding-block: 8px;
+  }
+  .assistant-drawer:not(.assistant-compact) .assistant-header > .assistant-titles { grid-column: 2; grid-row: 1; }
+  .assistant-drawer:not(.assistant-compact) .assistant-header > .assistant-history-control { grid-column: 3; grid-row: 1; }
+  .assistant-drawer:not(.assistant-compact) .assistant-header > :last-child { grid-column: 4; grid-row: 1; }
+  .assistant-drawer:not(.assistant-compact) .assistant-task-control {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    justify-self: start;
+  }
   .masthead .brand { min-width: 0; padding: 0; flex-shrink: 1; }
   .masthead .brand-words { min-width: 0; }
   .masthead .brand-words strong { font-size: 0.93333rem; }

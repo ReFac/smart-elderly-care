@@ -207,7 +207,7 @@ class AgentRuntimeTests(unittest.TestCase):
         ):
             with (
                 self.subTest(plan=plan),
-                patch.object(runtime.LocalPlanner, "plan", return_value=plan),
+                patch("platform_core.agents.narrative.route_domains", return_value={"mode": "deepseek", "specialistIds": plan}),
                 patch.object(runtime.LocalTools, "collect") as tool,
                 self.assertRaises(exception),
             ):
@@ -400,7 +400,7 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(request("GET", caps_path, None)[0], 401)
         code, caps = request("GET", caps_path, self.owner)
         self.assertEqual(code, 200)
-        self.assertEqual(caps["runtime"], "deepseek-flash")
+        self.assertEqual(caps["runtime"], "deerflow")
         self.assertEqual(
             {a["id"] for a in caps["adapters"]},
             {"mcp-tools", "a2a-delegate", "trace-export"},

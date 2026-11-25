@@ -4,7 +4,7 @@ import re
 from unicodedata import normalize
 
 
-REFUSAL = "我只处理养老机构运营、照护、长护险及相关医疗问题。你可以问我养老政策、护理知识或平台使用方法。"
+REFUSAL = "这个问题超出了院务范围。你想了解院里的哪件事？"
 NO_TOPIC = "这句话没有提取到可独立检索的养老或医疗主题。请用不含个人资料的问题再问一次。"
 
 PUBLIC_SUBJECTS = {

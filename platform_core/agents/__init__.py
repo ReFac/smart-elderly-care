@@ -153,7 +153,7 @@ def preflight(db, state, user, payload):
     request = text_field(payload, "requestId", "请求标识", 100)
     resident = payload.get("residentId", "")
     scope = payload.get("scope", "auto")
-    mode = payload.get("planning", "local")
+    mode = payload.get("planning", "platform")
     if (
         not isinstance(resident, str)
         or len(resident) > 100
@@ -168,7 +168,9 @@ def preflight(db, state, user, payload):
 
         require_agent_receipt(db, user, selected, payload["voiceTranscriptId"])
         args["voiceTranscriptId"] = payload["voiceTranscriptId"]
-    if mode == "platform":
+    # Preserve existing fingerprints for in-progress requests from older clients.
+    # The legacy mode is metadata only. All automatic runs use the same DeerFlow route.
+    if payload.get("planning") == "platform":
         args["planning"] = mode
     if selected:
         args["region"] = selected
@@ -178,7 +180,9 @@ def preflight(db, state, user, payload):
         (user["id"], request),
     ).fetchone()
     if prior:
-        if json.loads(prior["args"]) != args:
+        recorded = json.loads(prior["args"])
+        recorded.pop("planning", None)
+        if recorded != {key: value for key, value in args.items() if key != "planning"}:
             raise ValueError("请求标识已被另一项任务使用")
         get_row(db, user, prior["id"])
         return {
@@ -197,6 +201,10 @@ def preflight(db, state, user, payload):
     )
     if not specs or (scope != "auto" and scope not in {s.key for s in specs}):
         raise PermissionError("此范围或岗位未授权所选专员")
+    if scope == "auto":
+        named = [s for s in SPECIALISTS if any(word in goal for word in s.keywords)]
+        if named and not any(s in specs for s in named):
+            raise PermissionError("任务涉及的业务域未获授权")
     if resident:
         if not any(s.key == "care" for s in specs) or scope not in ("auto", "care"):
             raise PermissionError("指定长辈的任务需要照护权限")

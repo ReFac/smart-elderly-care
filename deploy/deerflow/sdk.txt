@@ -1,2 +1,3 @@
-# ByteDance official v2.0.0 tag, pinned to its source commit (MIT).
-deerflow-harness @ git+https://github.com/bytedance/deer-flow.git@7e7f0410797693cf882594555ba414e0361d4c6f#subdirectory=backend/packages/harness
+# ByteDance DeerFlow v2.2.0, both packages from the same immutable release (MIT).
+deerflow-harness @ git+https://github.com/bytedance/deer-flow.git@58fc5bd5b8e6ea46538e9481ba06ca2a46e14e2a#subdirectory=backend/packages/harness
+deerflow-extension-api @ git+https://github.com/bytedance/deer-flow.git@58fc5bd5b8e6ea46538e9481ba06ca2a46e14e2a#subdirectory=backend/packages/extension-api

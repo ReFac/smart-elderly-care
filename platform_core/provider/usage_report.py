@@ -12,6 +12,7 @@ from . import ZONE, local_time, task_usage
 FEATURES = {
     "assistant.chat": "健康助理 · 对话",
     "assistant.faq": "健康助理 · 常见问题",
+    "assistant.experience": "健康助理 · 经验提议",
     "assistant.toolAnswer": "健康助理 · 核对资料后回答",
     "assistant.scheduledMeal": "健康助理 · 伙食工单确认入口",
     "assistant.medication": "健康助理 · 服药确认入口",

@@ -34,7 +34,7 @@ class RevenueTests(unittest.TestCase):
         (artifact,) = runtime.execute(
             "本月实收多少",
             SPECIALISTS,
-            "auto",
+            "finance",
             state,
             "",
             "2026-11-24",
@@ -50,7 +50,7 @@ class RevenueTests(unittest.TestCase):
         (overview,) = runtime.execute(
             "本月营收",
             SPECIALISTS,
-            "auto",
+            "finance",
             state,
             "",
             "2026-11-24",
@@ -62,7 +62,7 @@ class RevenueTests(unittest.TestCase):
             runtime.execute(
                 "本月实收多少",
                 SPECIALISTS[:1],
-                "auto",
+                "finance",
                 state,
                 "",
                 "2026-11-24",

@@ -234,6 +234,23 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(self.plan("张先生的电话号码")["reason"], "no_signal")
         self.mock.assert_not_called()
 
+    def test_individual_care_and_general_overview_keep_private_text_off_the_wire(self):
+        self.grant(10000)
+        self.actor["permissions"].append("care")
+        self.mock.return_value = reply("inventory")
+        result = self.plan("查看郑先生的记录", "resident-route", required_care=True)
+        self.assertEqual(result["reason"], "invalid_output")
+        projected = json.loads(self.mock.call_args.args[1]["messages"][1]["content"])
+        self.assertEqual(projected["required"], ["care"])
+        self.assertNotIn("郑先生", str(projected))
+        self.mock.return_value = reply("care")
+        result = self.plan("今天怎么样，郑先生想知道", "site-overview")
+        self.assertEqual(result["specialistIds"], ["care"])
+        projected = json.loads(self.mock.call_args.args[1]["messages"][1]["content"])
+        self.assertEqual(projected["signals"], ["今天怎么样"])
+        self.assertNotIn("郑先生", str(projected))
+
+
     def test_concurrent_reservations_no_db_lock_overspend_or_duplicate_calls(self):
         self.grant()
         entered, finish = Event(), Event()

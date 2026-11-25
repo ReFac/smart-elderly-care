@@ -4,7 +4,6 @@ The official SDK owns discovery, negotiation and transport. Only an operator can
 register a server. Model-visible arguments are limited to typed reference values.
 """
 import asyncio
-from contextlib import AsyncExitStack
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
@@ -14,7 +13,6 @@ from pathlib import Path
 import re
 import stat
 import sys
-from tempfile import TemporaryDirectory
 from threading import BoundedSemaphore
 from urllib.parse import urlsplit
 
@@ -198,56 +196,11 @@ def tools_for(user, text=None):
 
 
 async def _invoke(tool, arguments):
-    # Load the optional SDK on the first real call. Other workspaces and the
-    # account/login paths need neither a subprocess nor these dependencies.
-    runtime = ROOT / ".local/harness-runtime"
-    if runtime.is_dir() and str(runtime) not in sys.path:
-        sys.path.append(str(runtime))
-    import mcp
-    from mcp import Client, StdioServerParameters
-    from mcp.client.stdio import stdio_client
-    from mcp.client.streamable_http import streamable_http_client
-
-    async with asyncio.timeout(TIMEOUT), AsyncExitStack() as stack:
-        if "url" in tool.endpoint:
-            from httpx2 import AsyncClient
-            from httpx2 import URL
-            approved_url = URL(tool.endpoint["url"])
-
-            async def check_endpoint(request):
-                if request.url != approved_url:
-                    raise ValueError("MCP 服务地址已经变化")
-
-            http = await stack.enter_async_context(AsyncClient(
-                timeout=TIMEOUT, trust_env=False, follow_redirects=False,
-                event_hooks={"request": [check_endpoint]},
-            ))
-            transport = streamable_http_client(tool.endpoint["url"], http_client=http, max_sse_event_size=65536)
-        else:
-            directory = stack.enter_context(TemporaryDirectory(prefix="nh-reference-"))
-            env = {"HOME": directory, "PATH": os.defpath, "PYTHONNOUSERSITE": "1",
-                   "PYTHONPATH": str(Path(mcp.__file__).resolve().parent.parent)}
-            params = StdioServerParameters(**tool.endpoint, cwd=directory, env=env)
-            errors = stack.enter_context(open(os.devnull, "w"))
-            transport = stdio_client(params, errlog=errors)
-        client = await stack.enter_async_context(Client(transport, read_timeout_seconds=TIMEOUT, cache=None))
-        cursor = None
-        for _ in range(4):
-            listing = await client.list_tools(cursor=cursor)
-            descriptor = next((item for item in listing.tools if item.name == tool.remote), None)
-            if descriptor is not None:
-                break
-            cursor = listing.next_cursor
-            if not cursor:
-                break
-        if descriptor is None or not descriptor.annotations or descriptor.annotations.read_only_hint is not True:
-            raise ValueError("服务未声明此授权工具为只读")
-        response = await client.call_tool(tool.remote, arguments)
-        if response.is_error:
-            raise ValueError("MCP 工具未能处理请求")
-        value = response.structured_content
-        if value is None:
-            value = [item.text for item in response.content if item.type == "text"]
-        if len(json.dumps(value, ensure_ascii=False).encode()) > MAX_OUTPUT:
-            raise ValueError("MCP 工具返回的数据过多")
-        return value
+    from . import deerflow_chat, runtime_assets
+    # The selected server may use the institution's existing server packages.
+    # The child receives no application credentials, resident prompt or history.
+    runtime = runtime_assets.install_root() / ".local/harness-runtime"
+    return await asyncio.to_thread(deerflow_chat.capability, "call_mcp", {
+        "server": tool.server, "remote": tool.remote, "endpoint": tool.endpoint,
+        "arguments": arguments, "serverLibraries": str(runtime) if runtime.is_dir() else "",
+    })

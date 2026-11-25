@@ -12,6 +12,7 @@ import { canReadDocuments, documentIntake } from './assistant-documents.js';
 import { canDraftProfile } from './assistant-materials.js';
 import { workbookButton } from './assistant-workbook.js';
 import { dictationReview } from './assistant-dictation.js';
+import { taskReceipt } from './evidence-runtime.js';
 
 import { openAgentLearning } from './agent-learning.js';
 
@@ -138,7 +139,7 @@ function buildChat(getContext, actor, area, region, label) {
   const recents = control(
     '历史业务简报',
     'history',
-    'assistant-icon-control',
+    'assistant-icon-control assistant-history-control',
     () => openPriorReports(getContext()),
     true,
   );
@@ -152,7 +153,7 @@ function buildChat(getContext, actor, area, region, label) {
     floating.expand();
     if (!input.disabled) input.focus({preventScroll:true});
   });
-  const jobs = canAct(ctx, 'dossier.confirmVisit') ? control('整理任务', 'folder', 'assistant-icon-control',
+  const jobs = canAct(ctx, 'dossier.confirmVisit') ? control('整理任务', 'folder', 'assistant-task-control',
     async () => (await import('./visit-job-list.js')).openVisitJobs(getContext())) : null;
   const header = node('header', 'assistant-header', [mark(), titles, jobs, recents, expand, close]);
   const floating = floatingWindow(panel, header, ctx.state.user.id);
@@ -396,6 +397,7 @@ function buildChat(getContext, actor, area, region, label) {
     const body = node('div', 'assistant-turn-body', [messageBody(item.content)]);
     const sources = searchSources(item);
     if (sources) body.append(sources);
+    if (!mine && item.runtime) body.append(taskReceipt(item.runtime, item.taskId, '对话回执'));
     if (!mine && item.toolTrace?.length) {
       const labels = {
         care_evidence:['照护记录','Care records'], finance_evidence:['收款与欠款','Receipts and balances'],

@@ -13,7 +13,7 @@ from ..provider import completions, deepseek, task_usage, token_receipt
 from ..store import Conflict, SignedOut
 from . import chat_context as ctx
 from . import chat_document_help, chat_math, community_skills, english, growth, mcp_plugins
-from . import chat_forms, chat_navigation, chat_scope, chat_web, pi_runtime, react, view_filters, ward_brief
+from . import chat_forms, chat_navigation, chat_scope, chat_web, deerflow_chat, react, resident_status, view_filters, ward_brief
 
 CONTEXT_LIMIT = 100_000
 MEMORY_TURNS = 5
@@ -70,9 +70,9 @@ def init(db):
 
 def rows(db, actor, scope, generation, limit):
     return db.execute(
-        """SELECT t.request,t.asked,t.answered,t.question,t.answer,t.action,t.hours,t.web_sources,t.tool_trace,u.taskId
+        """SELECT t.request,t.asked,t.answered,t.question,t.answer,t.action,t.hours,t.web_sources,t.tool_trace,u.taskId,u.runtime
         FROM assistant_turns t LEFT JOIN agent_task_usage u ON u.meter='tokens' AND u.actor=t.actor
-            AND u.receipt='chat/' || t.request AND u.runtime='pi'
+            AND u.receipt='chat/' || t.request AND u.runtime IN ('pi','deerflow')
         WHERE t.actor=? AND t.scope=? AND t.generation=? ORDER BY t.seq DESC LIMIT ?""",
         (actor, scope, generation, limit),
     )
@@ -89,7 +89,7 @@ def upload_task(db, actor_id, origin_request):
     row = db.execute("""SELECT u.taskId,t.action FROM assistant_turns t
         JOIN assistant_threads th ON (t.actor,t.scope,t.generation)=(th.actor,th.scope,th.generation)
         JOIN agent_task_usage u ON u.meter='tokens' AND u.actor=t.actor
-            AND u.receipt='chat/' || t.request AND u.runtime='pi'
+            AND u.receipt='chat/' || t.request AND u.runtime IN ('pi','deerflow')
         WHERE t.actor=? AND t.request=?""", (actor_id, origin_request)).fetchone()
     if not row or (json.loads(row["action"]) if row["action"] else {}).get("kind") not in chat_document_help.UPLOAD_ACTIONS:
         raise ValueError("所选对话没有可关联的文件整理请求")
@@ -116,7 +116,7 @@ def messages(db, actor, scope, generation, limit, pages=None, area=None, *, memo
             },
         ]
         if not memory and row["taskId"]:
-            pair[1].update(taskId=row["taskId"], runtime="pi")
+            pair[1].update(taskId=row["taskId"], runtime=row["runtime"])
         if not memory and row["tool_trace"]:
             pair[1]["toolTrace"] = json.loads(row["tool_trace"])
         size = len(ctx.compact(pair).encode()) + 32
@@ -129,7 +129,7 @@ def messages(db, actor, scope, generation, limit, pages=None, area=None, *, memo
         previous = []
         for question, answer in chronological:
             action = answer["action"] or {}
-            if action.get("kind") == "scopeRefusal":
+            if action.get("kind") in ("scopeRefusal", "residentLocation"):
                 answer.update(action=None, pageLinks=[])
                 previous = []
                 continue
@@ -533,7 +533,7 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             task_id = speech.require_chat_receipt(db, user, area, voice_receipt)
         else:
             task_id = task_usage.identifier("chat", uid, request)
-        turn.enter_context(task_usage.scope("pi", task_id))
+        turn.enter_context(task_usage.scope("deerflow", task_id))
         pages = chat_navigation.visible(user, routes)
         previous_generation = thread["generation"] if thread else ""
         if not thread:
@@ -620,19 +620,24 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             if not upload:
                 save_turn(db, document_reply, {"kind": "scopeRefusal"})
                 return view(db, uid, scope, thread, pages, selected)
-        plugins = () if page_target else mcp_plugins.tools_for(user, text)
+        last_action = json.loads(last["action"]) if last and last["action"] else {}
+        last_location = last_action.get("location") if last_action.get("kind") == "residentLocation" else None
+        location = None if is_english else resident_status.question(text, followup=bool(
+            last and (last_location or ward_brief.topic(last["question"]) == "health")
+        ), previous=last_location)
+        plugins = () if page_target or location else mcp_plugins.tools_for(user, text)
         arithmetic = bool(chat_math.WHEN.search(text) and chat_math.tools_for(user))
         skill_request = bool(re.search(r"工作方法|工作指南|指南模板|技能|skill|工作簿|电子表格|xlsx?|简报草稿|草拟|起草|周报|通报|整理.{0,5}(?:表格|材料|资料)", text, re.I))
-        faq_request = None if page_target or manual_form or document_request or plugins or skill_request else faq.intent(text, last["question"] if last else "")
+        faq_request = None if location or page_target or manual_form or document_request or plugins or skill_request else faq.intent(text, last["question"] if last else "")
         faq_workflow = next((entry for entry in faq_request["items"] if entry.destinations), None) if faq_request else None
         if faq_request and not faq_workflow and not faq_request["explicit"] and chat_navigation.local_question(text):
             faq_request = None
         actions = chat_navigation.navigation_actions(
             permitted_actions(user, routes, text, selected), text, pages
         )
-        if faq_request or manual_form or document_request or plugins or skill_request:
+        if location or faq_request or manual_form or document_request or plugins or skill_request:
             actions = {}
-        requested_filters = None if faq_request or manual_form or document_request or plugins or skill_request else view_filters.request(text, page, last["question"] if last else "")
+        requested_filters = None if location or faq_request or manual_form or document_request or plugins or skill_request else view_filters.request(text, page, last["question"] if last else "")
         if requested_filters is not None:
             filter_links, open_filtered = (
                 view_filters.resolve(db, state, user, requested_filters, selected)
@@ -656,17 +661,27 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             early_action = {**early_action, "region": ctx.region.selection(area)}
 
         brief = ((english.topic(text, store.deployment_language) if is_english else "") or ward_brief.topic(text)) if not (faq_request or manual_form or document_request or plugins or skill_request or arithmetic or actions) and requested_filters is None else ""
+        if location:
+            if not ctx.institution_access(user) or not resident_status.can_read(user):
+                save_turn(db, "当前账号没有查阅院内长辈健康或照护汇总的权限。", {"kind": "scopeRefusal"})
+                return view(db, uid, scope, thread, pages, selected)
+            brief = "health"
         if brief == "operations" and not ctx.institution_access(user):
             save_turn(db, "This account cannot access the facility overview." if is_english else "当前账号没有查看院内运营汇总的权限。", {"kind": "scopeRefusal"})
             return view(db, uid, scope, thread, pages, selected)
         if user["kind"] not in ("owner", "staff"):
             brief = ""
-        if chat_scope.obvious_unrelated(text) or not (
-            faq_request or manual_form or document_request or plugins or (skill_request and user["kind"] in {"owner", "staff"}) or requested_filters is not None or brief or page_target or chat_navigation.local_question(text)
-            or chat_scope.conversation_subject(text, last["question"] if last else "")
-        ):
+        if chat_scope.obvious_unrelated(text):
             save_turn(db, english.REFUSAL if is_english else chat_scope.REFUSAL, {"kind": "scopeRefusal"})
             return view(db, uid, scope, thread, pages, selected)
+        # An unfamiliar expression is a conversation turn. Withhold records, tools
+        # and public search until there is enough context to identify an authorized scope.
+        clarify = not (
+            faq_request or manual_form or document_request or plugins or arithmetic or actions
+            or (skill_request and user["kind"] in {"owner", "staff"})
+            or requested_filters is not None or brief or page_target or chat_navigation.local_question(text)
+            or chat_scope.conversation_subject(text, last["question"] if last else "")
+        )
         plan, model = provider.latest(db), provider.model_name()
         if not provider.active(plan, now.date().isoformat()):
             raise Unavailable("机构的云端 AI 套餐尚未开通或已经到期，请联系管理员")
@@ -682,13 +697,22 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
         elif actions.get("care") == "scheduledMeal":
             feature = "assistant.scheduledMeal"
         lines = []
+        health_place = ""
         lookup_actions = ()
         builtin_reads = ()
         rule_text = growth.guidance(db, user, "chat", campus_id=(selected or {}).get("campusId", ""))
         rule_suffix = ("\n本院已审阅的呈现偏好（仅在与本轮任务相关时应用）：" + rule_text) if rule_text else ""
 
         def private_body(db, state, available):
-            nonlocal lookup_actions, builtin_reads
+            nonlocal lookup_actions, builtin_reads, health_place
+            if clarify:
+                return {
+                    "model": model, "thinking": {"type": "disabled"}, "max_tokens": 180,
+                    "messages": [
+                        {"role": "system", "content": "你是养老机构的健康助理。用机构语言自然回应。同事口语表达时，结合养老院工作含义，询问一个能明确对象或范围的问题，例如问哪间房、哪位长辈或哪项院务。对明确无关的请求简短引回院务。本轮没有业务记录、联网资料或操作权限，不得声称已查到情况或执行操作。"},
+                        {"role": "user", "content": text},
+                    ],
+                }
             if page_target:
                 return {"model":model, "thinking":{"type":"disabled"}, "max_tokens":96,
                         "messages":[{"role":"system","content":"Invite the user to open the named workspace page using the button. The user chooses whether to navigate."},
@@ -711,12 +735,15 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
                 facts = {"公开常见问题": [
                     {"问题": entry.question, "已核对说明": entry.answer} for entry in faq_request["items"]
                 ]}
-            elif plugins or skill_request:
+            elif location or plugins or skill_request:
                 facts = {}
             else:
                 facts = ctx.evidence(store, db, user, state, selected, hours, topics)
             if brief:
-                lines[:] = english.briefing(brief, facts, store.deployment_language) if is_english else ward_brief.phrases(brief, facts)
+                if location:
+                    health_place, lines[:] = ctx.resident_status_lines(db, user, state, selected, location, now.date().isoformat())
+                else:
+                    lines[:] = english.briefing(brief, facts, store.deployment_language) if is_english else ward_brief.phrases(brief, facts)
                 return {
                     "model": model, "thinking": {"type": "disabled"}, "stream": False,
                     "max_tokens": 128, "response_format": {"type":"json_object"},
@@ -787,6 +814,7 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
 
         consider_search = (
             web_enabled
+            and not clarify
             and faq_request is None
             and manual_form is None
             and requested_filters is None
@@ -917,7 +945,6 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
                 raise chat_web.SearchFailure(
                     "公开检索的会话、套餐或权限已经变化"
                 ) from None
-        observation = {}
         response = None
         answer = None
         action = None
@@ -929,6 +956,8 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
                 actor = store.actor(live, token)
                 return (*builtin_reads, *(mcp_plugins.tools_for(actor, text) or mcp_plugins.tools_for(actor)),
                         *community_skills.tools_for(actor, text), *chat_math.tools_for(actor))
+
+        tool_turn = react.ToolTurn(lookup_actions, current_tools, trace)
 
         def first_model():
             nonlocal charged, remote_receipt, response, answer, action
@@ -949,38 +978,21 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
                 raise ValueError
             charged = remote_receipt.total
             if lookup_actions and response["choices"][0]["finish_reason"] == "tool_calls":
-                chosen = react.requested_calls(response, current_tools(), offered=lookup_actions)
-                return {"calls": [{"id": f"read-{i}", "name": name, "arguments": args}
-                                  for i, (name, args) in enumerate(chosen.items())]}
+                return tool_turn.dispatch(response["choices"][0]["message"].get("tool_calls"))
             _, answer, action = extract(response, {} if page_target else actions, request, scope)
             return {"text": answer}
 
-        def execute_read(name, args):
-            # Pi dispatches calls sequentially. Resolve each tool again on the host
-            # at execution time so a scope change cannot release stale records.
-            call = {"type": "function", "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}}
-            read = react.from_response({"choices": [{"message": {"tool_calls": [call]}}]},
-                                       current_tools(), offered=lookup_actions, trace=trace)
-            observation.update(read)
-            return read[name]
-
         def synthesis():
             nonlocal answer
-            with closing(store.connect()) as live:
-                live.execute("BEGIN")
-                current_search_state(live)
-            if arithmetic and re.search(r"然后|再算|再计算|据此|and then|then calculate|then compute", text, re.I):
-                react.next_step(store, uid, request, text, observation, current_tools, lookup_actions, trace)
-            if "read_workflow_skill" in observation:
-                react.load_reference(store, uid, request, text, observation, current_tools)
-            answer = react.answer(
-                store, uid, request, SYSTEM + rule_suffix, text, observation,
+            result = tool_turn.continue_model(
+                store, uid, request, SYSTEM + rule_suffix, text, context_limit=CONTEXT_LIMIT,
                 context=last["question"] if last and text != topics else "",
-                **({"on_delta": emit_delta} if progress else {}),
+                on_delta=emit_delta if progress else None,
             )
-            return answer
+            answer = result.get("text")
+            return result
 
-        pi_runtime.run(body, first_model, execute_read, synthesis)
+        deerflow_chat.run(body, first_model, tool_turn.read, synthesis)
         if document_request:
             action = upload
         if direct:
@@ -1008,6 +1020,10 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
                 raise ValueError("云端摘要未返回有效的事实编号")
             first = selected_line - 1
             answer = "\n".join([lines[first], *lines[:first], *lines[first+1:]])
+            if location and (location.room or location.bed):
+                action = {"kind": "residentLocation", "location": {"place": location.place, "room": location.room, "bed": location.bed}}
+            if health_place:
+                answer = f"{health_place} · {now.month}月{now.day}日\n" + answer
             if brief == "operations" and not is_english:
                 place = selected["label"] if selected else "你负责的范围" if user.get("facilityScope") else "院里"
                 answer = f"今天{place}的情况（{now.month}月{now.day}日）\n" + answer
@@ -1068,11 +1084,11 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             progress.complete(answer)
         result = (answer, action)
         status = "ok"
-    except pi_runtime.Unavailable as err:
+    except deerflow_chat.Unavailable as err:
         # The worker has no credentials; it can only have incurred the cloud
         # charges already recorded by this thread's provider callback.
         status, failure, rejected = "closed", str(err), not charged
-        failure_reason = "pi_unavailable"
+        failure_reason = "deerflow_unavailable"
     except chat_web.UnverifiedTopic:
         # An unsafe or unrecognized search topic never falls back to private evidence.
         result, status = (chat_scope.NO_TOPIC, {"kind": "scopeRefusal"}), "closed"

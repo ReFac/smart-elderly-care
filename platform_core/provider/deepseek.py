@@ -61,25 +61,30 @@ SIGNALS = {
 }
 
 
-def request_body(model, goal, specialists):
+def request_body(model, goal, specialists, *, required_care=False):
     tags = []
     for item in specialists:
         for word in SIGNALS.get(item.key, ()):
             if word in goal:
                 tags.append((goal.index(word), word))
-    if not tags:
+    for word in ("全院", "院况", "院务", "经营概况", "机构概况", "今天怎么样", "近期变化"):
+        if word in goal:
+            tags.append((goal.index(word), word))
+    if not tags and not required_care:
         return None
     domains = [item.key for item in specialists]
     prompt = {
         "allowed": domains,
         "signals": list(dict.fromkeys(word for _, word in sorted(tags)))[:12],
     }
+    if required_care:
+        prompt["required"] = ["care"]
     return {
         "model": model,
         "messages": [
             {
                 "role": "system",
-                "content": 'Route nursing-home task signals to matching allowed domains only. Return JSON as {"ids":["care"]}. No prose.',
+                "content": 'Route nursing-home task signals to matching allowed domains only. Include every required domain. Return JSON as {"ids":["care"]}. No prose.',
             },
             {
                 "role": "user",
@@ -200,7 +205,7 @@ class Outcome:
     receipt: token_receipt.TokenReceipt | None = None
 
 
-def complete(transport, key, body, allowed, *, allowance=1_000_000):
+def complete(transport, key, body, allowed, *, allowance=1_000_000, required=()):
     try:
         result = transport(key, body)
     except HTTPError as err:
@@ -222,6 +227,8 @@ def complete(transport, key, body, allowed, *, allowance=1_000_000):
             raise ValueError
         ids = content["ids"]
         if not isinstance(ids, list) or not 1 <= len(ids) <= len(allowed):
+            raise ValueError
+        if not all(key in ids for key in required):
             raise ValueError
         if not all(isinstance(key, str) and key in allowed for key in ids) or len(
             set(ids)

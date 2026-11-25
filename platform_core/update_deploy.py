@@ -25,14 +25,29 @@ from .backups import audit, enqueue_deliveries, identifier, private_directory, p
 
 MAX_UNPACKED = 600 * 1024 * 1024
 BUNDLED = "platform_core/agents/bundled/"
-PI_ASSETS = ("runtimes/pi/conversation.mjs", "runtimes/pi/package.json", "runtimes/pi/package-lock.json")
-DEERFLOW_ASSETS = ("deploy/deerflow/worker.py", "deploy/deerflow/worker-config.yaml",
+DEERFLOW_ASSETS = ("deploy/deerflow/worker.py", "deploy/deerflow/conversation.py",
+                   "deploy/deerflow/capabilities.py", "deploy/deerflow/delegation.py", "deploy/deerflow/experience.py", "deploy/deerflow/gateway_extension.py", "deploy/deerflow/worker-config.yaml",
                    "deploy/deerflow/requirements.txt", "deploy/deerflow/sdk.txt")
 
 
+# Keep the signed allowlist explicit. Operator-installed skills, MCP credentials and
+# local files must never be gathered merely because they share a directory.
+AGENT_MATERIALS = (
+    "workspace-mcp.json", "requirements-a2a.txt", "requirements-harness.txt",
+    "requirements-payments.txt", "requirements-storage.txt", "skills/UPSTREAM.md",
+    "skills/xlsx/SKILL.md", "skills/xlsx/LICENSE.txt",
+    "skills/resident-daily-life/SKILL.md", "skills/resident-health-review/SKILL.md",
+    "skills/resident-record-intake/SKILL.md", "skills/internal-comms/SKILL.md",
+    "skills/internal-comms/LICENSE.txt", "skills/internal-comms/examples/3p-updates.md",
+    "skills/internal-comms/examples/company-newsletter.md", "skills/internal-comms/examples/faq-answers.md",
+    "skills/internal-comms/examples/general-comms.md",
+)
+BUNDLE_ASSETS = (*DEERFLOW_ASSETS, *AGENT_MATERIALS)
+
+
 def app_file(name):
-    if name.startswith((BUNDLED + "runtimes/", BUNDLED + "deploy/")):
-        return name[len(BUNDLED):] in (*PI_ASSETS, *DEERFLOW_ASSETS)
+    if name.startswith(BUNDLED):
+        return name[len(BUNDLED):] in BUNDLE_ASSETS
     parts = name.split("/")
     return name == "server.py" or (
         len(parts) >= 2 and parts[0] in ("platform_core", "web")
@@ -58,9 +73,8 @@ def unpack_archive(archive, release, destination):
                 entries = bundle.infolist()
                 names = {entry.filename for entry in entries}
                 required = {"server.py", "platform_core/store.py", "web/index.html"}
-                for bridge, assets in (("pi_runtime", PI_ASSETS), ("deerflow_worker", DEERFLOW_ASSETS)):
-                    if f"platform_core/agents/{bridge}.py" in names:
-                        required.update(BUNDLED + asset for asset in assets)
+                if "platform_core/agents/deerflow_worker.py" in names:
+                    required.update(BUNDLED + asset for asset in BUNDLE_ASSETS)
                 if (
                     not required <= names or not 3 <= len(entries) <= 5000
                     or len(entries) != len(names)

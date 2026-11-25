@@ -23,6 +23,7 @@ def seed(store):
         # Use an attributable fixture so the browser verifies a concrete result without a paid model.
         life = report.build(db, state, resident, now)
         life.update(id="fixture-life", generatedAt=stamp, source="deepseek", model="测试模型",
+                    taskId="daily-0123456789abcdef01234567", draftRuntime="deerflow",
                     changes=[dict(day=day, permission="care", text="已签认午餐，吃了米饭。",
                                   evidence=[dict(kind="task", id="lunch-test", date=day)])],
                     suggestions=[], residentEdition=[])
@@ -30,6 +31,7 @@ def seed(store):
                    (life["id"], "r001", resident["bedId"], day, stamp, "fixture", json.dumps(life)))
         health = dict(id="fixture-health", residentId="r001", agentId="health-review", status="draft",
                       day=day, generatedAt=stamp, source="deepseek", model="测试模型",
+                      taskId="health-0123456789abcdef01234567", draftRuntime="deerflow",
                       items=[dict(text="护士已复核这位长辈的晨间观察。",
                                   evidence=[dict(kind="healthRecord", id="observation-test", date=day)])])
         db.execute("INSERT INTO rounds_health_reviews VALUES(?,?,?,?,?,?,?,?)",
@@ -75,6 +77,11 @@ def check_owner(browser, port):
     assert b.evaluate("document.querySelector('[data-resident-agent=daily-life]').textContent.includes('吃了米饭')")
     b.click("[data-resident-agent=health-review] details summary")
     b.wait_for("document.querySelector('[data-resident-agent=health-review] details[open]').innerText.includes('observation-test')")
+    for agent, prefix in [('daily-life', 'daily'), ('health-review', 'health')]:
+        selector = f'[data-resident-agent={agent}] .assistant-task-receipt'
+        b.click(selector + ' summary')
+        receipt = b.evaluate(f"document.querySelector('{selector}').innerText")
+        assert 'DeerFlow' in receipt and prefix + '-0123456789abcdef01234567' in receipt
     profile(b, origin, "r002")
     assert 'observation-test' not in b.evaluate("document.querySelector('#content').textContent")
     assert not b.errors, b.errors
@@ -86,6 +93,7 @@ def check_care(browser, port):
     profile(b, origin, "r001")
     assert b.evaluate("document.querySelector('[data-resident-agent=daily-life]').textContent.includes('吃了米饭')")
     assert not b.evaluate("!!document.querySelector('[data-resident-agent=health-review]')")
+    assert 'health-0123456789abcdef01234567' not in b.evaluate("document.querySelector('#content').textContent")
     assert not b.evaluate("!!document.querySelector('.sidebar a[href=\"#settings\"]')")
     assert not b.errors, b.errors
 

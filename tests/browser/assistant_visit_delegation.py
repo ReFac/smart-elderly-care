@@ -28,7 +28,7 @@ class VisitWorkflow:
         self.release = Event()
 
     def model(self, key, body, **kwargs):
-        # Mock only the provider boundary. Pi and DeerFlow keep their real SDKs/processes.
+        # The provider is simulated. Conversation and evidence workers run the real DeerFlow SDK.
         assert key == "synthetic-visit-browser"
         guide = body["messages"][0]["content"]
         if "文件分拣员" in guide:
@@ -210,12 +210,34 @@ class VisitWorkflow:
         )
         b.wait_for("!!document.querySelector('.desk-assistant-float')")
         b.click(".desk-assistant-float")
+        for width, scale in [(1366, 1), (1366, 1.5), (320, 1.5)]:
+            b.call("Emulation.setDeviceMetricsOverride", width=width, height=800, deviceScaleFactor=1, mobile=width==320)
+            b.evaluate(f"document.documentElement.style.setProperty('--desk-type-scale','{scale}')")
+            assert b.evaluate("""(() => {
+                const button = document.querySelector('.assistant-task-control');
+                const range = document.createRange();
+                range.selectNodeContents(button.lastChild);
+                const box = button.getBoundingClientRect(), text = range.getBoundingClientRect();
+                const header = button.closest('header').getBoundingClientRect();
+                const titleRange = document.createRange();
+                titleRange.selectNodeContents(button.closest('header').querySelector('h2'));
+                const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+                return titleRange.getClientRects().length === 1 && range.getClientRects().length === 1 && text.right <= box.right &&
+                    text.bottom <= box.bottom && box.left >= 0 && box.right <= innerWidth &&
+                    box.bottom <= header.bottom && button.contains(hit);
+            })()"""), f"整理任务按钮在宽 {width}、字号倍率 {scale} 时换行、被裁切或无法点击"
+        b.call("Emulation.setDeviceMetricsOverride", width=1366, height=800, deviceScaleFactor=1, mobile=False)
+        b.evaluate("document.documentElement.style.setProperty('--desk-type-scale','1')")
+        click("整理任务")
+        b.wait_for("document.querySelector('dialog[open]')?.textContent.includes('由 DeerFlow 整理就诊草稿')")
+        b.wait_for("document.querySelector('dialog[open]')?.textContent.includes('当前没有等待核对的就诊资料')")
+        b.click("dialog[open] button[aria-label='关闭对话框']")
         ask("帮我整理本次就诊资料")
         b.call("Page.setInterceptFileChooserDialog", enabled=True)
         click("上传就诊资料")
         origin = get("/api/assistant/chat")["messages"][-1]
         assert (
-            origin["runtime"] == "pi"
+            origin["runtime"] == "deerflow"
             and origin["action"]["kind"] == "uploadVisitRecords"
         )
         doc = b.call("DOM.getDocument")["root"]["nodeId"]
@@ -255,10 +277,18 @@ class VisitWorkflow:
             "fetch('/api/assistant/chat').then(r=>r.json()).then(x=>x.messages.length===4)"
         )
         reply = get("/api/assistant/chat")["messages"][-1]
-        assert reply["runtime"] == "pi" and reply["taskId"] != task and reply["content"]
+        assert reply["runtime"] == "deerflow" and reply["taskId"] != task and reply["content"]
+        b.wait_for("document.querySelector('.from-assistant .assistant-task-receipt')?.textContent.includes('DeerFlow')")
         assert get(f"{endpoint}/{draft}")["state"] == "running" and not records(draft)
         self.release.set()
         click("整理任务")
+        b.wait_for("document.querySelector('dialog[open] [data-visit-jobs] .assistant-task-receipt')?.textContent.includes('DeerFlow')")
+        b.click('dialog[open] [data-visit-jobs] .assistant-task-receipt summary')
+        b.wait_for("document.querySelector('dialog[open] [data-visit-jobs] .assistant-task-receipt[open]')?.innerText.includes(" + json.dumps(task) + ")")
+        b.evaluate("""{const body = document.querySelector('[data-visit-jobs]');
+            window.previousVisitReceipt = body.querySelector('details');
+            [...body.querySelectorAll('button')].find(button => button.textContent === '刷新').click();}""")
+        b.wait_for("!window.previousVisitReceipt.isConnected && !!document.querySelector('[data-visit-jobs] details[open]')")
         click("核对草稿")
         b.wait_for(
             "document.querySelector('.medical-visit-review-content img')?.naturalWidth === 1"
@@ -292,10 +322,16 @@ class VisitWorkflow:
                     "SELECT runtime FROM agent_task_usage WHERE taskId=?", (task,)
                 )
             }
-        assert {"pi", "deerflow", "platform"} <= runtimes, runtimes
+        assert runtimes == {"deerflow", "platform"}, runtimes
+        click("整理任务")
+        click("查看组件部署状态")
+        b.wait_for("document.querySelector('main')?.textContent.includes('DeerFlow · 对话与资料整理')")
+        click("查看我的整理任务")
+        b.wait_for("document.querySelector('dialog[open]')?.textContent.includes('由 DeerFlow 整理就诊草稿')")
+        b.click("dialog[open] button[aria-label='关闭对话框']")
         assert not b.errors, b.errors
         print(
-            "中文 Chromium 已验证 Pi 委派就诊原件、DeerFlow 后台整理时继续问答、复用 OCR、授权预览和员工确认入档。"
+            "中文 Chromium 已验证普通及大字号、窄屏整理入口、DeerFlow 对话与后台整理回执、OCR 复用、授权预览和员工确认入档。"
         )
 
 

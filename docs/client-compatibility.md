@@ -2,13 +2,13 @@
 
 [文档导航](README.md) · [English](en/client-compatibility.md)
 
-机构只需部署一套 HTTPS 网站。员工和家属通过 `/?workspace=1` 登录，访客从 `/visit` 进入，`/roomtour` 和 `/faq` 可以直接访问。小程序与 App 打开同一套业务界面。每个宿主独立登录，服务器按正在使用的账号和机构检查权限。
+机构只需部署一套 HTTPS 网站。员工和家属从 `/?workspace=1` 登录，访客从 `/visit` 进入，也可以直接访问 `/roomtour` 或 `/faq`。小程序和 App 使用同一套业务界面，各自在宿主内登录。服务器逐次检查当前账号在该机构的权限。
 
 ## 客户端验证矩阵
 
 后续客户端检查及真机验收只使用中文测试机构和中文构建，覆盖简体中文界面及公共宿主能力。[仓库测试约定](../AGENTS.md)
 
-2026-11-26 使用临时数据库和合成账号进行以下检查。浏览器自动化使用本机回环地址，生产域名和证书需在交付环境检验。
+下表记录 2026-11-26 的检查结果。测试使用临时数据库和合成账号，自动化浏览器连接本机回环地址。正式域名和证书留到机构交付环境检验。
 
 | 客户端 | 实际验证 | 交付时再验 |
 | --- | --- | --- |
@@ -24,7 +24,7 @@
 
 ## 生成微信或抖音工程
 
-需要 Node.js 18 或更新版本。在仓库根目录执行对应命令。将环境变量换成机构已校验的域名与实际 AppID，输出目录应为新目录。输出包含平台清单、原生页面、样式和必要的客户端配置，可直接导入对应开发者工具。构建只需要公开的 AppID 和域名。
+在仓库根目录使用 Node.js 18 或更新版本，执行对应平台的构建命令。填入机构已校验的域名和真实 AppID，指定一个新输出目录。这两项公开资料足够完成构建。生成的目录带有平台清单、原生页面、样式和客户端配置，可直接导入开发者工具。
 
 ```bash
 node clients/build-miniapp.cjs wechat "$INSTITUTION_HTTPS_ORIGIN" "$WECHAT_APP_ID" .local/release-wechat
@@ -37,7 +37,7 @@ node clients/build-miniapp.cjs douyin "$INSTITUTION_HTTPS_ORIGIN" "$DOUYIN_APP_I
 
 ## 语音、文件与现场复测
 
-健康助理在浏览器提供麦克风权限、AudioContext 和 AudioWorklet 时录制语音。缺少能力或拒绝授权可改用文本。App 已声明相机、相册及所需麦克风用途。用机构真实设备复核选片、PDF、Excel 下载、系统返回、朗读音频及断线后的重试。每次提交仍由员工核对，款项以支付渠道回执为准。
+浏览器支持 AudioContext 和 AudioWorklet，且用户允许使用麦克风时，健康助理才能录音。设备缺少这些能力或用户拒绝授权时，可以打字。App 已声明相机、相册及所需的麦克风用途。交付时要在机构真机上复核选片、PDF 和 Excel 下载、系统返回、朗读与断线重试。提交前仍由员工核对，款项以支付渠道回执为准。
 
 ```bash
 export NH_DEPLOYMENT_LANGUAGE=zh-CN
@@ -51,6 +51,6 @@ WebKit 回归需要可连接的 GTK 显示服务、PyGObject 与 WebKit2GTK 4.1�
 
 ### 小程序离线提示语言
 
-构建小程序时可在输出目录后追加部署语种，例如 `node clients/build-miniapp.cjs wechat https://care.example wx123456789abcdef0 /tmp/wechat-fr fr`。也可设置 `NH_DEPLOYMENT_LANGUAGE`。缺省为简体中文。公共入口和分享参数不改变机构语种。原生首页、分享标题、未配置域名、连接失败和重试在发包前写入，断网时可显示简中、英语、法语或西班牙语。其他已登记国际语种回退为英文。只有中国版微信包内含适用于大陆手机号的原生回电页。国际版的访客使用 H5 预约。
+要指定小程序断网时的语言，可在输出目录后加上语种，例如 `node clients/build-miniapp.cjs wechat https://care.example wx123456789abcdef0 /tmp/wechat-fr fr`，也可设置 `NH_DEPLOYMENT_LANGUAGE`。默认使用简体中文。原生首页、分享标题、域名缺失提示、连接失败和重试文案在发包前写入。离线时可显示简体中文、英语、法语或西班牙语，其他已登记的国际语种回退到英文。公共入口和分享参数不会改变机构语种。大陆手机号原生回电页仅随中国版微信包发布，国际版访客通过 H5 预约。
 
 Expo 设置 `EXPO_PUBLIC_DEPLOYMENT_LANGUAGE` 选择应用断网和重试提示的语言。连到机构后，小程序与 App 均使用机构服务的语言及业务版本。 Electron 原生窗口及权限询问读取启动环境的 `NH_DEPLOYMENT_LANGUAGE`，支持同样四种语言。

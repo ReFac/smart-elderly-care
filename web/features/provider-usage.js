@@ -1,5 +1,6 @@
 import { displayLocale } from '../lib/locale.js';
 import { node, today } from './shared.js';
+import { runtimeNames } from './evidence-runtime.js';
 
 const endpoint = '/api/provider/usage';
 const number = new Intl.NumberFormat(displayLocale);
@@ -158,7 +159,6 @@ function time(at) {
 }
 
 function recordsGrid(records, selectTask) {
-  const runtimes = { pi: 'Pi', deerflow: 'DeerFlow 2.0', platform: '院务系统' };
   function taskLink(row) {
     if (!row.taskId) return '—';
     const button = node('button', 'usage-row-filter', row.taskId);
@@ -170,7 +170,7 @@ function recordsGrid(records, selectTask) {
     ['调用时间', row => time(row.at)],
     ['经办账号', row => row.actorLabel],
     ['功能', row => row.featureLabel],
-    ['执行组件', row => runtimes[row.runtime] || '—'],
+    ['执行组件', row => runtimeNames[row.runtime] || '—'],
     ['任务编号', taskLink],
     ['状态', row => statusBadge(row.status)],
     ['已核实用量', row => amount(row.amount, row.unit), true],

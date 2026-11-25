@@ -1,5 +1,6 @@
 import { displayLocale } from '../lib/locale.js';
 import { badge, btn, node } from './shared.js';
+import { taskReceipt } from './evidence-runtime.js';
 
 const agents = [
   { id: 'health-review', title: '长辈健康变化', description: '整理这位长辈近期有记录的健康变化，列出供医护人员核对的依据。' },
@@ -99,6 +100,8 @@ export function residentSpecialists(ctx, drafts, residentId, compact) {
         ...rows.slice(visible.length).map(renderItem),
       ]));
       if (!rows.length) body.append(node('p', 'fx-muted', '本次整理没有可展示的条目。'));
+      const receipt = taskReceipt(draft.draftRuntime, draft.taskId);
+      if (receipt) body.append(receipt);
     }
     grid.append(body);
   }

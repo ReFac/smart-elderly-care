@@ -62,8 +62,8 @@ def review(kind, facts, draft):
 
 
 def main():
-    if version("deerflow-harness") != "2.0.0":
-        raise RuntimeError("本部署需要 DeerFlow 2.0.0")
+    if version("deerflow-harness") != "2.2.0":
+        raise RuntimeError("本部署需要 DeerFlow 2.2.0")
     from deerflow.agents.factory import create_deerflow_agent
     from langchain_core.language_models import BaseChatModel
     from langchain_core.messages import AIMessage, ToolMessage
@@ -104,7 +104,7 @@ def main():
                 )
             return ChatResult(generations=[ChatGeneration(message=message)])
 
-    send({"ready": "deerflow-2.0.0"})
+    send({"ready": "deerflow", "protocol": 1})
     while True:
         try:
             work = read()

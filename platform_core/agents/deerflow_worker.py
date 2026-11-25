@@ -27,8 +27,8 @@ _home = None
 
 def backend():
     value = os.environ.get("NH_DEERFLOW_BACKEND", "deerflow")
-    if value not in ("deerflow", "direct"):
-        raise ValueError("NH_DEERFLOW_BACKEND 必须为 deerflow 或 direct")
+    if value != "deerflow":
+        raise ValueError("当前部署需要 DeerFlow，请将 NH_DEERFLOW_BACKEND 设为 deerflow 后重启")
     return value
 
 
@@ -61,15 +61,29 @@ def _env(home):
 def _installed(interpreter, requirements, revision):
     # Loading the factory catches partial installations. The probe never starts a
     # worker, talks to the model, or accepts any business data.
-    probe_code = (
-        "from importlib.metadata import distribution, version; import sys, json; "
-        "print(version('deerflow-harness'), flush=True); "
-        "origin=json.loads(distribution('deerflow-harness').read_text('direct_url.json') or '{}'); "
-        "commit=origin.get('vcs_info', {}).get('commit_id'); "
-        "deps_ok=all(version(name)==pin for name,pin in (p.split('==') for p in sys.argv[2:])); "
-        "sys.exit(1) if (commit and commit!=sys.argv[1]) or not deps_ok else None; "
-        "from deerflow.agents.factory import create_deerflow_agent"
-    )
+    probe_code = """
+import json
+import sys
+from importlib.metadata import distribution, version
+
+print(version("deerflow-harness"), flush=True)
+for package, expected, subdir in (
+    ("deerflow-harness", "2.2.0", "backend/packages/harness"),
+    ("deerflow-extension-api", "0.2.9", "backend/packages/extension-api"),
+):
+    meta = distribution(package)
+    origin = json.loads(meta.read_text("direct_url.json") or "{}")
+    vcs = origin.get("vcs_info", {})
+    if (meta.version != expected or origin.get("url") != "https://github.com/bytedance/deer-flow.git"
+            or vcs.get("vcs") != "git" or vcs.get("commit_id") != sys.argv[1]
+            or origin.get("subdirectory") != subdir):
+        sys.exit(1)
+if any(version(name) != pin for name, pin in (p.split("==") for p in sys.argv[2:])):
+    sys.exit(1)
+from deerflow.agents.factory import create_deerflow_agent
+from deerflow.skills.mutations.validation import validate_candidate
+from langchain_mcp_adapters.tools import load_mcp_tools
+"""
     try:
         with TemporaryDirectory(prefix="careops-deerflow-probe-") as home:
             probe = subprocess.run(
@@ -83,7 +97,7 @@ def _installed(interpreter, requirements, revision):
                 timeout=10,
             )
         version = probe.stdout.strip() or None
-        return version, probe.returncode == 0 and version == "2.0.0"
+        return version, probe.returncode == 0 and version == "2.2.0"
     except (OSError, subprocess.TimeoutExpired):
         return None, False
 
@@ -94,23 +108,31 @@ def installation():
         engine = backend()
         requirements = tuple(line.strip() for line in ENTRY.with_name("requirements.txt").read_text().splitlines()
                              if line.strip() and not line.lstrip().startswith("#"))
-        pin = re.search(r"@([0-9a-f]{40})#", ENTRY.with_name("sdk.txt").read_text())
-        if not pin or not all(re.fullmatch(r"[\w.-]+==[\w.-]+", item) for item in requirements):
+        sdk_lines = (line for line in ENTRY.with_name("sdk.txt").read_text().splitlines()
+                     if line.strip() and not line.lstrip().startswith("#"))
+        source_pins = [re.fullmatch(
+            r"deerflow-(harness|extension-api) @ git\+https://github\.com/bytedance/deer-flow\.git"
+            r"@([0-9a-f]{40})#subdirectory=backend/packages/([a-z-]+)", line.strip()
+        ) for line in sdk_lines]
+        if (not requirements or not all(re.fullmatch(r"[\w.-]+==[\w.-]+", item) for item in requirements)
+                or len(source_pins) != 2 or not all(pin and pin[1] == pin[3] for pin in source_pins)
+                or {p[1] for p in source_pins} != {"harness", "extension-api"}
+                or source_pins[0][2] != source_pins[1][2]):
             raise ValueError("DeerFlow 依赖清单无效")
-        version, installed = _installed(_interpreter(), requirements, pin[1])
+        version, installed = _installed(_interpreter(), requirements, source_pins[0][2])
         return {
             "backend": engine,
             "installed": installed,
             "version": version,
-            "expectedVersion": "2.0.0",
-            "ready": engine == "direct" or installed,
+            "expectedVersion": "2.2.0",
+            "ready": installed,
         }
     except (ValueError, OSError):
         return {
             "backend": "invalid",
             "installed": False,
             "version": None,
-            "expectedVersion": "2.0.0",
+            "expectedVersion": "2.2.0",
             "ready": False,
         }
 
@@ -189,7 +211,7 @@ def _start():
         return
     _stop()
     if not installation()["installed"]:
-        raise ValueError("DeerFlow 2.0 未就绪，请预置对应发布版本的独立运行环境")
+        raise ValueError("DeerFlow 2.2.0 未就绪，请预置对应发布版本的独立运行环境")
     _home = TemporaryDirectory(prefix="careops-deerflow-")
     try:
         _process = subprocess.Popen(
@@ -201,12 +223,12 @@ def _start():
             env=_env(_home.name),
         )
         os.set_blocking(_process.stdin.fileno(), False)
-        if _read(25) != {"ready": "deerflow-2.0.0"}:
+        if _read(25) != {"ready": "deerflow", "protocol": 1}:
             raise ValueError("工作进程无法启动")
     except (OSError, ValueError) as exc:
         _stop()
         raise ValueError(
-            "DeerFlow 2.0 未就绪，请按部署指南安装并核对 NH_DEERFLOW_PYTHON"
+            "DeerFlow 2.2.0 未就绪，请按部署指南安装并核对 NH_DEERFLOW_PYTHON"
         ) from exc
 
 
@@ -224,20 +246,16 @@ def generate(
     **options,
 ):
     """Only the host can spend quota, read a provider key or publish a reviewed record."""
-    engine = backend()
+    backend()
 
     def paid_call():
         if authorize:
             authorize()
-        with task_usage.scope(
-            "deerflow" if engine == "deerflow" else "platform", task_id
-        ):
+        with task_usage.scope("deerflow", task_id):
             return generation.generate(
-                store, actor, request_id, instruction, facts, validate, **options
+                store, actor, request_id, instruction, facts, validate, _evidence_graph=True, **options
             )
 
-    if engine == "direct":
-        return paid_call()
     # Keep the heavy graph interpreter out of the HTTP process. A single warm
     # worker avoids 200 Python startups and shares no conversation/checkpoints.
     key = (

@@ -1,6 +1,6 @@
 import { interfaceText } from '../lib/locale.js';
 import { displayLocale } from '../lib/locale.js';
-import { btn, facts, field, node, page, section, select, table } from './shared.js';
+import { btn, canAct, facts, field, node, page, section, select, table } from './shared.js';
 
 const providers = {deepseek:'DeepSeek', openai:'OpenAI / 兼容服务', anthropic:'Anthropic', google:'Google'};
 const titles = values => values.map(value => ({value,label:value}));
@@ -100,16 +100,20 @@ export function deploymentConsole(ctx) {
         ['模型端点',running.endpoint],['端口来源',view.portPinned?'启动命令指定':'部署配置']]:[]),
     ]))];
     if (view.agentRuntimes) {
-      const {pi, deerflow} = view.agentRuntimes;
-      const piStatus = pi.nodeSupported === false
-        ? interfaceText('需使用 Node.js') + ' ≥ ' + pi.minimumNode + (pi.nodeVersion ? ' · ' + interfaceText('当前版本') + ' ' + pi.nodeVersion : '')
-        : pi.installed ? interfaceText('已安装') + ' ' + pi.version : interfaceText('待安装') + ' ' + pi.requiredVersion;
-      sections.push(section('健康助理的执行组件', facts([
-        ['Pi · 员工对话', piStatus],
-        ['DeerFlow · 就诊整理与定时简报', deerflow.backend === 'direct' ? '已切换为平台直连'
-          : deerflow.ready ? interfaceText('已安装') + ' ' + deerflow.version : interfaceText('待核对安装') + ' ' + deerflow.expectedVersion],
+      const {deerflow} = view.agentRuntimes;
+      const runtimeStatus = deerflow.backend === 'invalid' ? '整理组件配置无效，请联系部署管理员。'
+        : deerflow.installed ? interfaceText('已安装') + ' ' + deerflow.version
+        : interfaceText('待核对安装') + ' ' + deerflow.expectedVersion;
+      sections.push(section('健康助理的执行组件', node('div', 'fx-profile', [facts([
+        ['DeerFlow · 对话与资料整理', runtimeStatus],
         ['院务系统', '负责排队、授权、计量和员工签认'],
-      ])));
+      ]), node('p', 'fx-muted', '员工对话、就诊资料整理、长辈健康变化和今日生活都可使用 DeerFlow。安装状态来自本机依赖检查，实际调用可在 AI 用量中按任务编号核对。'),
+      node('div', 'fx-actions', [
+        canAct(ctx, 'dossier.confirmVisit') && btn(ctx, '查看我的整理任务',
+          async () => (await import('./visit-job-list.js')).openVisitJobs(ctx)),
+        btn(ctx, '定时巡查', () => ctx.go('settings', 'rounds')),
+        btn(ctx, '查看 AI 用量', () => ctx.go('settings', 'deepseekUsage')),
+      ])])));
     }
     if (own) {
       const d=view.draft;

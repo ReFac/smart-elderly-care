@@ -7,7 +7,7 @@ from http.client import HTTPException
 import json
 from urllib.error import HTTPError, URLError
 
-from . import completions, deepseek, task_usage, token_receipt
+from . import completions, deepseek, specialist_dispatch, task_usage, token_receipt
 
 
 def init(db):
@@ -22,6 +22,7 @@ def fingerprint(value):
     ).hexdigest()
 
 
+@specialist_dispatch.hosted
 def generate(
     store,
     actor,
@@ -36,6 +37,10 @@ def generate(
     shared_once=False,
     on_delta=None,
     image=None,
+    tool_messages=None,
+    tools=(),
+    context_limit=None,
+    _evidence_graph=False,
 ):
     """Reserve before sending, persist confirmed billing even if the returned JSON is unusable."""
     from . import active, late_usage, latest, model_name, read_model_key, remaining_tokens
@@ -59,10 +64,18 @@ def generate(
         "max_tokens": output_tokens,
         "stream": False,
     }
-    if on_delta:
+    if tool_messages is not None:
+        messages.extend(tool_messages)
+    if tools:
+        body["tools"] = tools
+    if on_delta or tool_messages is not None:
         body.pop("response_format")
     digest = fingerprint(body)
     size = len(json.dumps(messages, ensure_ascii=False).encode()) + 128 + completions.output_budget(body)
+    if tools:
+        size += len(json.dumps(tools, ensure_ascii=False).encode())
+    if context_limit is not None and size > context_limit:
+        raise ValueError("本轮工具观察超过会话上下文上限，请缩小查询范围")
     if image is not None:
         mime, original = image
         if (completions.provider_name() != "deepseek" or model != "deepseek-flash"
@@ -120,6 +133,8 @@ def generate(
         if remaining is not None and size > remaining:
             raise ValueError("机构的云端 AI 套餐额度不足")
         key = read_model_key()
+        if not _evidence_graph:
+            specialist_dispatch.before_reservation(feature or "structured-summary", actor, request_id)
         db.execute(
             """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance,feature,attributedActor)
                     VALUES(?,?,?,?,?,?,'pending',?,?,?)""",
@@ -147,16 +162,19 @@ def generate(
                     "detail": "low",
                 }},
             ]
-        raw = completions.stream(key, body, on_delta, timeout=40) if on_delta else completions.send(key, body, timeout=40)
+        raw = completions.stream(key, body, on_delta, timeout=40) if on_delta and not tools else completions.send(key, body, timeout=40)
         remote_receipt = token_receipt.read(raw, size)
         if remote_receipt is None:
             raise ValueError("缺少有效用量")
         tokens, status, reason = remote_receipt.total, "closed", "invalid_output"
         choice = raw["choices"][0]
-        if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
+        if tools and choice["finish_reason"] == "tool_calls":
+            result = validate({"tool_calls": choice["message"]["tool_calls"]})
+        elif choice["finish_reason"] == "stop":
+            content = choice["message"]["content"]
+            result = validate({"text": content} if on_delta or tool_messages is not None else json.loads(content))
+        else:
             raise ValueError("回复未完成")
-        content = choice["message"]["content"]
-        result = validate({"text": content} if on_delta else json.loads(content))
         status, reason = "ok", "ready"
     except HTTPError as error:
         error.close()

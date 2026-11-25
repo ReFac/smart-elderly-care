@@ -1,6 +1,9 @@
 # The SDK imports its skill loader during startup. Its catalog lives in the
 # worker's empty temporary home. CareOps supplies only reviewed skill text.
-models: []
+models:
+  - name: scoped-read
+    model: scoped-read
+    use: delegation:EvidenceTransport
 tools: []
 tool_groups: []
 sandbox:

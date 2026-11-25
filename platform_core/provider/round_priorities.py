@@ -5,7 +5,7 @@ import json
 from uuid import uuid4
 
 from .. import access, history, provider, rounds
-from . import completions, deepseek, task_usage, token_receipt
+from . import completions, deepseek, specialist_dispatch, task_usage, token_receipt
 
 CHECKS = {
     "past_due": "先核对已过计划时刻的工单，确认有无漏记或仍需跟进。",
@@ -63,9 +63,9 @@ def view(db, actor, report, now):
             "reason": row["reason"],
             "generatedAt": row["generated_at"],
             "model": row["model"],
-            "items": [CHECKS[x] for x in dict.fromkeys([*ids, *codes]) if x in codes]
-            if ids
-            else [],
+            "items": [CHECKS[x] for x in ids if x in codes],
+            # Historical model outputs could rank only part of the handover list.
+            "unrankedItems": [CHECKS[x] for x in codes if x not in ids] if ids else [],
         }
     return {
         "available": len(codes) >= 2
@@ -82,6 +82,7 @@ def read(store, token, rid, report_id):
         return view(db, actor, report, store.now())
 
 
+@specialist_dispatch.hosted
 def generate(store, token, rid, data, *, transport=None):
     from ..store import Conflict
 
@@ -110,7 +111,7 @@ def generate(store, token, rid, data, *, transport=None):
             "messages": [
                 {
                     "role": "system",
-                    "content": 'Order provided care handover checks by review priority. Return JSON {"ids":[...]} using only the supplied codes.',
+                    "content": 'Order all provided care handover checks by review priority. Include every supplied code exactly once. Return JSON {"ids":[...]} using only the supplied codes.',
                 },
                 {"role": "user", "content": json.dumps(codes, separators=(",", ":"))},
             ],
@@ -125,6 +126,7 @@ def generate(store, token, rid, data, *, transport=None):
         if remaining is not None and hold > remaining:
             raise ValueError("本期套餐可用额度不足")
         key = provider.read_model_key()
+        specialist_dispatch.before_reservation("care.roundPriorities", actor["id"], report["id"])
         request = "rounds/" + uuid4().hex
         db.execute(
             """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance,feature)
@@ -156,7 +158,7 @@ def generate(store, token, rid, data, *, transport=None):
             comment,
         )
     result = deepseek.complete(
-        transport or completions.send, key, body, codes, allowance=hold
+        transport or completions.send, key, body, codes, allowance=hold, required=codes
     )
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")

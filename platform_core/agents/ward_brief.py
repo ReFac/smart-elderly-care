@@ -3,7 +3,7 @@
 import json
 
 from .. import access_policy, campus_access
-from . import chat_scope
+from . import chat_scope, resident_status
 
 
 def health(db, actor, state, current, chosen, today):
@@ -71,12 +71,7 @@ def topic(text):
     if chat_scope.overview_question(text):
         return "operations"
     query = re.sub(r"[\s，、。！？,?.!]", "", text)
-    if re.fullmatch(
-        r"(?:请问|想问一下)?(?:今天|今日|目前|最近)?(?:的)?(?:院里|院内|养老院|全院|在住)?"
-        r"(?:的)?(?:老人|长辈|长者|导人气)(?:们)?(?:的)?(?:健康|身体|身体健康|身体情况|健康状况|身体状况|情况|状态)?"
-        r"(?:如何|咋样|怎么样|正常|健康|有没有异常|有异常|还好吗|好吗)(?:吗|么|呀|啊|呢)?",
-        query,
-    ):
+    if resident_status.question(text) is not None:
         return "health"
     if re.search(
         r"流水|营收|实收|新增款|欠款|待缴|今日的财|今天的财|财务", query

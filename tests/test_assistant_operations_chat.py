@@ -158,6 +158,63 @@ class OperationsChatTests(unittest.TestCase):
         prompt = self.cloud.call_args.args[1]["messages"][-1]["content"]
         self.assertNotRegex(prompt, "实收|新收到|净入账|待缴余额")
 
+    def test_resident_status_questions_resolve_the_requested_location_before_cloud(self):
+        with closing(self.store.connect()) as db, db:
+            state = json.loads(db.execute("SELECT data FROM workspace WHERE id=1").fetchone()[0])
+            state["vitals"] = [
+                {"residentId": person, "date": "2026-11-24", "abnormal": True}
+                for person in ("r001", "r003", "r003")
+            ]
+            db.execute("UPDATE workspace SET data=? WHERE id=1", (json.dumps(state),))
+        overview = self.ask("老人们状况如何？", "health-all", web=True)
+        self.assertIn("3 条异常体征", overview["content"])
+        self.assertFalse(overview["webSearched"])
+        ambiguous = self.ask("101床的老人们状态如何？", "check-number", web=True)
+        self.assertIn("整间房", ambiguous["content"])
+        self.assertFalse(ambiguous["pageLinks"])
+        self.assertNotIn("异常体征", ambiguous["content"])
+        room = self.ask("101房", "health-room", web=True)
+        self.assertIn("101 房", room["content"])
+        self.assertIn("在住 2 人", room["content"])
+        self.assertIn("1 条异常体征", room["content"])
+        bed = self.ask("那101-02床呢？", "health-bed", web=True)
+        self.assertIn("101-02", bed["content"])
+        self.assertIn("在住 1 人，今天还没有体征登记", bed["content"])
+        prompt = self.cloud.call_args.args[1]["messages"][-1]["content"]
+        self.assertNotRegex(prompt, "3 条异常体征|在住 2 人|收款|r001")
+        missing = self.ask("999床的长辈状态如何？", "missing-bed", web=True)
+        self.assertIn("没有找到", missing["content"])
+        self.assertFalse(missing["pageLinks"])
+        self.assertEqual(self.receipt("health-room"), "assistant.health")
+
+    def test_resident_status_respects_permissions_and_room_assignment(self):
+        account = self.account("health-reader", kind="staff", role="自定义",
+                               permissions=["assistants", "clinical"])
+        with closing(self.store.connect()) as db:
+            room = db.execute("SELECT roomId FROM facility_beds WHERE bedId='b001'").fetchone()[0]
+        self.store.facility_policy = lambda db, actor: {"roomIds": [room]}
+        scoped = self.ask("老人们状况如何？", "assigned", token=account, web=True)
+        self.assertIn("在住 2 人", scoped["content"])
+        hidden = self.ask("102-01床的老人状态如何？", "other-room", token=account, web=True)
+        self.assertIn("没有找到", hidden["content"])
+        self.assertFalse(hidden["pageLinks"])
+        self.store.facility_policy = None
+        family = self.account("health-relative", kind="family", residentId="r001")
+        count = self.cloud.call_count
+        self.assertIn("权限", self.ask("老人们状况如何？", "denied-health", token=family)["content"])
+        self.assertEqual(self.cloud.call_count, count)
+
+    def test_unfamiliar_phrasing_gets_a_private_clarifying_turn(self):
+        self.cloud.return_value["choices"][0]["message"]["content"] = "你想问的是哪间房？"
+        for index, question in enumerate(("帮我瞅瞅大伙儿呗", "怎么设置 Wi-Fi 路由器？")):
+            msg = self.ask(question, f"ambiguous-{index}", web=True)
+            self.assertEqual(msg["content"], "你想问的是哪间房？")
+            self.assertFalse(msg["webSearched"])
+            body = self.cloud.call_args.args[1]
+            self.assertNotIn("tools", body)
+            self.assertEqual([m["role"] for m in body["messages"]], ["system", "user"])
+            self.assertEqual(body["messages"][-1]["content"], question)
+
     def test_specific_subjects_and_off_topic_requests_keep_their_routes(self):
         for phrase, key in (("今天财务怎么样", "finance"), ("老人健康吗？", "health")):
             self.ask(phrase, key, web=True)

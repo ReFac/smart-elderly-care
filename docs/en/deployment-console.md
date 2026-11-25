@@ -2,7 +2,7 @@
 
 [Documentation](README.md)
 
-Sign in as Owner and open **部署控制台** in the main sidebar. The console reports the running release, facility profile, chat provider, model, credential availability, paid plan, gateway heartbeat times and change history. Actual access to a model also depends on the upstream account, plan and connectivity.
+Sign in as Owner and open **部署控制台** in the sidebar. Check the running release, facility profile, chat provider and model here. The console also shows whether a credential is available, which paid plan is in use, when gateways last checked in and which settings changed. Under **Health assistant runtimes**, check the installed DeerFlow SDK, open your document tasks or the rounds schedule, and use a task ID to find its calls in AI usage. The installation check reads local dependencies. A model call also needs a working connection and an upstream account and plan that permit access.
 
 ## Installation modes
 
@@ -12,26 +12,26 @@ Sign in as Owner and open **部署控制台** in the main sidebar. The console r
 | `NH_DEPLOYMENT_MODE=operator` | A trusted Owner of a dedicated process can stage model credentials, endpoints, listener settings and activation policy. |
 | `NH_INSTITUTION_PROFILE=licensed-medical` | Displays the licensed medical profile. The default profile is residential care. |
 
-Use one service process, encrypted business database and operations store per facility. After provisioning the Owner password and database keys, a managed installation behind an HTTPS reverse proxy can start with:
+Give each facility its own service process, encrypted business database and operations store. For a managed installation behind an HTTPS reverse proxy, provision the Owner password and database keys before running this command.
 
 ```bash
 NH_DEPLOYMENT_MODE=managed python3 manage_updates.py run --initial-data empty --db .local/institution.sqlite3 --public-origin https://care.example.org
 ```
 
-For an operator installation, choose **编辑部署配置**. DeepSeek, OpenAI, Anthropic and Google use known official endpoints. For a private OpenAI-compatible service, provision its full chat completions URL in the host's comma-separated `NH_DEPLOY_CHAT_ENDPOINTS`. HTTPS and loopback HTTP are supported. A custom destination needs a dedicated credential. Leaving the password field blank retains the credential for the same provider and endpoint. Official endpoints may also use host credentials. Chat, OCR and speech have distinct adapters. See [provider configuration](../provider.md) and [media setup](../media.md).
+In an operator installation, open **编辑部署配置** to change providers. DeepSeek, OpenAI, Anthropic and Google use known official endpoints and may use host credentials. To use a private OpenAI-compatible service, add its full chat completions URL to the host’s comma-separated `NH_DEPLOY_CHAT_ENDPOINTS`. Use HTTPS or loopback HTTP and a dedicated credential for that custom destination. Leave the password field blank to keep the credential for the same provider and endpoint. Chat, OCR and speech each use a separate adapter. [Provider configuration](../provider.md) · [Media setup](../media.md)
 
 ## Apply a change
 
-1. Set the target model and port. The default listener uses loopback. For a container or protected reverse-proxy network, explicitly set both `NH_DEPLOY_ALLOW_NETWORK_BIND=1` and a valid `--public-origin` before binding all interfaces. Restrict backend connectivity to the trusted proxy.
-2. Save a draft for separate approval, or select application at next restart. A running service continues serving its current connection. The Owner can withdraw a pending change.
-3. During a maintenance window restart the whole launcher or managed system service, then update reverse-proxy upstream settings if the port changed. An explicit CLI `--port` pins the port and takes precedence. Omit it to use the saved setting.
-4. Verify the running values, release and audit entry after restarting. If a port is occupied or an approved endpoint has been removed, use the previous known-good CLI port to correct an incompatible pending port, or temporarily boot in managed mode with host credentials and a fixed port to recover the operations store offline.
+1. Choose the model and port. By default the service listens on loopback. To bind all interfaces in a container or protected reverse-proxy network, first set `NH_DEPLOY_ALLOW_NETWORK_BIND=1` and a valid `--public-origin`. Allow only the trusted proxy to reach the backend.
+2. Save the change for separate approval or choose to apply it on the next restart. Until then, the service uses its current connection. The Owner can withdraw a pending change.
+3. During the maintenance window, restart the whole launcher or managed system service. If the port changed, update the upstream in the reverse proxy. An explicit CLI `--port` takes precedence over the saved value. Omit it to use the saved port.
+4. Check the release, running settings and audit entry. If the new port is occupied, start with the previous working CLI port and correct the pending port. If an approved endpoint is gone or the operations store needs offline recovery, you can temporarily boot in managed mode with host credentials and a fixed port.
 
-Deployment settings are stored in a separate SQLCipher file next to the business database, named `.<database filename>.deployment.sqlite3`. Its separate key defaults to the same directory and can be set with `NH_PLATFORM_KEY_FILE`. Business snapshots exclude deployment settings and credentials. Back up the operations file and encryption key separately during controlled downtime and verify recovery. The web API never returns provider or gateway credentials.
+The SQLCipher file `.<database filename>.deployment.sqlite3` sits next to the business database and stores deployment settings. Its key is separate and defaults to the same directory. Set `NH_PLATFORM_KEY_FILE` to choose another key location. Business snapshots exclude deployment settings and credentials. During controlled downtime, back up the operations file and its key separately and verify that you can recover them. The web API never returns provider or gateway credentials.
 
 ## Gateway heartbeat
 
-Register a gateway ID, name, edge transport and a device-specific random bearer token of 32–128 characters using letters, digits, underscores or hyphens. Disable the gateway or rotate its token to revoke the previous credential. A gateway should send a heartbeat every minute using HTTPS or same-host loopback:
+Register the gateway ID, name and edge transport. Give each device its own random bearer token of 32 to 128 letters, digits, underscores or hyphens. Rotating the token or disabling the gateway revokes the old credential. Have the gateway send a heartbeat every minute over HTTPS or same-host loopback.
 
 ```http
 POST /api/deployment/gateways/radar-1/heartbeat
@@ -41,4 +41,4 @@ Content-Type: application/json
 {}
 ```
 
-A successful reply includes `accepted` and the server receipt timestamp. The console distinguishes waiting for the first heartbeat, a verified heartbeat within three minutes, expired connectivity and disabled gateways. Refresh the page status for a fresh sample. MQTT or Modbus gateways must bridge this HTTP heartbeat at the edge. Vendor event delivery, bed assignment and care alerts require separate integration testing.
+A successful reply contains `accepted` and the time the server received the heartbeat. Refresh the console to see whether the gateway is waiting for its first heartbeat, has checked in within the past three minutes, has timed out or is disabled. Bridge MQTT or Modbus to this HTTP heartbeat at the edge. Test vendor event delivery, bed assignment and care alerts separately.

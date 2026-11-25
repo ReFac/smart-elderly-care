@@ -376,6 +376,10 @@ function priorityPanel(ctx, url, report, revision, reload) {
         ),
         node('small', 'fx-muted', saved.model + ' · ' + localStamp(saved.generatedAt)),
       );
+      if (saved.unrankedItems?.length) {
+        area.append(node('strong', '', '原简报中未参与排序的事项'),
+          node('ul', '', saved.unrankedItems.map((item) => node('li', '', item))));
+      }
     } else if (saved.status) {
       area.replaceChildren(
         node(

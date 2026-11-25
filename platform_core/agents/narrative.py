@@ -1,12 +1,12 @@
-"""Collect authorized evidence locally and interpret the scoped metrics in DeepSeek."""
+"""Prepare approved evidence for DeerFlow supervisor and specialist runs."""
 
 from contextlib import closing
 import json
 
-from . import brief_workflow, preflight, react, runtime
+from . import brief_workflow, preflight, runtime
 from .. import access, campus_access
 from ..operations import assistants
-from ..provider import completions, generation, model_name
+from ..provider import completions, generation, model_name, plan as route_domains
 
 
 class Events:
@@ -86,15 +86,25 @@ def prepare(store, token, payload, revision, *, suggestion=False):
     if not suggestion:
         day = store.now().date().isoformat()
         provider_plan = None
-        if check["args"].get("planning") == "platform" and check["args"]["scope"] == "auto":
-            choices = tuple(
-                react.Action(spec.key, spec.title, lambda: None) for spec in check["specs"]
+        if check["args"]["scope"] == "auto":
+            provider_plan = route_domains(
+                store.connect,
+                lambda db: store.actor(db, token),
+                check["args"]["goal"],
+                "brief-route/" + generation.fingerprint(check["request"]),
+                now=store.now(), allowed_specs=check["specs"],
+                scope_key=check["fingerprintScope"],
+                required_care=bool(check["args"]["residentId"]),
             )
-            goal = check["args"]["goal"]
-            if check["args"]["residentId"]:
-                goal += "\n这是个体照护核对，请至少选择 care。"
-            selected = react.choose(store, actor["id"], ["specialist-plan", req], goal, choices, feature="agent.routing")
-            provider_plan = {"mode": "deepseek", "specialistIds": selected}
+            if provider_plan["mode"] != "deepseek":
+                reason = provider_plan["reason"]
+                explanations = {
+                    "no_signal": "请说明要核对照护、物资、收费还是全院概况，或直接选择专员",
+                    "inactive": "机构的云端 AI 套餐尚未开通或已到期",
+                    "exhausted": "机构的云端 AI 套餐额度不足",
+                    "unconfigured": "机构尚未配置可用的云端模型",
+                }
+                raise ValueError(explanations.get(reason, "云端尚未返回有效的专员计划，请核对服务回执"))
             # Recheck current authorization and the captured revision before observing any records.
             with closing(store.connect()) as db, db:
                 db.execute("BEGIN")

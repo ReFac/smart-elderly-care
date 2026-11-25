@@ -312,8 +312,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/assistant/learning":
             from platform_core.agents import growth
 
-            params = self.query_fields({"campusId", "topic"})
-            return self.send_json(200, growth.read(self.store, self.token(), params.get("campusId", ""), params.get("topic", "")))
+            params = self.query_fields({"campusId", "topic", "proposalId"})
+            return self.send_json(200, growth.read(self.store, self.token(), params.get("campusId", ""),
+                                                   params.get("topic", ""), params.get("proposalId", "")))
         if path == "/api/assistant/extensions":
             from platform_core.agents import community_skills, mcp_plugins
 
@@ -777,6 +778,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.store, self.read_json(2048), self.client_address[0], self.token()
             )
             return self.send_json(201, {"user": user}, self.session_cookie(token))
+        if path in ("/api/assistant/learning/gateway-ticket", "/api/assistant/learning/gateway-exchange"):
+            from platform_core.agents import experience_gateway
+
+            body = self.read_json(SMALL_BODY)
+            if path.endswith("gateway-ticket"):
+                return self.send_json(200, experience_gateway.issue(self.store, self.token(), body))
+            peer = self.client_address[0]
+            host = urlsplit("//" + self.headers.get("Host", "")).hostname
+            if peer not in ("127.0.0.1", "::1") or host not in ("127.0.0.1", "::1"):
+                raise PermissionError("仅本机 Gateway 可以交换同步凭证")
+            return self.send_json(200, experience_gateway.exchange(self.store, body))
         learning = re.fullmatch(r"/api/assistant/learning/(preview|propose|review)", path)
         if learning:
             from platform_core.agents import growth

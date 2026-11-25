@@ -16,6 +16,9 @@ PASSWORD = "synthetic-brief-test"
 
 class BriefWorkflow(TestCase):
     def setUp(self):
+        from provider_fixture import simulated_route
+
+        self.enterContext(patch("platform_core.agents.narrative.route_domains", side_effect=simulated_route))
         folder = self.enterContext(TemporaryDirectory())
         self.path = Path(folder) / "facility.sqlite3"
         self.store = Store(self.path, initial_owner_password=PASSWORD)
