@@ -2,11 +2,14 @@ import { previewOriginal } from './assistant-original.js';
 import { staffLabel } from './people-labels.js';
 import { node } from './shared.js';
 import { openVisitEditor } from './medical-visit-intake.js';
+import { materialDestinations, materialKinds } from './assistant-materials.js';
+import { privateFilename } from './credential-form.js';
 
 const resume = '员工简历';
 const contract = '劳动合同';
-const clinical = row => ![resume, contract, '其他'].includes(row.category);
-const types = [resume, contract, '就诊记录', 'CT影像', '检查报告', '处方', '医嘱', '其他'];
+const medicalTypes = ['就诊记录', 'CT影像', '检查报告', '处方', '医嘱'];
+const clinical = row => medicalTypes.includes(row.category);
+const types = [resume, contract, ...Object.keys(materialKinds), ...medicalTypes, '其他'];
 const formats = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
 const mib = 1024 * 1024;
 
@@ -71,7 +74,7 @@ export function documentIntake(getContext, changed, hide) {
     try {
       for (const [index, row] of rows.entries()) {
         if (row.result) continue;
-        progress = '正在阅读第 ' + (index + 1) + ' / ' + rows.length + ' 份 · ' + row.file.name;
+        progress = '正在阅读第 ' + (index + 1) + ' / ' + rows.length + ' 份 · ' + privateFilename(row.file.name);
         render();
         try {
           const response = await fetch('/api/assistant/documents/preview', {
@@ -117,7 +120,7 @@ export function documentIntake(getContext, changed, hide) {
     if (!ctx.state.allowedActions?.includes('access.staffContract'))
       return node('small', '', '需要员工合同管理权限');
     const select = node('select');
-    select.setAttribute('aria-label', row.file.name + '所属员工');
+    select.setAttribute('aria-label', privateFilename(row.file.name) + '所属员工');
     select.add(new Option('选择合同所属员工', ''));
     const staff = (ctx.state.accounts || []).filter(a => a.kind === 'staff');
     for (const account of staff) select.add(new Option(staffLabel(ctx, account) + ' · ' + account.username, account.id));
@@ -144,7 +147,7 @@ export function documentIntake(getContext, changed, hide) {
     openVisitEditor(getContext(), null, mode, '', chosen.map(({ file, mime, category }) => ({file, mime, category})));
   }
   function fileRow(row) {
-    const title = node('strong', '', row.file.name);
+    const title = node('strong', '', privateFilename(row.file.name));
     const parts = [title];
     if (row.result?.pageCount) parts.push(node('small', '', row.result.pageCount + ' 页'));
     if (stage === 'choose' || stage === 'review') {
@@ -156,10 +159,10 @@ export function documentIntake(getContext, changed, hide) {
     }
     if (stage === 'review') {
       const select = node('select');
-      select.setAttribute('aria-label', row.file.name + '的文件类型');
+      select.setAttribute('aria-label', privateFilename(row.file.name) + '的文件类型');
       for (const type of types) select.add(new Option(type, type));
       select.value = row.category;
-      select.onchange = () => {row.category = select.value;};
+      select.onchange = () => {row.category = select.value; delete row.personId;};
       parts.push(select);
     }
     if (stage === 'confirmed') {
@@ -169,6 +172,11 @@ export function documentIntake(getContext, changed, hide) {
           node('small', '', '需要新增员工权限'));
       } else if (row.category === contract) {
         parts.push(contractFields(row));
+      } else if (materialKinds[row.category]) {
+        const category = row.category;
+        parts.push(materialDestinations(row, getContext,
+          () => rows.includes(row) && row.category === category && stage === 'confirmed' &&
+            !card.closest('[hidden], [inert]'), hide));
       } else if (clinical(row) && canOpenVisit(getContext())) {
         const check = node('input');
         check.type = 'checkbox';

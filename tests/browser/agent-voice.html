@@ -156,7 +156,10 @@
     await until(()=>log.querySelectorAll('.from-assistant').length===7,'短回答完成');
     check(log.scrollHeight-log.clientHeight-log.scrollTop<4, '短回复跟随底部');
     type('创建老人入住');enter();
-    await until(()=>goTo[0]?.[0]==='residents','明确指令快速定位');
+    await until(()=>log.querySelector('.from-assistant:last-child .assistant-page-link'), '给出可点击的入住入口');
+    check(!goTo.length && !drawer.hidden, '用户确认入口之前仍在对话');
+    log.querySelector('.from-assistant:last-child .assistant-page-link').click();
+    await until(()=>goTo[0]?.[0]==='residents' && drawer.classList.contains('assistant-compact'),'点击后定位并随页显示小窗');
     launcher.click();await until(()=>!find('.assistant-input').disabled,'继续对话');
     generation = 'other-window';
     messages=[{role:'user',content:'另一窗口的问题'},{role:'assistant',content:'另一窗口的回复'}];

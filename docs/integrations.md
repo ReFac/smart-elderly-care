@@ -69,3 +69,16 @@
 2. **媒体单独验收。** 小米说明其官方 Home Assistant 集成无法与摄像机协商 P2P 加密视频密钥，因而无法读取这类实时流。若具体设备通过厂商正式接口提供授权快照或跌倒示意图，可通过 `iot.mijia-evidence` 传递具有权限控制的证据引用。需要厂商说明样例报文、授权范围、有效期和取证限制。[官方摄像机视频流说明](https://github.com/XiaoMi/ha_xiaomi_home/wiki/Features-that-will-not-be-implemented#camera-video-stream)
 3. **接入专业设备。** `iot.sensor` 接收超声波、雷达、人体存在或床位传感器观测。`iot.youle` 接收优乐侧的疑似跌倒、持续卧床和证据引用，待厂商确认“优乐”的具体产品、签名方式、时间戳、坐标系、阈值单位与稳定事件编号。首稿的本地模拟流程可验证重复消息、双人房、误报和人工复核。
 4. **接入语音和 OCR。** `voice.transcribe` 预留音频分片、部分和最终转写。`voice.proposal` 预留意图草案。`document.ocr` 和 `deepseek-summary` 预留留档图像的识别和一次概括。工牌的流式、分片适配端口预留。桌面实际使用 DeepSeek 官方整段 ASR 与医疗文书 OCR，开通方式和请求协议见[识别工具](media.md)。验收应覆盖断网重传、授权撤回、人工确认、处理过的申请在其他账号消失、跨房间查询与原图留存。
+
+### 入住收款与通用收银终端
+
+正式入住和试住转正式均可使用机构预缴金、实收线下款或商户定额收款。员工可在入住表单核算费用，输入微信、支付宝或终端收款金额。系统按已验证的渠道回执登记长辈预缴，员工核对后确认入住。首期含押金时需勾选从预缴金转存押金。已付款后离开入住表单，款项仍可在财务台账查询。扫码收款沿用机构现有微信 Native / 支付宝当面付商户配置。
+
+通用终端适配器通过 HTTPS 请求机构服务。部署端设置 `NH_TERMINAL_ID` 和仅服务账号可读的 `NH_TERMINAL_KEY_FILE`。密钥文件至少含 32 个随机字节，两端按原始字节读取。接口仅返回指定订单的金额、渠道与状态。
+
+| POST 接口 | JSON 内容 | 结果 |
+| --- | --- | --- |
+| `/api/payments/terminal/v1/lookup` | `orderId` | 商户指定的人民币分值、支付渠道及订单状态 |
+| `/api/payments/terminal/v1/receipt` | `orderId`、`transactionId`、带时区的 `paidAt`、整数 `amountCents`、`currency=CNY`、`channel`、`status=SUCCESS` | 已核实收款凭证编号 |
+
+每次请求附带 `X-Terminal-Id`、`X-Terminal-Time`（Unix 秒）及 `X-Terminal-Signature`（小写十六进制 HMAC-SHA256）。签名内容依次为 `v1`、终端编号、接口末段（`lookup` 或 `receipt`）、时间戳，各以 LF 结束，最后追加原始 JSON 请求体。时间偏差限五分钟。终端按订单号读取应收，仅对真实支付成功事件发送回执。网络异常时使用相同订单、原交易号及原支付时间重发。两次回执只有一条入账记录。已付款订单可再次查询。厂商确定后，由该终端适配器把设备或收单服务商的回执转换为此协议。

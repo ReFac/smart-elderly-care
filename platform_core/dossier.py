@@ -590,15 +590,18 @@ def project_roster(db, data, user):
     if not residents:
         return
     visible = json.dumps(list(residents))
-    if access.has(user, "finance"):
-        for rid, kind, did, at in db.execute(
-            """SELECT resident_id,kind,id,at FROM subsidy_materials WHERE rowid IN (
+    if access.has(user, "finance") or access.has(user, "intake"):
+        for rid, kind, did, at, details in db.execute(
+            """SELECT resident_id,kind,id,at,reviewed_fields FROM subsidy_materials WHERE rowid IN (
                  SELECT MAX(rowid) FROM subsidy_materials
                  WHERE resident_id IN (SELECT value FROM json_each(?))
                  AND kind IN ('idFront','idBack','household') GROUP BY resident_id,kind)""",
             (visible,),
         ):
-            residents[rid].setdefault("credentialMaterials", {})[kind] = {"id": did, "at": at}
+            fields = json.loads(details)
+            if "idNumber" in fields:
+                fields["idNumber"] = masked(fields["idNumber"])
+            residents[rid].setdefault("credentialMaterials", {})[kind] = {"id": did, "at": at, "fields": fields}
     if access.has(user, "medical") or access.has(user, "clinical"):
         # The roster needs only the latest verified labels, never source notes or older diagnoses.
         for rid, payload in db.execute(

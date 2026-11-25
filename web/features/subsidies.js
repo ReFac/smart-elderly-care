@@ -1,7 +1,7 @@
 import { badge, btn, choose, field, link, node } from './shared.js';
 import { residentAnchor } from './people-labels.js';
+import { materialForm, materialLabels as labels } from './credential-form.js';
 
-const labels = { idFront: '身份证正面', idBack: '身份证反面', household: '户口本', invoice: '发票' };
 const status = (row) => (row.claim ? '已生成清单' : row.missing.length ? '材料不全' : '材料齐全');
 
 function selectControl(label, options) {
@@ -58,56 +58,9 @@ function printRows(ctx, month, list) {
 }
 
 function upload(ctx, row, data, invoice) {
-  const kinds = invoice ? ['invoice'] : ['idFront', 'idBack', 'household'];
-  const kind = selectControl('材料类型', kinds);
-  for (const o of kind.options) o.textContent = labels[o.value];
-  const months = selectControl('发票所属月份', row.invoiceMonths);
-  const file = node('input');
-  file.type = 'file';
-  file.accept = 'image/jpeg,image/png,application/pdf';
-  file.required = true;
-  const title = invoice ? '上传发票' : '维护证件';
-  ctx.dialog({
-    title: title + ' · ' + row.name,
-    fields: [],
-    submitLabel: '核对并留存',
-    content: node('div', 'subsidy-fields', [
-      label('材料类型', kind),
-      invoice && label('发票月份', months),
-      label('原件（PDF、PNG、JPEG，最大 8 MiB）', file),
-    ]),
-    onSubmit: async () => {
-      const chosen = file.files[0];
-      if (!chosen || !chosen.size || chosen.size > 8 * 1024 * 1024)
-        throw Error('请选择 8 MiB 以内的非空原件');
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = () => reject(Error('原件无法读取，请重新选择'));
-        reader.readAsDataURL(chosen);
-      });
-      return ctx.command(
-        'ops.subsidyMaterial',
-        {
-          month: data.month,
-          residentId: row.residentId,
-          kind: kind.value,
-          invoiceMonth: invoice ? months.value : '',
-          fileName: chosen.name,
-          imageBase64: base64,
-        },
-        {
-          title,
-          target: row.name,
-          expectedRevision: data.revision,
-          fields: [
-            ['材料类型', labels[kind.value]],
-            ['文件名', chosen.name],
-            ['所属月份', invoice ? months.value : '长期证件'],
-          ],
-        },
-      );
-    },
+  return materialForm(ctx, {id: row.residentId, name: row.name}, {
+    kind: invoice ? 'invoice' : 'idFront',
+    filing: {month: data.month, revision: data.revision, invoiceMonths: row.invoiceMonths},
   });
 }
 

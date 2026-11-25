@@ -6,6 +6,7 @@ export function el(tag, className = '', text = '') {
 }
 
 const paths = {
+  pin: 'm14 3 7 7-3 1-3 4-1 3-8-8 3-1 4-3z M10 14l-7 7',
   person: 'M8 7a4 4 0 1 0 8 0 4 4 0 1 0-8 0 M4 21v-2c0-4 3-6 8-6s8 2 8 6v2z',
   left: 'm15 5-7 7 7 7',
   refresh: 'M20 11a8 8 0 1 0-2 7 M20 4v7h-7',

@@ -171,6 +171,21 @@ class MerchantCheckout(unittest.TestCase):
         )
         return self.data()["paymentOrders"][0]
 
+    @unittest.skipUnless(checkout.find_spec("qrcode"), "optional qrcode payment package")
+    def test_admission_can_issue_fixed_qr_before_a_bill_or_bed_exists(self):
+        self.command("care.register", {"name":"扫码入住演练"})
+        rid = self.data()["residents"][-1]["id"]
+        for index, channel in enumerate(checkout.CONFIG):
+            self.command("ops.admissionOrder", dict(residentId=rid, channel=channel, amount="12.20",
+                                                    collection="qr", requestId=str(index)*32))
+            order = self.data()["paymentOrders"][0]
+            code = self.store.payment_checkout(self.user, order["id"])
+            self.assertIn("LOCAL-TEST", code["checkoutUrl"])
+            self.assertEqual((code["amount"], code["channel"]), (12.20, channel))
+            self.assertTrue(code["matrix"])
+            self.assertEqual(order["billId"], "")
+        self.assertFalse([b for b in self.data()["bills"] if b["residentId"] == rid])
+
     def test_signed_requests_and_tampered_responses(self):
         for channel in checkout.CONFIG:
             order = self.order(channel)

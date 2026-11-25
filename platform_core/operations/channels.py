@@ -76,17 +76,17 @@ def verify_wechat_message(headers, raw, now):
     )
 
 
-def wechat(headers, raw, now):
+def wechat_event(headers, raw, now, allowed_events):
     from cryptography.exceptions import InvalidTag
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     verify_wechat_message(headers, raw, now)
     event = json.loads(raw)
     if (
-        event["event_type"] != "TRANSACTION.SUCCESS"
+        event["event_type"] not in allowed_events
         or event["resource"]["algorithm"] != "AEAD_AES_256_GCM"
     ):
-        raise ValueError("需要交易成功的加密通知")
+        raise ValueError("渠道通知事件类型或加密算法不匹配")
     resource = event["resource"]
     secret = material("WXPAY_V3_KEY_FILE").rstrip(b"\r\n")
     if len(secret) != 32:
@@ -101,6 +101,11 @@ def wechat(headers, raw, now):
         )
     except InvalidTag:
         raise PermissionError("微信支付通知解密校验失败") from None
+    return event, order
+
+
+def wechat(headers, raw, now):
+    event, order = wechat_event(headers, raw, now, {"TRANSACTION.SUCCESS"})
     if (
         order["appid"] != setting("WXPAY_APP_ID")
         or order["mchid"] != setting("WXPAY_MERCHANT_ID")
@@ -176,6 +181,10 @@ def receive(store, channel, headers, raw_body):
         raise ValueError("此机构需安装渠道验签组件 cryptography") from None
     except (KeyError, UnicodeError, TypeError, AttributeError):
         raise ValueError("渠道通知缺少有效的交易字段") from None
+    record_verified(store, channel, fields, now, "渠道签名通知")
+
+
+def record_verified(store, channel, fields, now, verification):
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
         from .. import history
@@ -186,7 +195,7 @@ def receive(store, channel, headers, raw_body):
         ).fetchone()
         state = json.loads(encoded)
         receipt, added = settle(
-            state, fields, now.date().isoformat(), verification="渠道签名通知"
+            state, fields, now.date().isoformat(), verification=verification
         )
         if added:
             revision += 1
@@ -212,3 +221,4 @@ def receive(store, channel, headers, raw_body):
                 activity.for_person(state, receipt["residentId"]),
                 {},
             )
+        return receipt["id"]

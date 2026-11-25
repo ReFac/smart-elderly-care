@@ -8,6 +8,7 @@ from threading import BoundedSemaphore, Lock
 
 LARGE_BODY = 512 * 1024
 SLOW_WRITES = frozenset({
+    "/api/payments/refunds/channel",
     "/api/assistant/chat", "/api/assistant/chat/stream", "/api/assistant/voice",
     "/api/agent/voice/transcriptions", "/api/staff/resume/preview", "/api/assistant/documents/preview",
     "/api/public/visitor/wechat-contact", "/api/public/visitor/register", "/api/auth/login", "/api/auth/verify", "/api/auth/reset-link/redeem", "/api/auth/reset-link/send",
@@ -51,7 +52,7 @@ def configured_limits():
 def heavy_request(method, path, content_length):
     if method == "GET":
         return path == "/api/backups/download" or path.startswith((
-            "/api/medical-visits/originals/", "/api/finance/subsidies/materials/", "/api/finance/expense-import/files/", "/tour-media/",
+            "/api/medical-visits/originals/", "/api/dossier/credentials/", "/api/finance/subsidies/materials/", "/api/finance/expense-import/files/", "/tour-media/",
         )) or (
             path.startswith("/api/documents/") and ("/pages/" in path or path.endswith("/image"))
         ) or (path.startswith("/api/staff/") and path.endswith("/original"))

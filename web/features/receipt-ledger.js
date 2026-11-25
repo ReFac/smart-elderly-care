@@ -1,7 +1,8 @@
-import { facts, kpis, link, money, named, node, residentName, table, today } from './shared.js';
+import { canAct, choose, facts, kpis, link, money, named, node, residentName, table, today } from './shared.js';
+import { requestRefund, refundLedger } from './receipt-refunds.js';
 import { residentAnchor } from './people-labels.js';
 
-const directMethods = new Set(['线下登记', '线下刷卡登记', '微信支付', '支付宝']);
+const directMethods = new Set(['线下登记', '线下刷卡登记', '微信支付', '支付宝', '银联刷卡']);
 const cents = (amount) => Math.round(Number(amount) * 100);
 const currency = (amount) => amount == null ? '手续费待核对' : money(amount / 100);
 export const isDirectReceipt = (row) => directMethods.has(row.method);
@@ -16,6 +17,7 @@ export function receiptRows(state) {
     if (!voucher) {
       voucher = {
         id, date: row.date, residentId: row.residentId,
+        refundOf: row.refundOf, refundReference: row.refundReference,
         billId: row.originBillId || row.billId || channelRow?.billId || '',
         bills: new Map(),
         method: row.method || channelRow?.channel || '', channel: row.channel || channelRow?.channel || '',
@@ -54,6 +56,7 @@ export function receiptFacts(row, billId) {
     ['凭证编号', row.id], ['到账日期', row.date], ['收款方式', tender(row)],
     ['实收总额', currency(row.gross)], [billId ? '核销本单' : '凭证核销总额', currency(applied)], ['转入预缴', currency(row.advance)],
     ['机构承担手续费', currency(row.fee)], ['净入账', currency(row.net)],
+    ...(row.refundOf ? [['退款对应原凭证',row.refundOf],['退款凭证号',row.refundReference]] : []),
     ...(billIds.length ? [['关联账单', billIds.join('、')]] : row.billId ? [['账单号', row.billId]] : []),
     ...(row.merchantOrder ? [['商户订单号', row.merchantOrder]] : []),
     ...(row.transactionId ? [['渠道交易流水号', row.transactionId]] : []),
@@ -100,12 +103,14 @@ export function receiptLedger(ctx) {
     const visible = rows.filter((r) => first <= r.date && r.date <= last);
     const totals = visible.reduce((s, r) => {
       s.gross += r.gross;
+      if (r.refundOf) s.refunds -= r.gross;
       if (r.fee == null) s.unknown += 1;
       else s.fee += r.fee;
       return s;
-    }, { gross: 0, fee: 0, unknown: 0 });
+    }, { gross: 0, refunds:0, fee: 0, unknown: 0 });
     list.replaceChildren(kpis([
-      ['期间实收（含预缴）', currency(totals.gross)],
+      ['期间实收（含预缴）', currency(totals.gross + totals.refunds)],
+      ...(totals.refunds ? [['已核实退款',currency(totals.refunds)]] : []),
       ['机构承担手续费', totals.unknown ? totals.unknown + ' 笔待核对' : currency(totals.fee)],
       ['期间净入账', currency(totals.unknown ? null : totals.gross - totals.fee)],
     ]), table(ctx, {
@@ -114,16 +119,17 @@ export function receiptLedger(ctx) {
       cols: [
         { label: '到账日期', view: (r) => r.date },
         { label: '长辈', view: (r) => residentAnchor(ctx, r.residentId) },
-        { label: '实收金额', view: (r) => named(currency(r.gross), tender(r)) },
+        { label: '实收金额', view: (r) => named(currency(r.gross), (r.refundOf ? '退款 · ' : '') + tender(r)) },
         { label: '核销账单', view: (r) => currency(r.applied) },
         { label: '转入预缴', view: (r) => currency(r.advance) },
         { label: '机构手续费', view: (r) => currency(r.fee) },
         { label: '净入账', view: (r) => currency(r.net) },
-        { label: '操作', view: (r) => link(ctx, '查看凭证', () => ctx.detail('实收凭证', receiptFacts(r))) },
+        { label: '操作', view: (r) => choose(link(ctx, '查看凭证', () => ctx.detail('实收凭证', receiptFacts(r))),
+          !r.refundOf && r.gross>0 && canAct(ctx,'ops.requestRefund') && link(ctx,'申请退款',()=>requestRefund(ctx,r))) },
       ],
     }));
   }
   for (const input of [picker, start.input, end.input]) input.addEventListener('change', draw);
   draw();
-  return node('div', 'fx-profile', [controls, list]);
+  return node('div', 'fx-profile', [controls, list, refundLedger(ctx)]);
 }

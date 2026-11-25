@@ -231,11 +231,14 @@
     await speak('打开运营总览');
     check(calls[2].signal.aborted, '开启新录音时打断上一轮朗读，避免收进录音');
     const navigated = turns.at(-1);
-    await until(() => location.hash === '#overview' && panel().hidden, '语音指令提前打开页面');
+    await until(() => panel().querySelector('.assistant-current .assistant-page-link'), '流式回复先给出可点击的入口');
+    check(location.hash !== '#overview' && !panel().hidden, '未点击时不跳转');
+    panel().querySelector('.assistant-current .assistant-page-link').click();
+    await until(() => location.hash === '#overview' && panel().classList.contains('assistant-compact'), '点击入口后小窗随行');
     beginSpeech(navigated);
     await until(() => calls.length === 4 && !navigated.done, '切到业务页后仍并行朗读');
     calls[3].deliver();
-    await until(() => !popup().hidden && popup().classList.contains('assistant-reader-detached'), '跳转后继续用声纹小窗');
+    await until(() => !popup().hidden && popup().getBoundingClientRect().width > 0, '跳转后继续用声纹小窗');
     popup().querySelector('.assistant-reader-close').click();
     finish(navigated);
     await until(() => !input().readOnly, '跳转后的完整答复仍写回');

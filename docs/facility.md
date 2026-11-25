@@ -23,7 +23,9 @@
 
 「全部床位」可按房间号、楼层与房号、照护区域或平面图位置排序，支持楼栋和父子区域筛选。「区域设置」内每栋楼各自维护区域树，可覆盖整层或单间，房间的显式划分优先。给护工分配多个区域用于照护职责匹配，查阅权限仍由账号授权决定。
 
-新版演示数据可用 `python3 -m tools.seed_modern_demo --db .local/new-demo.sqlite3` 在新路径创建，包含两栋楼、28 张床、八个照护区域及三餐和早晚巡查的初始派发。
+启动时为新库选择 `--initial-data demo`，或在新路径运行 `python3 -m tools.seed_modern_demo --db .local/new-demo.sqlite3`，可建立含两栋楼、28 张床及三餐和早晚巡查的虚构机构。登录后点击「首页 → 演示导览」，按岗位进入业务流程。有病历权限的人员可以从导览直接打开具体就诊记录、核对 PDF 原件和复诊补充文书。
+
+已有演示库需由 Owner 运行 `python3 -m tools.seed_modern_demo --db 既有演示库路径 --enrich-existing-demo`，核验原演示样本后补齐资料。重复执行可续办中断的步骤。为真实机构新建资料库时选择 `--initial-data empty`。
 
 | 接口 | 输入和最小返回 |
 | --- | --- |

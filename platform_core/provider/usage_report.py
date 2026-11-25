@@ -16,6 +16,7 @@ FEATURES = {
     "assistant.scheduledMeal": "健康助理 · 伙食工单确认入口",
     "assistant.medication": "健康助理 · 服药确认入口",
     "assistant.finance": "健康助理 · 经营快报",
+    "assistant.operations": "健康助理 · 今日院务简报",
     "assistant.health": "健康助理 · 健康快报",
     "assistant.webAnswer": "健康助理 · 联网回答",
     "assistant.webTopic": "健康助理 · 联网选词",

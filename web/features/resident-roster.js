@@ -1,6 +1,7 @@
 import { bedCard, hasBedCard, printBedCards } from './bedcard.js';
 import { isTrial, labelBedStay, statusLabel } from './admission.js';
 import { residentLabel } from './people-labels.js';
+import { materialForm } from './credential-form.js';
 import { badge, btn, canAct, choose, hasGrant, named, node, today } from './shared.js';
 
 const credentialKinds = {idFront:'身份证正面', idBack:'身份证反面', household:'户口本'};
@@ -140,18 +141,22 @@ function healthSummary(row) {
     node('span','', '慢性病 · ' + chronic)]);
 }
 
-function credentialList(ctx, person) {
+export function credentialList(ctx, person) {
   const materials = person.credentialMaterials || {};
   const rows = Object.entries(credentialKinds).map(([kind, label]) => {
     const doc = materials[kind];
     if (!doc) return node('li','',[label,node('span','fx-muted','待归档')]);
     const open = node('a','resident-profile-link','查看留存原件');
-    open.href = '/api/finance/subsidies/materials/' + encodeURIComponent(doc.id);
+    open.href = (hasGrant(ctx, 'intake') ? '/api/dossier/credentials/' : '/api/finance/subsidies/materials/') + encodeURIComponent(doc.id);
     open.target = '_blank';
     open.rel = 'noopener noreferrer';
-    return node('li','',[label,named(open,doc.at?.slice(0,10))]);
+    const info = doc.fields || {};
+    const values = [info.name, info.birthDate, info.idNumber, info.authority, info.validity].filter(Boolean);
+    return node('li','',[label,named(open,[doc.at?.slice(0,10), ...values].filter(Boolean).join(' · '))]);
   });
   const body = node('div','fx-profile',node('ul','roster-credential-list',rows));
+  if (!isArchived(person) && canAct(ctx, 'dossier.credential'))
+    body.append(btn(ctx, '维护证件', () => materialForm(ctx, person)));
   if (ctx.available?.('billing')) {
     const link = node('a','btn btn-secondary','办理民政补贴材料');
     link.href = '#billing?tab=subsidies';
@@ -325,7 +330,7 @@ export function residentRoster(ctx, options) {
         row.plan ? [row.plan.title,row.plan.status].filter(Boolean).join(' · ') : '')]);
       if (accessible) cols.push(['基础档案摘要',healthSummary]);
       if (hasGrant(ctx,'finance','medical')) cols.push(['归档资料',row=>node('div','roster-documents',[
-        hasGrant(ctx,'finance') ? action('证件 '+Object.keys(row.person.credentialMaterials || {}).length+' / '+Object.keys(credentialKinds).length,
+        hasGrant(ctx,'finance','intake') ? action('证件 '+Object.keys(row.person.credentialMaterials || {}).length+' / '+Object.keys(credentialKinds).length,
           ()=>credentialList(ctx,row.person)) : null,
         hasGrant(ctx,'medical') ? action(row.visitCount+' 次就诊 · '+row.fileCount+' 份原件',()=>options.medical(row.person)) : null,
       ])]);

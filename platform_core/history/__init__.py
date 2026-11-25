@@ -240,6 +240,8 @@ class Reader:
             return own and can_read_agent_history(self.db, self.user, row["revision"])
         if action in ("leads.public", "trial.expire"):
             return policy.has(self.user, "intake")
+        if action == "dossier.readCredential":
+            return policy.has(self.user, "intake")
         if action in ("ops.billingLifecycle", "ops.readSubsidyMaterial"):
             return policy.has(self.user, "finance")
         if action == "permissionRequest.editProfile":
@@ -271,7 +273,7 @@ class Reader:
         # Recheck composite role requirements; an archived summary may also carry sensitive text.
         if action in ("gw.propose", "gw.confirm", "gw.dismiss"):
             return own and policy.has(self.user, "care")
-        if action.startswith("dossier.") and action != "dossier.profile":
+        if action.startswith("dossier.") and action not in ("dossier.profile", "dossier.credential"):
             if not policy.has(self.user, "medical"):
                 return False
         if action in (

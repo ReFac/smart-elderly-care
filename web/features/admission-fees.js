@@ -1,9 +1,12 @@
+import { admissionCollection } from './admission-collection.js';
 import { chargesEditor, feeLedger, lineDescription } from './charge-lines.js';
 import { btn, canAct, facts, field, money, node, section, select } from './shared.js';
 
 const paymentModes = {
   standard: ['正常入住 · 已有足额预缴', '使用档案中已到账的预缴金核销首期费用。'],
   offline: ['线下款已收 · 登记后入住', '实际到款后填写。超出本次应缴的金额转入预缴金。'],
+  qr: ['微信 / 支付宝 · 出示定额收款码', '由机构指定金额，收到支付渠道回执后核销。'],
+  terminal: ['商户收银终端', '由收银终端调取定额订单，到账后自动入账。'],
   temporary: ['临时入住 · 欠费待缴', '建立待缴账单，可在入住交费中登记到账或使用商户收款二维码。'],
 };
 const offlineMethods = {
@@ -38,7 +41,7 @@ export function admissionFinanceFields(ctx) {
       ...billingPolicyFields(),
     ] : []),
     select('paymentMode', '本次收款确认', Object.entries(paymentModes)
-      .filter(([value]) => value !== 'offline' || finance)
+      .filter(([value]) => ['standard','temporary'].includes(value) || finance)
       .map(([value, [label]]) => ({ value, label }))),
     ...(finance ? [
       field('offlineAmount', '线下实收金额（元）', { type: 'number', min: '0.01', max: 99999999, step: '0.01' }),
@@ -103,9 +106,13 @@ export function admissionFinance(ctx, action, toPayload) {
   let requestId = 0;
   let preview;
 
+  const collection = finance && admissionCollection(ctx,
+    () => payload(Object.fromEntries(new FormData(form))),
+    () => getQuote(payload(Object.fromEntries(new FormData(form)))));
   function payload(values) {
     const { offlineAmount, offlineChannel, allocateSecurityFromPrepaid, ...terms } = values;
     const result = toPayload(terms);
+    if (['qr','terminal'].includes(result.paymentMode)) result.paymentMode = 'standard';
     if (terms.paymentMode && finance) {
       result.depositMonths = Number(terms.depositMonths);
       result.reminderDays = Number(terms.reminderDays ?? 3);
@@ -162,6 +169,7 @@ export function admissionFinance(ctx, action, toPayload) {
     }
     if (id !== requestId) throw new Error('入住信息已更新，请重新核算。');
     currentQuote = { key, quote };
+    collection?.quoted?.(quote.dueAmount);
     showQuote(quote, result.stayType === 'trial');
     return quote;
   }
@@ -177,7 +185,8 @@ export function admissionFinance(ctx, action, toPayload) {
       elements.securityMode.options[0].textContent = waiveSecurity ? '按约定提醒' : '押金单独保管';
       elements.securityMode.options[1].disabled = waiveSecurity;
     }
-    const transferEnabled = formal && !waiveSecurity && elements.paymentMode.value === 'standard' && finance;
+    if (collection) collection.display(formal ? elements.paymentMode.value : '');
+    const transferEnabled = formal && !waiveSecurity && ['standard','qr','terminal'].includes(elements.paymentMode.value) && finance;
     securityChoice.hidden = securityTransfer.disabled = !transferEnabled;
     if (!transferEnabled) securityTransfer.checked = false;
     methodHint.hidden = !formal;
@@ -219,6 +228,7 @@ export function admissionFinance(ctx, action, toPayload) {
     });
     quoteBox.insertBefore(preview, quoteBox.children[1]);
     footer.before(node('div', 'admission-payment-hint', [methodHint, securityChoice]), quoteContent);
+    if (collection) footer.before(collection.panel);
     form.addEventListener('input', (event) => {
       if (['paymentMode', 'depositMonths'].includes(event.target.name)) showFormFields();
       if (!offlineNames.includes(event.target.name)) invalidate();
@@ -235,6 +245,10 @@ export function admissionFinance(ctx, action, toPayload) {
 
   async function review(values) {
     const result = payload(values);
+    if (['qr','terminal'].includes(values.paymentMode)) {
+      result.paymentOrderId = await collection.verified();
+      if (!await ctx.refreshWorkspace(form)) throw new Error('请重新打开入住档案');
+    }
     const quote = await getQuote(result);
     const due = amountInCents(quote.dueAmount);
     if (result.paymentMode === 'standard' && due > 0) {
@@ -267,6 +281,7 @@ export function admissionFinance(ctx, action, toPayload) {
       ...quoteFacts(quote),
       ...(result.paymentMode ? [['收款确认', paymentModes[result.paymentMode][0]]] : []),
       ...(result.allocateSecurityFromPrepaid ? [['押金转存', '已授权从当前预缴余额转存']] : []),
+      ...(result.paymentOrderId ? [['已核实渠道订单', result.paymentOrderId]] : []),
       ...netFields,
     ] };
   }

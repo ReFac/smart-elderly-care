@@ -27,6 +27,7 @@ class Page:
 
 # The model may name a page in prose. Only this application-owned directory supplies a route or tab.
 PAGES = (
+    Page("assistants", "AI", ("AI 页", "健康助理对话页")),
     Page("settings","在线用户",("在线账号","活跃会话"),"onlineUsers"),
     Page("settings","定时任务",("定时服务状态","后台调度状态"),"timers"),
     Page("settings","数据监控",("数据库监控","存储用量"),"dataMonitor"),
@@ -121,6 +122,7 @@ PAGES = (
     Page("settings", "试住约定", ("试住设置", "试住默认价", "试住默认天数"), "trials"),
     Page("settings", "备份与恢复", ("备份", "快照", "恢复备份"), "backups"),
     Page("settings", "平台更新", ("自动更新", "检查更新", "更新设置", "升级前备份", "软件更新", "版本更新"), "platformUpdates"),
+    Page("account", "外观与显示", ("我的界面设置", "个人设置", "字体设置", "字号设置", "显示主题", "显示设置"), "display"),
     Page("account", "个人中心", ("我的账户", "我的账号")),
     Page("tour", "环境导览", ("院内环境", "养老院环境", "院区环境", "全景导览")),
     Page("family", "家属服务", ("长辈服务", "照护消息", "家属消息", "家属推送")),

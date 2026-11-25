@@ -86,6 +86,54 @@ class WardOverview(unittest.TestCase):
             self.assertNotIn("今日已登记健康情况", scoped)
             self.assertNotIn("到账与欠款（元）", scoped)
 
+    def test_operations_brief_uses_room_receipts_and_current_care_work(self):
+        day = self.now.date().isoformat()
+        with closing(self.store.connect()) as db:
+            room = db.execute("SELECT roomId FROM facility_beds WHERE bedId='b001'").fetchone()[0]
+            actor, _, _, state, chosen = chat_context.scope(self.store, db, self.token, {"roomId": room})
+            person = chosen["residentIds"][0]
+            neighbor = next(p["id"] for p in state["residents"] if p["id"] not in chosen["residentIds"])
+            bed = next(b for b in state["beds"] if b["residentId"] == person)
+            neighbor_bed = next(b for b in state["beds"] if b["residentId"] == neighbor)
+            state["bedMoves"] = [
+                dict(kind="入住", date=day, bedId=b["id"], residentId=b["residentId"])
+                for b in (bed, neighbor_bed)
+            ]
+            state["tasks"] = [
+                dict(residentId=person, date=day, status=status)
+                for status in ("已完成", "待执行", "已取消")
+            ] + [
+                dict(residentId=person, date="2026-11-23", status="待执行"),
+                dict(residentId=neighbor, date=day, status="待执行"),
+            ]
+            state["vitals"] = [dict(residentId=neighbor, date=day, abnormal=True)]
+            state["depositEntries"] = [
+                dict(residentId=person, date=day, amount=150),
+                dict(residentId=neighbor, date=day, amount=1000),
+            ]
+            state["payments"] = []
+            state["bills"] = [dict(residentId=person, balance=10, status="待缴")]
+            facts = chat_context.evidence(self.store, db, actor, state, chosen, 24, "今天怎么样了")
+        brief = "".join(ward_brief.phrases("operations", facts))
+        for text in ("1 笔新入住", "2 项照护", "已完成 1 项", "1 项待执行", "1 项照护逾期",
+                     "还没有体征登记", "今日已登记的记录中未见新增健康异常",
+                     "新收到 150.00 元", "10.00 元待缴"):
+            self.assertIn(text, brief)
+        self.assertNotIn("1,150", brief)
+
+    def test_operations_brief_reads_only_granted_domains(self):
+        with closing(self.store.connect()) as db:
+            actor, _, _, state, _ = chat_context.scope(self.store, db, self.token, {})
+            staff = {**actor, "kind": "staff", "permissions": ["inventory", "assistants"]}
+            facts = chat_context.evidence(self.store, db, staff, state, None, 24, "今天怎么样")
+            lines = ward_brief.phrases("operations", facts)
+            self.assertEqual(len(lines), 1)
+            self.assertIn("库存", lines[0])
+            family = {**actor, "kind": "family"}
+            facts = chat_context.evidence(self.store, db, family, state, None, 24, "养老院怎么样")
+            self.assertEqual(set(facts), {"说明"})
+            self.assertNotIn("在住", "".join(ward_brief.phrases("operations", facts)))
+
     def test_cloud_daily_brief_can_order_but_cannot_insert_other_facts(self):
         with closing(self.store.connect()) as db, db:
             provider.grant(db, "单位测试", 200000, "2026-12-01", now=self.now)

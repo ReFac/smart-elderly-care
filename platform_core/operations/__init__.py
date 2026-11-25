@@ -4,7 +4,7 @@ from .assistants import generate_suggestion, review_suggestion
 from .billing import CARE_RATES, deposit, generate_bill, pay
 from .demo import seed
 from .payment_terms import configure as configure_payment_fees
-from .settlements import create_order, expense, import_receipt, remind
+from .settlements import admission_order, create_order, expense, import_receipt, remind
 from .reports import generate_report, submit_report, report_receipt
 from .resources import add_item, assign_shift, edit_item, record_stock
 
@@ -21,6 +21,7 @@ ACTIONS = {
     "ops.pay": pay,
     "ops.paymentFees": configure_payment_fees,
     "ops.paymentOrder": create_order,
+    "ops.admissionOrder": admission_order,
     "ops.importReceipt": import_receipt,
     "ops.remindBill": remind,
     "ops.expense": expense,

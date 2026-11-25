@@ -1,4 +1,5 @@
 import { badge, btn, money, named, node, table, today } from './shared.js';
+import { clearFileSelection, fileControl } from '../lib/file-control.js';
 
 const sources = { bank: '银行对账单', electricity: '国网河南电费凭证' };
 const states = { ready: '可入账', duplicate: '重复', review: '待核对', excluded: '非支出或无效交易' };
@@ -43,7 +44,7 @@ export function importExpenses(ctx) {
   status.setAttribute('role', 'status');
   const results = node('div', 'fx-profile');
   const dialog = ctx.detail('导入机构支出', node('div', 'fx-profile', [
-    node('div', 'access-field-pair', [field('凭证来源', src), field('已导出的文件', file)]),
+    node('div', 'access-field-pair', [field('凭证来源', src), field('已导出的文件', fileControl(file))]),
     helper,
     node('div', 'fx-actions', [btn(ctx, '下载通用 CSV 样例', () => downloadTemplate(src.value, today(ctx))), load]),
     status, results,
@@ -57,7 +58,7 @@ export function importExpenses(ctx) {
   }
   function setSource() {
     file.accept = src.value === 'bank' ? '.csv' : '.csv,.xml';
-    file.value = '';
+    clearFileSelection(file);
     helper.textContent = src.value === 'bank'
       ? '支持 UTF-8 或 GB18030 编码的银行 CSV（最大 1 MiB）。预览将区分支出和贷方收入。'
       : '可导入电费缴费 CSV 或数字发票 XML（最大 1 MiB）。只有开票信息的凭证需核对实付记录。';

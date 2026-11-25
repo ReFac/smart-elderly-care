@@ -61,12 +61,20 @@ def exercise(b, port, username):
         b.call("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "dark"}])
     b.call("Page.navigate", url=origin + "/?workspace=1")
     b.wait_for("!!document.querySelector('.access-login-form')")
+    assert b.evaluate("document.querySelector('[data-color-mode-control]').value === 'light'")
+    assert b.evaluate("document.documentElement.dataset.colorMode === 'light'")
     b.evaluate("""{const f=document.querySelector('.access-login-form');
         f.elements.username.value=""" + json.dumps(username) + ";f.elements.password.value=" +
                json.dumps(PASSWORD) + "; f.requestSubmit()}")
     b.wait_for("!!document.querySelector('.sidebar a.nav-item') && !!document.querySelector('#content')")
     if narrow:
-        assert b.evaluate("document.documentElement.dataset.colorMode === 'dark'")
+        assert b.evaluate("document.documentElement.dataset.colorMode === 'light'")
+        b.click(".account-trigger")
+        b.evaluate("Array.from(document.querySelectorAll('dialog button')).find(b=>b.textContent==='外观与显示').click()")
+        b.wait_for("!!document.querySelector('.personal-display')")
+        b.evaluate("""{const form=document.querySelector('.personal-display');
+            form.elements.mode.value='system';form.requestSubmit()}""")
+        b.wait_for("document.documentElement.dataset.colorMode === 'dark'")
         b.click(".menu-trigger")
         assert b.evaluate("document.querySelector('.sidebar').getBoundingClientRect().left >= -1")
     data = b.evaluate("fetch('/api/state').then(r=>r.json()).then(s=>s.data)")

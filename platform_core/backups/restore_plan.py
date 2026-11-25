@@ -68,6 +68,7 @@ PROTECTED = {
     "deposits": "预存余额",
     "depositEntries": "预存流水",
     "dischargeSettlements": "退住结算与退款凭证",
+    "refunds": "收款退款申请与核实凭证",
     "expenses": "支出流水",
     "transactions": "库存流水",
     "reports": "报送记录",

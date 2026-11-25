@@ -1,5 +1,6 @@
 import { badge, btn, facts, link, named, node, table } from './shared.js';
 import { auditActorLabel } from './people-labels.js';
+import { fileControl } from '../lib/file-control.js';
 
 export async function request(path, payload) {
   const response = await fetch(
@@ -247,7 +248,7 @@ export function importDialog(panel, policy) {
   const status = node('p', 'fx-muted', '选择本机构导出的 .akbak 文件，先在隔离目录核对内容。');
   const preview = node('div', '');
   const wrap = node('div', 'backup-settings-form', [
-    node('label', 'field', [node('span', '', '加密备份文件'), input]),
+    node('label', 'field', [node('span', '', '加密备份文件'), fileControl(input)]),
     status,
     preview,
   ]);

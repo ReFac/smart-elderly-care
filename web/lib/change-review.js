@@ -107,6 +107,7 @@ const titles = {
   'ops.bill': '生成账单',
   'ops.deposit': '登记预存款',
   'ops.pay': '登记收款',
+  'ops.admissionOrder': '发起入住定额收款',
   'ops.paymentFees': '更新收款手续费率',
   'ops.importReceipt': '导入回执',
   'ops.paymentOrder': '创建支付订单',
@@ -265,7 +266,7 @@ export function changePreview(state, action, payload, options = {}) {
     state.uiSettings.institutionName;
   const fields = [];
   for (const [key, value] of Object.entries(payload)) {
-    if (['imageBase64', 'requestId', 'imageHash', 'transcriptId', 'mime'].includes(key)) continue;
+    if (['imageBase64', 'requestId', 'imageHash', 'transcriptId', 'mime', 'reviewedFields'].includes(key)) continue;
     const input = controls.find((i) => i.name === key);
     const label =
       input?.labels?.[0]?.querySelector('span')?.textContent?.replace(/\s*\*\s*$/, '') ||

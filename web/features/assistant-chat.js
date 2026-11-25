@@ -1,4 +1,5 @@
 import { replyReader } from './assistant-reader.js';
+import { floatingWindow } from './assistant-window.js';
 import { streamReply } from './assistant-stream.js';
 import { networkControl, searchSources } from './assistant-network.js';
 import { el, icon } from '../lib/ui.js';
@@ -80,8 +81,21 @@ export function checkChatUser(ctx) {
 
 // The panel lives outside the page renderer so changing business tabs does not erase a draft.
 export function toggleChat(getContext) {
-  if (current && !current.panel.hidden) current.hide();
+  if (current && !current.panel.hidden && !current.panel.closest('.assistant-page') && !current.panel.classList.contains('assistant-compact')) current.hide();
   else openChat(getContext);
+}
+
+export function placeChat(getContext, host) {
+  if (host) {
+    if (current?.panel.parentElement === host && !current.panel.hidden) return;
+    openChat(getContext);
+    if (current.panel.parentNode !== host) host.append(current.panel);
+    current.panel.setAttribute('role', 'region');
+  } else if (current?.panel.closest('.assistant-page')) {
+    if (!current.panel.hidden) current.hide();
+    document.body.append(current.panel);
+    current.panel.setAttribute('role', 'dialog');
+  }
 }
 
 export function openChat(getContext, place = null) {
@@ -124,8 +138,17 @@ function buildChat(getContext, actor, area, region, label) {
     true,
   );
   recents.hidden = !(ctx.state.agentRuns?.length || ctx.state.suggestions?.length);
-  const close = control('收起助理', 'close', 'assistant-icon-control', hide, true);
-  const header = node('header', 'assistant-header', [mark(), titles, recents, close]);
+  function dismiss() {
+    if (panel.closest('.assistant-page')) getContext().go('overview');
+    else hide();
+  }
+  const close = control('收起助理', 'close', 'assistant-icon-control', dismiss, true);
+  const expand = control('展开对话', 'fullscreen', 'assistant-expand', () => {
+    floating.expand();
+    if (!input.disabled) input.focus({preventScroll:true});
+  });
+  const header = node('header', 'assistant-header', [mark(), titles, recents, expand, close]);
+  const floating = floatingWindow(panel, header, ctx.state.user.id);
   const log = el('section', 'assistant-log');
   log.setAttribute('role', 'log');
   log.setAttribute('aria-label', '对话记录');
@@ -235,7 +258,7 @@ function buildChat(getContext, actor, area, region, label) {
     if (destroyed) return;
     draw();
     if (intake.present) log.scrollTop = log.scrollHeight;
-  }, hide);
+  }, accompany);
   const filePicker = !area && canReadDocuments(ctx) ? el('input') : null;
   const uploadButton = filePicker ? control('上传图片', 'file', 'assistant-attachment', () => filePicker.click()) : null;
   if (filePicker) {
@@ -496,6 +519,7 @@ function buildChat(getContext, actor, area, region, label) {
     if (!destroyed && loaded) problem(message);
   }
   function hide(keepPlayback = false) {
+    floating.stop();
     intake.stop();
     if (keepPlayback !== true) {
       reader.stop();
@@ -513,6 +537,11 @@ function buildChat(getContext, actor, area, region, label) {
     (lastFocused?.isConnected ? lastFocused : launch)?.focus({ preventScroll: true });
   }
   let openingAction = false;
+  function accompany() {
+    floating.accompany();
+    reader.popup.classList.add('assistant-reader-detached');
+    panel.append(reader.popup);
+  }
   async function perform(action, button) {
     if (openingAction) return;
     const origin = location.hash;
@@ -527,7 +556,7 @@ function buildChat(getContext, actor, area, region, label) {
       if (!checked || destroyed || panel.hidden || origin !== location.hash || document.querySelector('dialog[open]')) return;
       const live = getContext();
       if (!live.available(action.route)) return live.toast('当前账号无法打开这个页面');
-      hide(true);
+      accompany();
       await openAssistantAction(live, action);
     } catch (e) {
       if (!destroyed) getContext().toast(e.message);
@@ -572,8 +601,7 @@ function buildChat(getContext, actor, area, region, label) {
     adjustInput();
     draw('pending');
     request = new AbortController();
-    let action, openedEarly = false,
-      received = false,
+    let received = false,
       speechFrames = false;
     try {
       const result = await streamReply(path + '/stream', {
@@ -591,13 +619,9 @@ function buildChat(getContext, actor, area, region, label) {
         if (event.type === 'begin' && !panel.hidden) {
           if (speechRequested && !speechDismissed)
             speechTurn = { region, scopeKey: event.scopeKey, generation: event.generation, requestId: event.requestId };
-          if (event.requestId === retry.id && startPage === location.hash && !openedEarly &&
-              !openingAction && !document.querySelector('dialog[open]')) {
+          if (event.requestId === retry.id && startPage === location.hash && partialRow) {
             const destination = assistantCommand(getContext(), { role: 'assistant', action: event.action });
-            if (destination) {
-              openedEarly = true;
-              perform(destination);
-            }
+            if (destination) partialRow.append(row({ role:'assistant', content:'', action:event.action }));
           }
         }
         if (event.type === 'text' && typeof event.text === 'string') appendText(event.text);
@@ -612,11 +636,6 @@ function buildChat(getContext, actor, area, region, label) {
       received = true;
       if (speechRequested && !speechFrames && !speechDismissed)
         reader.enqueue(messages.at(-1), {region, scopeKey, generation});
-      if (
-        messages.at(-2)?.content === text &&
-        startPage === location.hash
-      )
-        action = assistantCommand(getContext(), messages.at(-1));
       retry = null;
     } catch (e) {
       if (destroyed) return;
@@ -668,8 +687,6 @@ function buildChat(getContext, actor, area, region, label) {
         adjustInput();
       }
     }
-    if (!openedEarly && !destroyed && !panel.hidden && action && !document.querySelector('dialog[open]'))
-      perform(action);
   }
   composer.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -712,7 +729,7 @@ function buildChat(getContext, actor, area, region, label) {
     if (event.key === 'Escape' && !event.isComposing && !composing) {
       event.preventDefault();
       event.stopPropagation();
-      hide();
+      dismiss();
     }
   });
   function loseWindow() {
@@ -725,16 +742,18 @@ function buildChat(getContext, actor, area, region, label) {
     area,
     hide,
     show() {
+      floating.expand();
+      if (reader.popup.parentNode !== composer) {
+        reader.popup.classList.remove('assistant-reader-detached');
+        composer.insertBefore(reader.popup, dictation.element);
+      }
       if (!panel.hidden) {
         if (!input.disabled) input.focus();
         return;
       }
       lastFocused = document.activeElement;
-      if (reader.popup.parentNode !== composer) {
-        reader.popup.classList.remove('assistant-reader-detached');
-        composer.insertBefore(reader.popup, dictation.element);
-      }
       panel.hidden = false;
+      floating.restore();
       document.getElementById('assistant-launch')?.setAttribute('aria-expanded', 'true');
       if (!sending && !waiting) load();
       if (loaded && !waiting) input.focus({ preventScroll: true });
@@ -742,6 +761,7 @@ function buildChat(getContext, actor, area, region, label) {
     },
     destroy() {
       destroyed = true;
+      floating.destroy();
       intake.discard();
       reader.stop();
       reader.popup.remove();

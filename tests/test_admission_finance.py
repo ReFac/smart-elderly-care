@@ -101,3 +101,67 @@ class AdmissionFinanceTests(TestCase):
         self.store.facility_policy = lambda db, user: {"roomIds": []} if user["username"] == "local-finance" else {}
         with self.assertRaises(PermissionError):
             self.store.bill_preview(finance, {"residentId": "r001", "month": "2027-12"}, rev)
+
+    def test_terminal_admission_requires_matching_signed_receipt(self):
+        self.check_terminal_admission("微信支付")
+
+    def test_unionpay_terminal_receipt_can_be_refunded_after_admission(self):
+        self.check_terminal_admission("银联刷卡")
+
+    def check_terminal_admission(self, channel):
+        import hmac
+        import json
+        from unittest.mock import patch
+        from platform_core.operations import terminal
+        key = bytes(range(32))
+        with TemporaryDirectory() as folder:
+            keyfile = Path(folder) / "terminal.key"
+            keyfile.write_bytes(key)
+            with patch.dict("os.environ", {"NH_TERMINAL_ID":"desk-test", "NH_TERMINAL_KEY_FILE":str(keyfile)}):
+                amount = self.preview()["dueAmount"]
+                args = dict(residentId=self.rid, amount=amount, channel=channel, collection="terminal", requestId="a"*32)
+                self.command("ops.admissionOrder",args)
+                self.command("ops.admissionOrder",args)
+                orders = self.state()["paymentOrders"]
+                self.assertEqual(len([r for r in orders if r.get("requestId")==args["requestId"]]), 1)
+                oid = orders[0]["id"]
+                admission = dict(**self.terms,paymentOrderId=oid,paymentMode="standard",allocateSecurityFromPrepaid=True)
+                with self.assertRaisesRegex(ValueError,"尚未到账"):
+                    self.command("care.admit",admission)
+                def adapter(action, fields, valid=True):
+                    now = self.store.now()
+                    stamp = str(int(now.timestamp()))
+                    data = json.dumps(fields).encode()
+                    sig = hmac.digest(key, f"v1\ndesk-test\n{action}\n{stamp}\n".encode()+data,"sha256").hex()
+                    return terminal.handle(self.store,action,{"X-Terminal-Id":"desk-test","X-Terminal-Time":stamp,
+                        "X-Terminal-Signature":sig if valid else ""}, data)
+                with self.assertRaises(PermissionError):
+                    adapter("lookup",{"orderId":oid},False)
+                self.assertEqual(adapter("lookup",{"orderId":oid})["amountCents"],int(amount*100))
+                receipt = dict(orderId=oid, status="SUCCESS", currency="CNY", amountCents=int(amount*100),
+                               channel=channel, paidAt=self.store.now().isoformat(),transactionId="txn-v1")
+                with self.assertRaises(ValueError):
+                    adapter("receipt",{**receipt,"amountCents":1})
+                got = adapter("receipt",receipt)
+                rev = self.store.version(self.token)["revision"]
+                self.assertEqual(got,adapter("receipt",receipt))
+                self.assertEqual(rev,self.store.version(self.token)["revision"])
+                self.assertFalse(self.finance())
+                self.command("care.admit", admission)
+                self.assertTrue(all(b["balance"] == 0 for b in self.finance().values()))
+                allocations = [a for pay in self.state()["payments"] for a in pay.get("sourceAllocations", ()) if a["receiptId"] == got["receiptId"]]
+                self.assertEqual(len(allocations),2)
+                self.assertEqual(sum(a["amount"] for a in allocations), amount)
+                self.assertEqual(len([r for r in self.state()["channelReceipts"] if r["merchantOrder"] == oid]),1)
+                # Both first-month charges have already consumed the advance; retain the original tender on reversal.
+                for sequence, refund_amount in enumerate((0.01, round(amount - 0.01, 2))):
+                    self.command("ops.requestRefund",dict(requestId="return-"+str(sequence),residentId=self.rid,
+                                 receiptId=got["receiptId"],amount=refund_amount,reason="入住收款核对退回"))
+                    refund = self.state()["refunds"][-1]
+                    self.command("ops.confirmRefund",dict(residentId=self.rid,refundId=refund["id"],verified=True,
+                                 reference="demo-refund-"+str(sequence)))
+                self.assertAlmostEqual(sum(b["balance"] for b in self.finance().values()),amount)
+                refunded = [r for r in self.state()["depositEntries"] if r.get("refundOf") == got["receiptId"]]
+                self.assertAlmostEqual(-sum(r["amount"] for r in refunded), amount)
+                reversed_offsets = [a for r in self.state()["payments"] if r.get("refundId") for a in r["sourceAllocations"]]
+                self.assertAlmostEqual(-sum(a["amount"] for a in reversed_offsets if a["receiptId"] == got["receiptId"]),amount)

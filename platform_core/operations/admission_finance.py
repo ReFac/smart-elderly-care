@@ -10,7 +10,7 @@ from .records import currency_amount, lookup, new_id, whole_number
 
 TERMS = {
     "depositMonths", "paymentMode", "offlinePayment", "feeItems", "reminderDays",
-    "securityMode", "allocateSecurityFromPrepaid",
+    "securityMode", "allocateSecurityFromPrepaid", "paymentOrderId",
 }
 
 
@@ -61,6 +61,12 @@ def security_bill(resident, bill, months, today, monthly_amount):
 
 
 def post(state, resident, payload, today, *, preview=False):
+    order_id = payload.get("paymentOrderId")
+    if "paymentOrderId" in payload:
+        order = lookup(state, "paymentOrders", order_id, "入住收款订单")
+        if (payload.get("paymentMode") != "standard" or order.get("purpose") != "admission"
+                or order["residentId"] != resident["id"] or order["status"] != "已到账"):
+            raise ValueError("入住收款订单尚未到账或与当前档案不匹配")
     trial = resident.get("stayType") == "trial"
     settings = terms(payload, trial=trial)
     resident["admissionTerms"] = settings
@@ -104,8 +110,7 @@ def post(state, resident, payload, today, *, preview=False):
         if security and payload.get("allocateSecurityFromPrepaid") is True:
             allocated = min(Decimal(str(account["amount"])), Decimal(str(security["balance"])))
             if allocated:
-                account["amount"] = float(Decimal(str(account["amount"])) - allocated)
-                billing.credit(state, security, allocated, "预缴转押金", today)
+                billing.spend_advance(state, account, security, allocated, "预缴转押金", today)
     due = [bill, *([security] if security else [])]
     total_due = sum((Decimal(str(row["balance"])) for row in due), Decimal(0))
     mode = payload.get("paymentMode", "temporary")
@@ -116,7 +121,7 @@ def post(state, resident, payload, today, *, preview=False):
             receive(state, due, payload.get("offlinePayment"), today)
         resident["admissionPayment"] = {
             "billId": bill["id"], "securityBillId": security["id"] if security else "",
-            "mode": mode,
+            "mode": mode, **({"paymentOrderId": order_id} if order_id else {}),
         }
     return {
         "bill": bill, "securityBill": security, "depositAmount": security["amount"] if security else 0,
@@ -149,12 +154,12 @@ def receive(state, bills, payload, today):
     surplus = amount - allocated
     if surplus:
         account = billing.get_account(state, bills[0]["residentId"])
-        account["amount"] = float(Decimal(str(account["amount"])) + surplus)
+        billing.add_advance(account, receipt, surplus)
         extra_fee = payment_terms.fee(amount, rate) - payment_terms.fee(allocated, rate)
         state["depositEntries"].insert(0, dict(
             id=new_id("receipt"), residentId=account["residentId"], date=today,
             amount=float(surplus), method=method, channel=channel, receiptId=receipt,
-            grossAmount=float(amount), originBillId=bills[0]["id"],
+            grossAmount=float(amount), originBillId=bills[0]["id"], trackedAdvance=True,
             **payment_terms.accounting(surplus, extra_fee, rate),
         ))
         billing.apply_deposit(state, account, today)
@@ -175,6 +180,8 @@ def use_security(state, resident, bill, today):
         (Decimal(str(row["amount"])) for row in state["payments"] if row.get("securityBillId") == deposit_id),
         Decimal(0),
     )
+    from .refunds import held_for_bill
+    remaining -= Decimal(held_for_bill(state, deposit_id)) / 100
     amount = min(remaining, Decimal(str(bill["balance"])))
     if amount <= 0:
         return None

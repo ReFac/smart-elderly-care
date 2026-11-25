@@ -2,6 +2,7 @@ import { asBase64 } from './document-original.js';
 import { btn, canAct, node, today } from './shared.js';
 import { residentLabel } from './people-labels.js';
 import { medicalResidentPicker } from './medical-resident-picker.js';
+import { fileControl, refreshFileSelection } from '../lib/file-control.js';
 import { reviewVisit, visitsFor } from './medical-visit-review.js';
 
 const types = ['就诊记录', 'CT影像', '检查报告', '处方', '医嘱', '其他'];
@@ -24,10 +25,12 @@ function attachmentsInput(ctx, rows, changed) {
   input.type = 'file';
   input.multiple = true;
   input.accept = '.pdf,.png,.jpeg,.jpg,application/pdf,image/png,image/jpeg';
+  const chooser = fileControl(input, { selectedFiles: () => rows.map(row => row.file) });
   const list = node('ul', 'medical-file-list');
   const error = node('p', 'form-error');
   error.setAttribute('role', 'alert');
   function draw() {
+    refreshFileSelection(input);
     list.replaceChildren(...rows.map(row => {
       const type = node('select');
       type.setAttribute('aria-label', row.file.name + '的资料类别');
@@ -66,7 +69,7 @@ function attachmentsInput(ctx, rows, changed) {
   draw();
   return { input, element: node('fieldset', 'medical-visit-group', [
     node('legend', '', '本次就诊原件'),
-    node('label', 'field', [node('span', '', '选择一组照片或 PDF'), input]),
+    node('label', 'field', [node('span', '', '选择一组照片或 PDF'), chooser]),
     node('small', 'fx-muted', '支持 JPEG、PNG 和 PDF，每组最多 12 份，单份 8 MiB，合计 24 MiB。'),
     list, error,
   ]) };

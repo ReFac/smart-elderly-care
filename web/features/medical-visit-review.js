@@ -215,7 +215,7 @@ function documentRows(ctx, docs, onOpen, onLink, reopenVisit) {
   ])));
 }
 
-function showVisit(ctx, person, record, openEditor, documents = {}) {
+export function showVisit(ctx, person, record, openEditor, documents = {}) {
   const body = node('article', 'medical-visit-detail');
   body.dataset.visitDetail = person.id;
   function reopenVisit() {

@@ -253,13 +253,15 @@ export function dayClosing(ctx) {
     const received = all.filter((r) => r.date === day),
       expenses = (ctx.state.expenses || []).filter((r) => r.date === day);
     const refunds = (ctx.state.dischargeSettlements || []).filter((r) => r.date === day && r.amount > 0);
+    const reversed = -received.reduce((s, r) => s + (r.refundOf ? r.gross : 0), 0);
     const gross = received.reduce((s, r) => s + r.gross, 0),
       expense = sum(expenses, 'amount'),
       refund = sum(refunds, 'amount');
     const feeKnown = received.every((r) => r.fee != null),
       fee = received.reduce((s, r) => s + (r.fee || 0), 0);
     const summary = [
-      ['当日实收（含预缴）', yuan(gross)],
+      ['当日实收（含预缴）', yuan(gross + reversed)],
+      ...(reversed ? [['收款原单退款', yuan(reversed)]] : []),
       ['机构承担手续费', feeKnown ? yuan(fee) : '有历史凭证待核对'],
       ['当日支出', yuan(expense)],
       ['退住退款', yuan(refund)],

@@ -46,6 +46,41 @@ def credit(state, bill, amount, method, today):
     return row
 
 
+def add_advance(account, receipt_id, amount):
+    sources = account.setdefault("sources", {})
+    sources[receipt_id] = float(Decimal(str(sources.get(receipt_id, 0))) + amount)
+    account["amount"] = float(Decimal(str(account["amount"])) + amount)
+
+
+def spend_advance(state, account, bill, amount, method, today):
+    """Keep each known prepaid receipt linked to the bill it actually paid."""
+    balance = Decimal(str(account["amount"]))
+    if not 0 < amount <= balance:
+        raise ValueError("可用预缴金额不足")
+    sources = account.get("sources", {})
+    tracked = sum((Decimal(str(value)) for value in sources.values()), Decimal(0))
+    if tracked > balance:
+        raise ValueError("预缴来源与余额不一致，请核对预缴台账")
+    need = max(Decimal(0), amount - (balance - tracked))
+    allocations = []
+    for receipt_id in list(sources):
+        if not need:
+            break
+        available = Decimal(str(sources[receipt_id]))
+        part = min(need, available)
+        if part:
+            allocations.append({"receiptId": receipt_id, "amount": float(part)})
+            need -= part
+        if part == available:
+            del sources[receipt_id]
+        else:
+            sources[receipt_id] = float(available - part)
+    account["amount"] = float(balance - amount)
+    payment = credit(state, bill, amount, method, today)
+    if allocations:
+        payment["sourceAllocations"] = allocations
+
+
 def apply_deposit(state, account, today):
     available = Decimal(str(account["amount"]))
     debt = sorted(
@@ -63,9 +98,8 @@ def apply_deposit(state, account, today):
         if not available:
             break
         amount = min(available, Decimal(str(bill["balance"])))
-        credit(state, bill, amount, "预交金冲抵", today)
+        spend_advance(state, account, bill, amount, "预交金冲抵", today)
         available -= amount
-    account["amount"] = float(available)
 
 
 def post_receipt(
@@ -88,13 +122,14 @@ def post_receipt(
         payment = credit(state, bill, applied, method, day)
         payment.update(common, **payment_terms.accounting(applied, applied_fee, rate))
     if surplus:
-        account["amount"] = float(Decimal(str(account["amount"])) + surplus)
+        add_advance(account, origin["receiptId"], surplus)
         state["depositEntries"].insert(
             0,
             dict(
                 id=new_id("receipt"),
                 residentId=resident_id,
                 amount=float(surplus),
+                trackedAdvance=True,
                 date=day,
                 method=method,
                 **common,

@@ -286,7 +286,7 @@
 .access-grant-group legend {
   color: var(--muted);
   padding: 0 4px;
-  font-size: 13px;
+  font-size: 0.86667rem;
   font-weight: 600;
 }
 .access-group-choices {
@@ -296,7 +296,7 @@
 .access-group-choices .access-check {
   padding: 5px 7px;
   border-color: transparent;
-  font-size: 13px;
+  font-size: 0.86667rem;
 }
 .access-group-choices .access-check:has(input:checked) {
   border-color: #d6e4f7;
@@ -307,7 +307,7 @@
   gap: 7px;
 }
 .access-fixed-login > span {
-  font-size: 13px;
+  font-size: 0.86667rem;
   font-weight: 600;
 }
 .access-fixed-login strong {
@@ -354,7 +354,7 @@
 .access-capability-section h3,
 .access-capability-section summary {
   margin: 0;
-  font-size: 14px;
+  font-size: 0.93333rem;
   font-weight: 650;
 }
 .access-capability-section summary {
@@ -368,7 +368,7 @@
   border-top: 1px solid var(--line);
   padding-top: 9px;
   margin-top: 9px;
-  font-size: 13px;
+  font-size: 0.86667rem;
 }
 .access-scope-values {
   display: flex;
@@ -384,7 +384,7 @@
 }
 .access-staff-manager {
   color: var(--accent);
-  font-size: 12px;
+  font-size: 0.8rem;
 }
 @media (min-width: 960px) {
   .dialog:has(.access-grant-groups),
@@ -668,11 +668,11 @@
 .backup-target small {
   display: block;
   color: var(--muted, #56677c);
-  font-size: 12px;
+  font-size: 0.8rem;
 }
 .backup-metric strong {
   display: block;
-  font-size: 17px;
+  font-size: 1.13333rem;
   margin-top: 5px;
 }
 .backup-target {
@@ -682,10 +682,10 @@
   gap: 8px;
 }
 .backup-target strong {
-  font-size: 14px;
+  font-size: 0.93333rem;
 }
 .backup-history h3 {
-  font-size: 15px;
+  font-size: 1rem;
 }
 .backup-history tr > td:last-child {
   white-space: normal;
@@ -702,7 +702,7 @@
 .backup-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .backup-navigation { justify-content: flex-end; margin-top: 12px; }
 .backup-settings-form { display: grid; gap: 14px; }
-.backup-settings-form h3 { font-size: 15px; margin: 8px 0 0; }
+.backup-settings-form h3 { font-size: 1rem; margin: 8px 0 0; }
 .backup-settings-form .backup-targets { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
 .backup-facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0 0 14px; }
 .backup-facts dt { color: var(--muted); }

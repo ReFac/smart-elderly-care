@@ -12,6 +12,7 @@
   import { assistantCommand, assistantPageLinks, openAssistantAction } from '../../web/features/assistant-actions.js';
   import { renderFeature } from '../../web/features/index.js';
   import { selectTab } from '../../web/features/shared.js';
+  import { detail, formDialog } from '../../web/lib/dialogs.js';
   import * as ui from '../../web/lib/ui.js';
 
   const find = selector => document.querySelector(selector);
@@ -29,12 +30,12 @@
   const state = {
     user: { id: 'navigation-fixture', kind: 'staff', permissions: ['assistants', 'longCare'], routes: ['longCare'] },
     uiSettings: { institutionName: '演练机构', hiddenRoutes: [] },
-    residents: [], longCareEvents: [], allowedActions: [],
+    residents: [], longCareEvents: [], allowedActions: [], beds: [], trialSettings: {days:3, fee:null},
   };
   const requests = [], navigations = [], messages = [];
   let freshRoutes = ['longCare'], refreshes = 0, reads = 0, complete;
   const ctx = {
-    state, ui,
+    state, ui, detail, dialog:formDialog, today:'2026-11-25',
     available: route => state.user.routes.includes(route) && !state.uiSettings.hiddenRoutes.includes(route),
     async checkNavigation() {
       refreshes++;
@@ -46,12 +47,13 @@
       navigations.push(route);
       if (tab) selectTab(route, tab);
       history.pushState(null, '', '#' + route);
-      find('main').replaceChildren(renderFeature(route, ctx));
+      if (route === 'longCare') find('main').replaceChildren(renderFeature(route, ctx));
       onArrival?.();
     },
     toast() {},
   };
   window.fetch = async (url, options = {}) => {
+    if (url === '/api/care/admission/preview') return Response.json({error:'演示预核算不可用'}, {status:503});
     check(url === (options.method === 'POST' ? '/api/assistant/chat/stream' : '/api/assistant/chat'),
       '页面入口只应读取工作台，无需提交院务命令');
     if (options.method === 'POST') {
@@ -72,6 +74,9 @@
           };
         } });
         return new Response(result, { headers: { 'Content-Type': 'application/x-ndjson' } });
+      } else if (payload.text === '办理正式入住') {
+        messages.push({ role:'assistant', content:'请打开入住表单。',
+          action:{kind:'openForm', form:'admission', route:'residents', tab:'notAdmitted', title:'办理入住'} });
       } else if (payload.text === question) {
         messages.push({ role: 'assistant', content: '可以进入长期护理保险查看经办台账。',
           pageLinks: [destination, destination, denied, { route: 'https://example.org', title: '不属于工作台' }] });
@@ -115,9 +120,10 @@
     check(document.activeElement === entry && entry.tabIndex === 0 && entry.matches('button, a[href]'), '入口可用键盘访问');
     entry.click();
     await until(() => location.hash === '#longCare' && find('main').textContent.includes('长护险经办台账'), '进入真实长护险台账');
-    check(refreshes === 1 && find('#assistant-chat').hidden && !find('dialog[open]'), '点击刷新权限，只打开页面');
+    check(refreshes === 1 && find('#assistant-chat.assistant-compact:not([hidden])') && !find('dialog[open]'), '点击刷新权限，小窗留在目标页面');
 
-    await open();
+    find('.assistant-expand').click();
+    check(!find('.assistant-compact'), '从随行小窗展开对话');
     check(find('.assistant-page-link') && requests.length === 1, '从已保存的回答重新使用入口');
     freshRoutes = [];
     find('.assistant-page-link').click();
@@ -154,11 +160,39 @@
     const before = navigations.length;
     history.replaceState(null, '', '#overview');
     submit(direct);
-    await until(() => location.hash === '#longCare' && typeof complete === 'function', '云端完整答复之前即进入目标页');
+    await until(() => find('.assistant-current .assistant-page-link') && typeof complete === 'function', '云端完整答复之前给出入口');
+    check(location.hash === '#overview' && navigations.length === before, '流式开始时留在当前页');
+    find('.assistant-current .assistant-page-link').click();
+    await until(() => location.hash === '#longCare' && find('.assistant-compact'), '点击早期入口后才进入目标页');
     check(find('.assistant-input').readOnly, '路由跳转与云端答复并行');
     complete();
     await until(() => !find('.assistant-input').readOnly, '云端答复继续完成');
     check(navigations.length === before + 1, '完整答复到达后不会再次打开页面');
+    find('.assistant-expand').click();
+    freshRoutes = state.user.routes = ['residents'];
+    state.allowedActions = ['care.admit'];
+    state.residents = [{id:'sample',name:'测试长辈',status:'未入住',level:'自理'}];
+    state.beds = [{id:'sample-bed',label:'01-A',ward:'东区',status:'空闲'}];
+    await send('办理正式入住');
+    check(!find('dialog[open]') && location.hash === '#longCare','打开表单前等待点击');
+    find('.from-assistant:last-child .assistant-action').click();
+    await until(() => find('dialog[aria-label="选择长辈档案"][open] .assistant-compact'), '小窗进入真实的入住选档模态层');
+    const registry = find('.admission-registry');
+    [...registry.querySelectorAll('button')].find(b=>b.textContent.trim()==='办理入住').click();
+    await until(() => find('dialog[aria-label="从档案办理入住"][open] .assistant-compact'), '选档后随行小窗跟到实际入住表单');
+    const activeDialog = find('dialog[aria-label="从档案办理入住"]');
+    const expand = activeDialog.querySelector('.assistant-expand');
+    const rect = expand.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2);
+    check(hit?.closest('button') === expand, '表单遮罩上方可以点中随行小窗 ' + JSON.stringify({
+      expand:rect, layer:hit?.className, tag:hit?.tagName, viewport:[innerWidth,innerHeight],
+      form:activeDialog.getBoundingClientRect(), floating:activeDialog.querySelector('.assistant-compact').getBoundingClientRect()
+    }));
+    expand.click();
+    const input = activeDialog.querySelector('.assistant-input');
+    input.focus();
+    check(document.activeElement === input && !find('.assistant-compact'),'表单保持打开时可展开并聚焦输入');
+    activeDialog.close();
     clearChat();
     document.documentElement.dataset.result = 'pass';
     find('output').textContent = 'PASS';

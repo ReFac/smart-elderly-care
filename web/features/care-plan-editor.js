@@ -58,6 +58,9 @@ function editor(ctx, plan) {
     saved.search = '';
   }
   const items = saved.items;
+  Object.defineProperty(saved, 'unsaved', {
+    configurable:true, get:() => JSON.stringify(items) !== JSON.stringify(sourceItems),
+  });
   const selected = saved.marked;
   const staff = staffField(ctx, 'assignee','执行人员',{value:plan.assignee}).options
     .filter(p => p.value).map(p => [p.value,p.label]);

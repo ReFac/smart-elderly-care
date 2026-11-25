@@ -69,11 +69,11 @@ dialog.risk-drawer .dialog-body > .risk-panel > * {flex-shrink:0;}
 .risk-drawer .dialog-head {position:sticky;top:0;z-index:2;background:var(--eval-surface);}
 .risk-panel,.risk-report {gap:12px;color:inherit;}
 .evaluation-person {display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:4px 0 12px;border-bottom:1px solid var(--eval-border);}
-.evaluation-avatar {display:grid;place-items:center;width:35px;height:35px;background:#6558ba;color:white;border-radius:50%;font-size:16px;font-weight:600;}
+.evaluation-avatar {display:grid;place-items:center;width:35px;height:35px;background:#6558ba;color:white;border-radius:50%;font-size:1.06667rem;font-weight:600;}
 .evaluation-identity {display:grid;gap:3px;}
-.evaluation-identity small,.risk-score small {font-size:var(--desk-small-size,13px);color:var(--eval-muted);}
+.evaluation-identity small,.risk-score small {font-size:var(--desk-small-size,0.86667rem);color:var(--eval-muted);}
 .evaluation-tags {margin-inline-start:auto;display:flex;flex-wrap:wrap;gap:6px;}
-.evaluation-tags span,.evaluation-grade span {font-size:var(--desk-small-size,13px);border-radius:5px;padding:1px 7px;background:var(--eval-soft);border:1px solid var(--eval-border);}
+.evaluation-tags span,.evaluation-grade span {font-size:var(--desk-small-size,0.86667rem);border-radius:5px;padding:1px 7px;background:var(--eval-soft);border:1px solid var(--eval-border);}
 .risk-tabs {display:flex;gap:16px;border-bottom:1px solid var(--eval-border);}
 .risk-tabs button[aria-pressed=true] {color:var(--desk-link);border-bottom:2px solid currentColor;border-radius:0;}
 .risk-result {
@@ -85,11 +85,11 @@ dialog.risk-drawer .dialog-body > .risk-panel > * {flex-shrink:0;}
 .risk-result[data-tone=medium]{--result-accent:var(--eval-amber)}
 .risk-result[data-tone=low]{--result-accent:var(--eval-green)}
 .evaluation-grade {display:flex;align-items:center;flex-wrap:wrap;gap:8px;}
-.risk-result .evaluation-grade h2 {font-size:22px;font-weight:650;line-height:1.35;color:var(--result-accent);}
+.risk-result .evaluation-grade h2 {font-size:1.46667rem;font-weight:650;line-height:1.35;color:var(--result-accent);}
 .evaluation-grade span {color:var(--result-accent);}
 .risk-result p {margin:7px 0 0;white-space:pre-line;overflow-wrap:anywhere;}
 .risk-score {display:grid;text-align:right;flex:none;font-variant-numeric:tabular-nums;}
-.risk-score strong {font-size:28px;color:var(--result-accent);line-height:1.2;}
+.risk-score strong {font-size:1.86667rem;color:var(--result-accent);line-height:1.2;}
 .risk-columns,.risk-measures,.risk-precautions {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
 .risk-measures {grid-template-columns:repeat(3,minmax(0,1fr));}
 .risk-report .fx-section {display:block;border:1px solid var(--eval-border);border-radius:10px;padding:12px 14px;overflow-wrap:anywhere;}
@@ -130,23 +130,23 @@ dialog.risk-drawer .dialog-body > .risk-panel > * {flex-shrink:0;}
 }
 
 .evaluation-name {display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;}
-.evaluation-name span,.evaluation-tags small {font-size:var(--desk-small-size,13px);color:var(--eval-muted);}
+.evaluation-name span,.evaluation-tags small {font-size:var(--desk-small-size,0.86667rem);color:var(--eval-muted);}
 .evaluation-tags {max-width:50%;align-items:center;justify-content:flex-end;}
 .evaluation-tags span,.evaluation-bands li {border-radius:999px;font-weight:550;}
 .evaluation-tags span {color:var(--eval-blue);background:color-mix(in srgb,var(--eval-blue) 7%,var(--eval-surface));}
 .evaluation-bands {display:flex;list-style:none;flex-wrap:wrap;gap:7px;margin:10px 0 0;padding:0;}
-.evaluation-bands li {border:1px solid color-mix(in srgb,currentColor 24%,var(--eval-surface));background:var(--eval-surface);font-size:var(--desk-small-size,13px);padding:1px 8px;}
+.evaluation-bands li {border:1px solid color-mix(in srgb,currentColor 24%,var(--eval-surface));background:var(--eval-surface);font-size:var(--desk-small-size,0.86667rem);padding:1px 8px;}
 .evaluation-bands [data-level="低风险"] {color:var(--eval-green);}
 .evaluation-bands [data-level="中风险"] {color:var(--eval-amber);}
 .evaluation-bands [data-level="高风险"] {color:var(--eval-red);}
 .evaluation-bands [aria-current] {box-shadow:inset 0 0 0 1px currentColor;}
 .evaluation-bars > :nth-child(3n + 1) .evaluation-track span {background:var(--eval-red);}
 .risk-columns {grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);}
-.risk-factor-list dt {font-size:var(--desk-small-size,13px);}
+.risk-factor-list dt {font-size:var(--desk-small-size,0.86667rem);}
 .risk-factor-list strong {color:var(--eval-red);}
 .risk-precautions ul {list-style:none;display:flex;flex-wrap:wrap;gap:5px;padding:0;margin:7px 0 0;}
 .risk-precautions article {padding:0;background:transparent!important;}
-.risk-precautions h4 {color:var(--eval-muted);font-size:var(--desk-small-size,13px);}
+.risk-precautions h4 {color:var(--eval-muted);font-size:var(--desk-small-size,0.86667rem);}
 .risk-precautions li {padding:2px 7px;border-radius:5px;background:color-mix(in srgb,currentColor 8%,var(--eval-surface));}
 .risk-measures article {border:1px solid color-mix(in srgb,currentColor 25%,var(--eval-surface));}
 .risk-measures ul {margin:7px 0 0;padding-inline-start:17px;color:var(--desk-text);}
@@ -160,7 +160,7 @@ dialog.risk-drawer .dialog-body > .risk-panel > * {flex-shrink:0;}
 .risk-report .review-plan .fx-facts {display:grid;grid-template-columns:1fr 1fr 2fr;gap:12px;border:0;background:transparent;}
 .risk-report .review-plan .fx-facts div {display:block;border:0;background:transparent;padding:0;}
 .risk-report .review-plan .fx-facts :is(dd,dt) {margin:0;padding:0;border:0;background:transparent;}
-.risk-report .review-plan dt {font-size:var(--desk-small-size,13px);color:var(--eval-muted);}
+.risk-report .review-plan dt {font-size:var(--desk-small-size,0.86667rem);color:var(--eval-muted);}
 .risk-report .review-plan dd {font-weight:550;}
 .risk-form-sections,.risk-form-rows {display:grid;gap:12px;}
 .risk-form-row {display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:8px 0;}

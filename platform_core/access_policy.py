@@ -172,8 +172,12 @@ ACTION_GRANTS = {
     "ops.bill": "finance",
     "ops.deposit": "finance",
     "ops.pay": "finance",
+    "ops.requestRefund": "finance",
+    "ops.confirmRefund": "finance",
+    "ops.cancelRefund": "finance",
     "ops.importReceipt": "finance",
     "ops.paymentOrder": "finance",
+    "ops.admissionOrder": "finance",
     "ops.remindBill": "finance",
     "ops.residentBillingPolicy": "finance",
     "ops.expense": "finance",
@@ -186,6 +190,7 @@ ACTION_GRANTS = {
     "ops.reportReceipt": "reports",
     "ops.report": "reports",
     "dossier.profile": "intake",
+    "dossier.credential": "intake",
     "dossier.document": "medical.write",
     "dossier.linkVisitDocument": "medical.write",
     "dossier.ocr": "medical.write",
@@ -227,6 +232,7 @@ COLLECTION_GRANTS = {
     "paymentOrders": "finance",
     "billingNotices": "finance",
     "dischargeSettlements": "finance",
+    "refunds": "finance",
     "paymentFeeSettings": "finance",
     "channelReceipts": "finance",
     "expenses": "finance",
@@ -522,6 +528,8 @@ def can_view_audit(user, action, *, agent_initiator=None, agent_grants=()):
     if user["kind"] == "owner":
         return True
     if action in ("leads.public", "trial.expire"):
+        return has(user, "intake")
+    if action == "dossier.readCredential":
         return has(user, "intake")
     if action in ("ops.billingLifecycle", "ops.readSubsidyMaterial"):
         return has(user, "finance")

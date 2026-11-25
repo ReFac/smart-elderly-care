@@ -60,7 +60,7 @@
   align-items: center;
   margin-bottom: 2px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.73333rem;
   font-weight: 650;
   letter-spacing: 0.08em;
 }
@@ -73,14 +73,14 @@
 .fx-module-title h1 {
   margin: 0;
   font-weight: 750;
-  font-size: clamp(24px, 2.3vw, 32px);
+  font-size: clamp(1.6rem, 2.3vw, 2.13333rem);
   line-height: 1.2;
   letter-spacing: -0.035em;
 }
 .fx-module-description {
   margin: 9px 0 0 61px;
   grid-column: 1 / -1;
-  font-size: 13px;
+  font-size: 0.86667rem;
   color: var(--muted);
   line-height: 1.55;
 }
@@ -119,10 +119,10 @@
 .fx-facts dt,
 .fx-time-date {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.8rem;
 }
 .fx-kpi strong {
-  font-size: clamp(22px, 2.3vw, 30px);
+  font-size: clamp(1.46667rem, 2.3vw, 2rem);
   line-height: 1.2;
   letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
@@ -155,7 +155,7 @@
 .fx-section h3,
 .fx-identity h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: 1.06667rem;
   font-weight: 690;
 }
 .fx-toolbar > h2,
@@ -179,7 +179,7 @@
   color: var(--accent, #254dba);
 }
 .fx-count {
-  font-size: 11px;
+  font-size: 0.73333rem;
   font-weight: 600;
   background: var(--soft);
   padding: 2px 7px;
@@ -203,7 +203,7 @@
   min-height: 36px;
   border-radius: 4px;
   font: inherit;
-  font-size: 13px;
+  font-size: 0.86667rem;
 }
 .fx-input {
   padding: 5px 10px;
@@ -242,7 +242,7 @@
 .fx-table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 13px;
+  font-size: 0.86667rem;
 }
 .fx-table th,
 .fx-table td {
@@ -255,7 +255,7 @@
   border-block: 1px solid var(--line);
   background: #eff2f7;
   color: #455673;
-  font-size: 12px;
+  font-size: 0.8rem;
   font-weight: 650;
   white-space: nowrap;
 }
@@ -283,7 +283,7 @@
   text-align: center;
   color: var(--muted);
   padding: 28px 12px;
-  font-size: 13px;
+  font-size: 0.86667rem;
 }
 .fx-pagination {
   display: flex;
@@ -312,7 +312,7 @@
   gap: 2px;
 }
 .fx-named strong {
-  font-size: 14px;
+  font-size: 0.93333rem;
   font-weight: 650;
 }
 .fx-named small {
@@ -337,7 +337,7 @@
   padding: 7px 13px;
   white-space: nowrap;
   font: inherit;
-  font-size: 13px;
+  font-size: 0.86667rem;
   cursor: pointer;
   border-radius: 4px;
 }
@@ -358,7 +358,7 @@
   padding-bottom: 14px;
 }
 .fx-identity h3 {
-  font-size: 21px;
+  font-size: 1.4rem;
   margin: 0 0 2px;
 }
 .fx-identity .badge {
@@ -396,7 +396,7 @@
   background: #f2f4f8;
 }
 .fx-facts dd {
-  font-size: 13px;
+  font-size: 0.86667rem;
   white-space: pre-wrap;
 }
 .fx-section {
@@ -405,11 +405,11 @@
   min-width: 0;
 }
 .fx-section h3 {
-  font-size: 15px;
+  font-size: 1rem;
 }
 .fx-section p {
   margin: 0;
-  font-size: 14px;
+  font-size: 0.93333rem;
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -438,7 +438,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 13px;
-  font-size: 14px;
+  font-size: 0.93333rem;
   list-style: none;
 }
 .fx-disclosure-head::-webkit-details-marker {
@@ -448,7 +448,7 @@
   content: '⌄';
   margin-inline-start: auto;
   color: var(--accent, #254dba);
-  font-size: 16px;
+  font-size: 1.06667rem;
 }
 .fx-disclosure[open] > .fx-disclosure-head {
   background: #f4f6fa;
@@ -495,7 +495,7 @@
   display: flex;
   gap: 6px;
   align-items: center;
-  font-size: 13px;
+  font-size: 0.86667rem;
   margin: 0 0 8px;
   color: var(--ink);
 }
@@ -527,7 +527,7 @@
   background: white;
 }
 .fx-bed span {
-  font-size: 13px;
+  font-size: 0.86667rem;
   overflow-wrap: anywhere;
 }
 .fx-bed strong {
@@ -537,7 +537,7 @@
 }
 .fx-bed small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.73333rem;
 }
 .fx-bed:hover:not(:disabled) {
   outline: 1px solid var(--accent, #254dba);
@@ -566,7 +566,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: 0.93333rem;
 }
 .fx-time-year::after {
   content: '';
@@ -636,7 +636,7 @@
 }
 .fx-form-group legend {
   padding: 0 5px;
-  font-size: 14px;
+  font-size: 0.93333rem;
   color: var(--ink);
   font-weight: 680;
 }
@@ -654,16 +654,16 @@
   justify-content: space-between;
   gap: 8px;
   padding: 10px 15px;
-  font-size: 13px;
+  font-size: 0.86667rem;
   border-bottom: 1px solid var(--line);
 }
 .fx-bedcard h3 {
   margin: 14px 15px 3px;
-  font-size: 23px;
+  font-size: 1.53333rem;
 }
 .fx-bedcard p {
   margin: 0 15px 10px;
-  font-size: 13px;
+  font-size: 0.86667rem;
   color: var(--muted);
 }
 .fx-card-barcode {
@@ -765,7 +765,7 @@
     content: attr(data-label);
     display: block;
     color: var(--muted);
-    font-size: 11px;
+    font-size: 0.73333rem;
     margin-bottom: 2px;
   }
   .fx-table .fx-end {
@@ -945,7 +945,7 @@
   align-items: center;
   gap: 9px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
 }
 .fx-occupancy {
@@ -981,7 +981,7 @@
 }
 .family-identity h2 {
   margin: 3px 0 0;
-  font-size: 23px;
+  font-size: 1.53333rem;
 }
 .family-identity small, .family-institution {
   color: #d1def1;
@@ -993,7 +993,7 @@
 }
 .family-institution {
   margin-inline-start: auto;
-  font-size: 14px;
+  font-size: 0.93333rem;
 }
 .family-mark {
   padding: 12px;
@@ -1004,8 +1004,8 @@
 .admission-registry {display:grid; gap:12px; min-width:0}
 .admission-search {display:flex; align-items:center; flex-wrap:wrap; gap:12px}
 .admission-search input {flex:1; min-width:min(100%,15em)}
-.admission-state-filter {display:flex; align-items:center; white-space:nowrap; gap:8px; color:var(--ink); font-weight:650; font-size:13px}
-.admission-all {justify-self:end; font-size:13px}
+.admission-state-filter {display:flex; align-items:center; white-space:nowrap; gap:8px; color:var(--ink); font-weight:650; font-size:0.86667rem}
+.admission-all {justify-self:end; font-size:0.86667rem}
 .admission-match:not(:empty) {padding:10px; background:#fff6e5; border-radius:7px}
 
 .invoice-rows { display:grid; gap:10px; margin-bottom:8px }

@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from platform_core import provider, staff_resume
+from platform_core import provider, resident_credentials, staff_resume
 from platform_core.agents import document_intake
 from platform_core.provider import media
 from platform_core.store import Store, TIMEZONE
@@ -99,6 +99,25 @@ class AssistantDocuments(TestCase):
                    "合同结束日期：2027-12-01", "合同终止日期：2028-12-01", "打印日期：2029-01-01"]
         fields = document_intake._contract_fields([{"text": t} for t in samples])
         self.assertEqual(fields, {"number": "ZH-25", "signedOn": "2026-11-22", "startsOn": "2026-12-01"})
+
+    def test_identity_fields_do_not_escape_to_chat_or_classifier(self):
+        number = "11010519491231002X"
+        strings = ["居民身份证", "姓名 张三 性别 男 民族 汉", "出生 1949年12月31日", "公民身份号码", number]
+        sample = {"pageCount": 1, "pages": [{"page": 1, "state": "complete"}],
+                  "lines": [{"text": text, "page": 1, "line": i} for i, text in enumerate(strings)]}
+        with patch.object(document_intake.document_ocr, "recognize", return_value=sample), \
+             patch.object(document_intake.generation, "generate", return_value={"category": "身份证正面"}) as classify:
+            result = self.preview()
+            self.assertEqual(result["material"]["fields"], {"name":"张三", "birthDate":"1949-12-31", "idNumber":number})
+            self.assertEqual(result["excerpt"], "")
+            self.assertNotIn(number, repr(classify.call_args))
+            self.assertNotIn("张三", repr(classify.call_args))
+            with patch.object(self.store, "actor", return_value={"kind":"staff","id":"w","permissions":["assistants"]}):
+                self.assertNotIn("material", self.preview())
+        sample["lines"].append({"text":"出生日期：1950年1月1日", "page":1})
+        self.assertIn("birthDate", resident_credentials.suggestions(sample["lines"])["ambiguous"])
+        back = resident_credentials.suggestions([{"text": v, "page":1} for v in ("签发机关 测试公安局","有效期限 2020.01.01-长期")])
+        self.assertEqual(back["fields"], {"authority":"测试公安局","validity":"2020.01.01-长期"})
 
     def test_pdf_preview_renders_requested_local_page_and_checks_access(self):
         handler = Handler.__new__(Handler)

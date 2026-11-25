@@ -1,4 +1,5 @@
 import { residentLabel, staffLabel } from './people-labels.js';
+import { clearFileSelection, fileControl } from '../lib/file-control.js';
 import { residentInsights } from './resident-insights.js';
 import { healthProfile } from './resident-health.js';
 import { residentEvaluations } from './resident-evaluations.js';
@@ -7,7 +8,7 @@ import { dailyTimeline } from './daily-timeline.js';
 import { billDetail } from './billing.js';
 import { familyPortal } from './family-portal.js';
 import { editResident } from './profile-editor.js';
-import { residentRoster } from './resident-roster.js';
+import { credentialList, residentRoster } from './resident-roster.js';
 import { register } from './admission.js';
 import { openPermissionRequest } from './permission-requests.js';
 import { displayAmount, loadProfileChoices, regionPicker } from './profile-controls.js';
@@ -19,7 +20,7 @@ import { previewSummary } from './dossier-summary.js';
 import { asBase64, originalViewer } from './document-original.js';
 import { pendingDocument, recognizeDocument, reviewReceipt } from './document-ocr.js';
 import { openVisitEditor } from './medical-visit-intake.js';
-import { visitHistory } from './medical-visit-review.js';
+import { showVisit, visitHistory, visitsFor } from './medical-visit-review.js';
 import { residencyDetails } from './residency.js';
 import {
   node,
@@ -120,7 +121,10 @@ async function relativeForm(ctx, resident, accountId, profile) {
 
 function label(caption, control, required = false) {
   control.required = required;
-  return node('label', 'field', [node('span', '', caption + (required ? ' *' : '')), control]);
+  const field = control.type === 'file'
+    ? fileControl(control, { action: control.hasAttribute('capture') ? '拍摄照片' : '选择文件' })
+    : control;
+  return node('label', 'field', [node('span', '', caption + (required ? ' *' : '')), field]);
 }
 
 function options(items) {
@@ -196,7 +200,7 @@ function newDocument(ctx, resident, visit, reopenVisit) {
     }
   }
   [pick, camera].forEach((input, i) => input.addEventListener('change', () => {
-    if (input.files[0]) [camera, pick][i].value = '';
+    if (input.files[0]) clearFileSelection([camera, pick][i]);
     inspect(pick.files[0] || camera.files[0]);
   }));
   const err = node('div', 'form-error');
@@ -377,6 +381,8 @@ function showKin(ctx, resident, readOnly=false) {
 function registrationDetails(ctx, resident, profile, archived, stay) {
   const content = node('div', 'fx-profile');
   const actions = choose();
+  if (allowed(ctx, 'intake') || allowed(ctx, 'finance'))
+    content.append(btn(ctx, '证件资料', () => credentialList(ctx, resident)));
   if (!archived && (allowed(ctx, 'intake') || canAct(ctx, 'permissionRequest.create'))) {
     actions.append(allowed(ctx, 'intake')
       ? btn(ctx, '编辑登记资料', () => editResident(ctx, resident, profile), 'primary')
@@ -671,6 +677,19 @@ export function openDossier(ctx, resident, lifeEvent, initialSection) {
   dialog.classList.add('resident-dossier-dialog');
   dialog.dataset.roundsResidentId = resident.id;
   return dialog;
+}
+
+export function openRecordedVisit(ctx, residentId, visitId) {
+  const live = ctx.current?.() || ctx;
+  if (!live.available('dossier') || !allowed(live, 'medical')) return;
+  const person = live.state.residents.find(row => row.id === residentId);
+  const visit = person && visitsFor(live, residentId).find(row => row.id === visitId);
+  if (!visit) return live.toast('这份就诊病例已不在当前可查阅范围内。');
+  const archived = person.status === '已退住' || person.status === '归档到期';
+  const reopen = current => openDossier(current, person, undefined, 'medical');
+  if (reopen(live) === false) return;
+  return showVisit(live, person, visit, archived ? null : openVisitEditor,
+    { open: showDocument, add: archived ? null : newDocument, reopen });
 }
 
 export function renderDossier(route, ctx) {

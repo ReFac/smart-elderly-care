@@ -146,6 +146,11 @@ class NetworkChatTests(unittest.TestCase):
         self,
     ):
         real_name = self.store.snapshot(self.token)["data"]["residents"][0]["name"]
+        self.answer = '{"first":1}'
+        brief = self.ask("我院今天怎么样", "ward-status", webSearch=True)["messages"][-1]
+        self.assertFalse(brief["webSearched"])
+        self.assertIsNone(brief["action"])
+        self.assertNotEqual(brief["content"], chat_scope.REFUSAL)
         self.answer = json.dumps(
             {
                 "answer": "请核对表单",
@@ -159,7 +164,6 @@ class NetworkChatTests(unittest.TestCase):
         )
         for i, text in enumerate(
             (
-                "我院今天怎么样",
                 "请搜索" + real_name + "相关新闻",
                 "查询老人手机号 １３８１２３４５６７８",
                 "搜索我的验证码",

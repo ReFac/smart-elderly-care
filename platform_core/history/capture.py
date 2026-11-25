@@ -39,6 +39,7 @@ PREFIXES = {
     "storage": ("storage_assets",),
 }
 SECRET = {
+    "reviewed_fields",
     "password",
     "salt",
     "password_hash",
@@ -102,7 +103,7 @@ def watch(db, action):
     prefixes = PREFIXES.get(action.partition(".")[0], ())
     if action == "permissionRequest.editProfile":
         prefixes += ("dossier_profiles",)
-    if action.startswith("ops.subsidy"):
+    if action.startswith("ops.subsidy") or action == "dossier.credential":
         prefixes = ("subsidy_",)
     if action == "access.setRealName":
         prefixes = ("account_real_names",)

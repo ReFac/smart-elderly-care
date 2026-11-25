@@ -100,12 +100,12 @@ export function channelOrders(ctx) {
     ),
     cols: [
       { label: '商户订单', view: (r) => named(r.id, r.channel) },
-      { label: '长辈 / 账单', view: (r) => named(residentAnchor(ctx, r.residentId), r.billId) },
+      { label: '长辈 / 账单', view: (r) => named(residentAnchor(ctx, r.residentId), r.billId || "入住预收") },
       { label: '应收金额', view: (r) => money(r.amount) },
       { label: '状态', view: (r) => r.status },
       {
         label: '操作',
-        view: (r) => (r.status === '待支付' ? choose(checkoutAction(ctx, r, available), link(ctx, '核对到账', () => manual(r))) : r.date),
+        view: (r) => (r.status === '待支付' ? choose(checkoutAction(ctx, r, available), !r.collection && link(ctx, '核对到账', () => manual(r))) : r.date),
       },
     ],
   });

@@ -16,10 +16,10 @@
 }
 .rounds-card h2,
 .rounds-card h3 {
-  font-size: 18px;
+  font-size: 1.2rem;
 }
 .rounds-card h4 {
-  font-size: 14px;
+  font-size: 0.93333rem;
 }
 .rounds-heading,
 .rounds-day,
@@ -41,7 +41,7 @@
 }
 .rounds-day time,
 .rounds-schedule small {
-  font-size: 13px;
+  font-size: 0.86667rem;
   color: var(--muted);
 }
 .rounds-schedule {
@@ -80,7 +80,7 @@
   border-radius: 7px;
 }
 .rounds-handoff {
-  font-size: 13px;
+  font-size: 0.86667rem;
   color: var(--muted);
 }
 .rounds-form-grid {
@@ -99,7 +99,7 @@
 .rounds-evidence,
 .rounds-observation,
 .rounds-warning {
-  font-size: 13px;
+  font-size: 0.86667rem;
 }
 .rounds-evidence {
   margin-top: 3px;

@@ -90,43 +90,35 @@ def sign(key, data):
     )
 
 
-def send(host, path, payload, headers):
+def send(host, path, payload, headers, *, method="POST"):
     with closing(HTTPSConnection(host, timeout=8)) as client:
         try:
-            client.request("POST", path, body=payload, headers=headers)
+            client.request(method, path, body=payload, headers=headers)
             with client.getresponse() as response:
                 body = response.read(65537)
                 if response.status != 200 or len(body) > 65536:
-                    raise ValueError("收款渠道未签发付款码，请核对商户订单及签约配置")
+                    raise ValueError("支付渠道未确认请求，请核对商户订单及签约配置")
                 return response.headers, body
         except (OSError, HTTPException):
             raise ValueError("收款渠道暂时无法连接，请稍后重试同一订单") from None
 
 
-def wx_native(order, now):
-    path = "/v3/pay/transactions/native"
+def wechat_api(path, now, request=None):
+    method = "GET" if request is None else "POST"
+    payload = b"" if request is None else compact(request).encode()
     merchant = setting("WXPAY_MERCHANT_ID")
     serial = setting("WXPAY_CERT_SERIAL")
     if not re.fullmatch(r"[0-9A-Za-z]+", merchant) or not re.fullmatch(
         r"[0-9A-Fa-f]+", serial
     ):
         raise ValueError("微信商户号或证书序列号格式错误")
-    payload = compact(
-        dict(
-            appid=setting("WXPAY_APP_ID"),
-            mchid=merchant,
-            out_trade_no=order["id"],
-            description="养老机构服务费",
-            notify_url=notify_origin() + "/api/payments/notify/wechat",
-            amount=dict(total=int(Decimal(str(order["amount"])) * 100), currency="CNY"),
-        )
-    ).encode()
     stamp, nonce = str(int(now.timestamp())), token_hex(16)
     signed = sign(
         "WXPAY_PRIVATE_KEY_FILE",
-        f"POST\n{path}\n{stamp}\n{nonce}\n".encode() + payload + b"\n",
+        f"{method}\n{path}\n{stamp}\n{nonce}\n".encode() + payload + b"\n",
     )
     auth = f'WECHATPAY2-SHA256-RSA2048 mchid="{merchant}",nonce_str="{nonce}",timestamp="{stamp}",serial_no="{serial}",signature="{signed}"'
+    options = {} if method == "POST" else {"method": "GET"}
     headers, raw = send(
         "api.mch.weixin.qq.com",
         path,
@@ -138,9 +130,19 @@ def wx_native(order, now):
             "User-Agent": "ElderlyCare-Merchant/1.0",
             "Wechatpay-Serial": setting("WXPAY_PUBLIC_KEY_ID"),
         },
+        **options,
     )
     verify_wechat_message(headers, raw, now)
-    return json.loads(raw)["code_url"]
+    return json.loads(raw)
+
+
+def wx_native(order, now):
+    result = wechat_api("/v3/pay/transactions/native", now, dict(
+        appid=setting("WXPAY_APP_ID"), mchid=setting("WXPAY_MERCHANT_ID"), out_trade_no=order["id"],
+        description="养老机构服务费", notify_url=notify_origin() + "/api/payments/notify/wechat",
+        amount=dict(total=int(Decimal(str(order["amount"])) * 100), currency="CNY"),
+    ))
+    return result["code_url"]
 
 
 def signed_object(raw, name):
@@ -186,38 +188,26 @@ def signed_object(raw, name):
     return values[name]
 
 
-def ali_precreate(order, now):
+def alipay_api(method, biz, now, *, notify_url=None):
     params = dict(
-        app_id=setting("ALIPAY_APP_ID"),
-        method="alipay.trade.precreate",
-        format="JSON",
-        charset="utf-8",
-        sign_type="RSA2",
-        timestamp=now.strftime("%Y-%m-%d %H:%M:%S"),
-        version="1.0",
-        notify_url=notify_origin() + "/api/payments/notify/alipay",
-        biz_content=compact(
-            dict(
-                out_trade_no=order["id"],
-                total_amount=f"{order['amount']:.2f}",
-                subject="养老机构服务费",
-                qr_code_timeout_express="2h",
-                seller_id=setting("ALIPAY_SELLER_ID"),
-            )
-        ),
+        app_id=setting("ALIPAY_APP_ID"), method=method, format="JSON", charset="utf-8",
+        sign_type="RSA2", timestamp=now.strftime("%Y-%m-%d %H:%M:%S"), version="1.0",
+        biz_content=compact(biz),
     )
+    if notify_url:
+        params["notify_url"] = notify_url
     message = "&".join(f"{k}={params[k]}" for k in sorted(params))
     params["sign"] = sign("ALIPAY_PRIVATE_KEY_FILE", message.encode())
-    _, raw = send(
-        "openapi.alipay.com",
-        "/gateway.do?charset=utf-8",
-        urlencode(params).encode(),
-        {
-            "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
-            "Accept": "application/json",
-        },
-    )
-    result = signed_object(raw, "alipay_trade_precreate_response")
+    _, raw = send("openapi.alipay.com", "/gateway.do?charset=utf-8", urlencode(params).encode(),
+                  {"Content-Type": "application/x-www-form-urlencoded;charset=utf-8", "Accept": "application/json"})
+    return signed_object(raw, method.replace(".", "_") + "_response")
+
+
+def ali_precreate(order, now):
+    result = alipay_api("alipay.trade.precreate", dict(
+        out_trade_no=order["id"], total_amount=f"{order['amount']:.2f}", subject="养老机构服务费",
+        qr_code_timeout_express="2h", seller_id=setting("ALIPAY_SELLER_ID"),
+    ), now, notify_url=notify_origin() + "/api/payments/notify/alipay")
     if result["code"] != "10000" or result["out_trade_no"] != order["id"]:
         raise ValueError("支付宝未确认这笔商户订单")
     return result["qr_code"]
@@ -274,7 +264,12 @@ def authorized_order(store, db, token, oid):
     return actor, data, order
 
 
-def payable(order, bill):
+def payable(state, order):
+    if order.get("collection") == "terminal":
+        return False
+    if order.get("purpose") == "admission":
+        return order["status"] == "待支付"
+    bill = lookup(state, "bills", order["billId"], "账单")
     if order["status"] != "待支付" or bill["balance"] <= 0:
         return False
     return (
@@ -284,7 +279,7 @@ def payable(order, bill):
 
 
 def cached_payment_link(db, state, order, now):
-    if not payable(order, lookup(state, "bills", order["billId"], "账单")):
+    if not payable(state, order):
         return {}
     if not db.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='checkout_codes'"
@@ -310,8 +305,7 @@ def open_code(store, token, oid):
         _, data, order = authorized_order(store, db, token, oid)
         if order["channel"] not in enabled_channels():
             raise ValueError("本机构尚未启用此渠道的商户收款码")
-        bill = lookup(data, "bills", order["billId"], "账单")
-        if not payable(order, bill):
+        if not payable(data, order):
             raise ValueError("订单已到账或应收余额已变，请核对收费账单")
         db.execute(
             """CREATE TABLE IF NOT EXISTS checkout_codes (id TEXT PRIMARY KEY, lease TEXT NOT NULL, until INTEGER NOT NULL, url TEXT NOT NULL)"""
@@ -332,8 +326,7 @@ def open_code(store, token, oid):
         with closing(store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             actor, data, order = authorized_order(store, db, token, oid)
-            bill = lookup(data, "bills", order["billId"], "账单")
-            if not payable(order, bill):
+            if not payable(data, order):
                 raise ValueError("订单状态已更新，请刷新账单")
             if not db.execute(
                 "UPDATE checkout_codes SET url=?,until=? WHERE id=? AND lease=?",

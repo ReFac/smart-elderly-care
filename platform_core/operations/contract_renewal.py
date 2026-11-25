@@ -5,11 +5,12 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
-from .billing_cycles import monthly_start
-from .records import new_id
 from ..access_policy import has, select_fields
+from .billing_cycles import monthly_start
+from .payment_terms import CASH_METHODS
+from .records import new_id
 
-RENEWAL_TENDER = {"线下登记", "线下刷卡登记", "微信支付", "支付宝", "预交金冲抵"}
+RENEWAL_TENDER = CASH_METHODS | {"预交金冲抵"}
 
 
 def has_security(person):

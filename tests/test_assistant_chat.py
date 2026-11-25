@@ -253,7 +253,7 @@ class ChatTests(unittest.TestCase):
         self.now = original
         self.command("ops.stock", {"itemId": "stock-1", "type": "入库", "quantity": 2})
         rev = self.store.version(self.owner)["revision"]
-        first = self.ask("今天院里情况怎么样呀")
+        first = self.ask("今天院里的护理用品怎么样呀")
         self.assertEqual(
             self.facts()["精确时间窗内已登记改动（操作代号及次数）"]["ops.stock"], 1
         )
@@ -261,7 +261,7 @@ class ChatTests(unittest.TestCase):
         self.assertNotIn("账号概况", self.facts())
         self.assertNotIn("经销员或供应商绩效资料", self.facts())
         self.assertEqual(len(first["messages"]), 2)
-        self.assertEqual(self.ask("今天院里情况怎么样呀"), first)
+        self.assertEqual(self.ask("今天院里的护理用品怎么样呀"), first)
         self.transport.assert_called_once()
         self.ask("那过去48小时呢", "again")
         self.assertEqual(
@@ -271,7 +271,7 @@ class ChatTests(unittest.TestCase):
         message = json.loads(second_prompt[-1]["content"])
         self.assertEqual(
             [m["content"] for m in message["对话上文"]],
-            ["今天院里情况怎么样呀", "云端答复"],
+            ["今天院里的护理用品怎么样呀", "云端答复"],
         )
         self.assertEqual(message["当前问题"], "那过去48小时呢")
         self.ask("护理用具怎么样", "third")

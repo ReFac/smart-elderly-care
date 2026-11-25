@@ -187,6 +187,9 @@ class Handler(BaseHTTPRequestHandler):
         return {key: values[0] for key, values in params.items()}
 
     def read_resource(self, path):
+        if path == "/api/account/display-preferences":
+            from platform_core import display_preferences
+            return self.send_json(200, display_preferences.settings(self.store, self.token()))
         if path == "/api/care/risk-report-example":
             from platform_core.care import risk_reports
             return self.send_json(200, risk_reports.example(self.store, self.token()))
@@ -199,10 +202,10 @@ class Handler(BaseHTTPRequestHandler):
             from platform_core.operations import subsidies
             params = self.query_fields({"month"})
             return self.send_json(200, subsidies.read(self.store, self.token(), params.get("month")))
-        subsidy_file = re.fullmatch(r"/api/finance/subsidies/materials/([a-f0-9]{32})", path)
+        subsidy_file = re.fullmatch(r"/api/(finance/subsidies/materials|dossier/credentials)/([a-f0-9]{32})", path)
         if subsidy_file:
             from platform_core.operations import subsidies
-            raw, mime = subsidies.original(self.store, self.token(), subsidy_file[1])
+            raw, mime = subsidies.original(self.store, self.token(), subsidy_file[2], credential=subsidy_file[1] == "dossier/credentials")
             return self.respond(200, raw, mime)
         if path == "/api/auth/passkeys":
             from platform_core import passkeys
@@ -635,6 +638,9 @@ class Handler(BaseHTTPRequestHandler):
             progress.close()
 
     def write_resource(self, path):
+        if path == "/api/account/display-preferences":
+            from platform_core import display_preferences
+            return self.send_json(200, display_preferences.settings(self.store, self.token(), self.read_json(1024)))
         if path in ("/api/updates/check", "/api/updates/settings", "/api/updates/download", "/api/updates/install"):
             service = self.update_service or updates.UpdateService(self.store)
             data = self.read_json(1024)
@@ -988,6 +994,19 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 result = self.store.transcribe(self.token(), asr[1], raw, consent)
             return self.send_json(200, result)
+        terminal = re.fullmatch(r"/api/payments/terminal/v1/(lookup|receipt)", path)
+        if terminal:
+            from platform_core.operations.terminal import handle
+            return self.send_json(200, handle(self.store, terminal[1], self.headers, self.read_body(2048)))
+        if path == "/api/payments/refunds/channel":
+            from platform_core.operations import merchant_refunds
+            return self.send_json(200, merchant_refunds.perform(self.store, self.token(), self.read_json(512)))
+        if path == "/api/payments/refunds/notify/wechat":
+            from platform_core.operations import merchant_refunds
+            if self.headers.get_content_type() != "application/json":
+                raise InvalidMedia("微信退款通知格式无效")
+            merchant_refunds.receive_wechat(self.store, self.headers, self.read_body(SMALL_BODY))
+            return self.send_json(200, {"code": "SUCCESS", "message": "成功"})
         if path == "/api/payments/checkout":
             body = self.read_json(512)
             if set(body) != {"orderId"}:
@@ -1027,6 +1046,16 @@ class Handler(BaseHTTPRequestHandler):
                 raise
             except PermissionError as e:
                 raise SignedOut(str(e)) from e
+            if user["kind"] == "owner" and getattr(self.store, "sample_pending_login", False):
+                from platform_core import sample
+
+                if sample.pending(self.store):
+                    try:
+                        sample.populate(self.store, token)
+                    except Exception:
+                        self.store.logout(token)
+                        raise
+                self.store.sample_pending_login = False
             return self.send_json(200, {"user": user}, self.session_cookie(token))
         if path == "/api/auth/logout":
             self.read_json(2048)
@@ -1066,7 +1095,7 @@ class Handler(BaseHTTPRequestHandler):
                 elif body["action"] == "access.create":
                     raise ValueError("请登记本人手机号。登录密码由本人设置。")
             if (
-                body.get("action") not in ("dossier.document", "access.staffContract", "ops.subsidyMaterial")
+                body.get("action") not in ("dossier.document", "dossier.credential", "access.staffContract", "ops.subsidyMaterial")
                 and int(self.headers["Content-Length"]) > SMALL_BODY
             ):
                 raise ValueError("普通表单上限为 64 KiB")
@@ -1188,15 +1217,24 @@ def main():
 
 
 def serve_institution(args, origin, initial_password):
-    from platform_core import sms_delivery
+    from platform_core import sample, sms_delivery
+    from platform_core.operations import checkout, merchant_refunds
 
     try:
         workers, heavy_workers = http_capacity.configured_limits()
         codes, links = sms_delivery.configured()
     except ValueError as error:
         raise SystemExit(str(error)) from None
-    store = Store(args.db, initial_data=args.initial_data, initial_owner_password=initial_password,
+    store = Store(args.db, initial_data=args.initial_data, prepare_sample=True, initial_owner_password=initial_password,
                   code_senders=codes, reset_link_senders=links)
+    owner_password = initial_password or os.environ.get("NH_OWNER_PASSWORD")
+    if store.created_workspace and args.initial_data == "demo" and owner_password:
+        token, _ = store.login("owner", owner_password)
+        try:
+            sample.populate(store, token)
+        finally:
+            store.logout(token)
+    store.sample_pending_login = sample.pending(store)
     update_service = updates.UpdateService(store)
     gate = Path(os.environ["NH_UPDATE_GATE"]) if os.environ.get("NH_UPDATE_GATE") else None
     handler = partial(
@@ -1208,6 +1246,7 @@ def serve_institution(args, origin, initial_password):
         stopped = Event()
         worker = Thread(target=dispatch_scheduled_work, args=(store, stopped), name="scheduled-work", daemon=True)
         auto = Thread(target=dispatch_updates, args=(update_service, stopped), name="platform-updates", daemon=True)
+        refunds = Thread(target=merchant_refunds.poll, args=(store, stopped), name="merchant-refunds", daemon=True)
 
         def start_services():
             while gate and not gate.is_file():
@@ -1217,6 +1256,8 @@ def serve_institution(args, origin, initial_password):
                 store.backups.start()
                 store.rounds.start()
                 worker.start()
+                if checkout.enabled_channels():
+                    refunds.start()
                 if update_service.managed:
                     auto.start()
 
@@ -1234,6 +1275,8 @@ def serve_institution(args, origin, initial_password):
                 worker.join(timeout=12)
             if auto.ident is not None:
                 auto.join(timeout=1)
+            if refunds.ident is not None:
+                refunds.join(timeout=10)
             store.rounds.stop()
             store.backups.stop()
 

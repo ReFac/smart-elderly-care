@@ -1,6 +1,7 @@
 import { el, icon, button } from '../lib/ui.js';
 import { table, named, badge, money, facts } from './shared.js';
 import { residentAnchor, staffLabel } from './people-labels.js';
+import { demoGuideButton } from './demo-guide.js';
 
 function jump(ctx, label, glyph, destination, tab) {
   const link = el('a','desk-shortcut');
@@ -18,7 +19,11 @@ export function officeHome(ctx) {
   heading.append(identity);
   const launch = el('a','btn btn-primary');
   launch.href = '#overview?view=cockpit'; launch.append(icon('chart',16),'打开经营大屏');
-  heading.append(launch); home.append(heading);
+  const actions = el('div','desk-home-actions');
+  const guide = demoGuideButton(ctx);
+  if (guide) actions.append(guide);
+  actions.append(launch);
+  heading.append(actions); home.append(heading);
   const metrics = el('div','desk-home-metrics');
   function metric(label,value,unit,detail,route,tab) {
     const a = el('a','desk-metric');

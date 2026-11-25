@@ -6,9 +6,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from ..operations.assistants import cite_records
-
-
-CASH_METHODS = ("线下登记", "线下刷卡登记", "微信支付", "支付宝")
+from ..operations.payment_terms import CASH_METHODS
 
 
 def reporting_window(goal, day):
@@ -125,8 +123,10 @@ def overview(records, today, people=None):
         if not (first_day <= day <= today):
             continue
         bucket = days.setdefault(
-            day, dict(deposits=Decimal(0), direct=Decimal(0), fees=Decimal(0))
+            day, dict(deposits=Decimal(0), direct=Decimal(0), fees=Decimal(0), refunds=Decimal(0))
         )
+        if row.get("refundOf"):
+            bucket["refunds"] -= Decimal(str(row["amount"]))
         bucket["deposits" if key == "depositEntries" else "direct"] += Decimal(
             str(row["amount"])
         )
@@ -147,6 +147,8 @@ def overview(records, today, people=None):
             sum(v["direct"] + v["deposits"] for k, v in days.items() if k >= first)
         ),
         "todayGross": float(gross),
+        "todayRefunds": float(current.get("refunds", 0)),
+        "monthRefunds": float(sum(v["refunds"] for k, v in days.items() if k >= first)),
         "todayNet": None if unknown_fees else float(gross - current.get("fees", 0)),
         "outstanding": float(
             sum(Decimal(str(b["balance"])) for b in ledger if b["balance"] > 0)

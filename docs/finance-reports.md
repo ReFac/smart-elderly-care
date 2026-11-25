@@ -90,3 +90,11 @@ CSV 文件支持 UTF-8 和 GB18030。每个文件最大 1 MiB，每个 CSV 最�
 | 支付宝当面付 | 签约条码支付后，收银端读取付款码并通过 `alipay.trade.pay` 提交。以商户签约产品及应用授权为准。[开放平台签约指引](https://open.alipay.com/operatingGuide.htm) · [官方场景说明](https://aipay.alipay.com/article/3074) |
 
 此次完成官方接口选型。顾客付款码被扫扣款上线前，需要院方签约、门店身份和对应收银凭证，以及支付中、断网查单、撤销和到账幂等的商户联调。顾客付款码不得写入长辈档案、工单、Agent 提示、操作日志或备份。
+
+## 微信与支付宝原路退款
+
+在「实收流水」中选择有渠道签名到账凭证的收款，申请全部或部分退款。在「退款对账」打开该申请，核对原商户订单、退款单号和金额，再点击「确认原路退款」。每次部分退款使用独立退款单号。同一申请的重试始终沿用原单号。仅有终端流水、手工收款或外部对账凭证时，使用实际退款凭证核实流程。
+
+微信商户需为机构已配置的商户号开通退款，并保证外网可访问 `POST /api/payments/refunds/notify/wechat`。系统验证微信签名、商户号和加密通知，核对原交易、退款单号、订单总额与退款金额。查询或通知确认成功后冲正一次。退款关闭后释放占用，退款异常时须在商户平台处理。[微信退款指引](https://pay.wechatpay.cn/doc/v3/merchant/4013071031) · [微信单笔退款查询](https://pay.wechatpay.cn/doc/v3/merchant/4012791884)
+
+支付宝使用机构签约应用的 RSA2 配置发起退款，再查询同一个退款请求号，核对该次退款金额。系统首次自动查单约在提交后 15 秒，微信约 1 分钟；后续查询逐步延长至每小时。查询进度重启后继续，财务也可在退款对账中手动查单。网络超时、验签异常和渠道处理中会保留退款申请与金额占用。生产交付需用机构自己的商户资料完成联调。[支付宝交易退款](https://aipay.alipay.com/docs/vibe-pay/ai-web-app-payment-qianyi/api-list/alipay-trade-refund.html) · [支付宝单笔退款查询](https://aipay.alipay.com/docs/vibe-pay/ai-web-app-payment-qianyi/api-list/alipay-trade-fastpay-refund-query.html)

@@ -3,6 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <title>财务与看板交互验证</title>
+    <link rel="stylesheet" href="../../web/style.css" />
+    <link rel="stylesheet" href="../../web/desk.css" />
+    <link rel="stylesheet" href="../../web/features/subsidies.css" />
   </head>
   <body>
     <main></main>
@@ -96,7 +99,7 @@
         type: '首次申报',
         missing: [],
         materials: [],
-        invoiceMonths: [],
+        invoiceMonths: ['2026-10'],
         claim: null,
       };
       const ctx = {
@@ -251,6 +254,36 @@
         await new Promise((r) => setTimeout(r, 1));
         const table = app.querySelector('.subsidy-grid');
         ok(table.tBodies[0].rows.length === 2 && !app.querySelector('.fx-kpis'), '申报材料单独显示');
+        for (const action of ['维护证件', '上传发票']) {
+          find(table, action).click();
+          const modal = document.querySelector('dialog[open]');
+          const input = modal.querySelector('input[type=file]');
+          const status = modal.querySelector('.file-control-status');
+          ok(modal.querySelector('.file-control-button').textContent === '选择文件' &&
+            status.textContent === '未选择文件' && input.validity.valueMissing, '中文文件控件与必填校验');
+          ok(!input.checkValidity() && input.validationMessage === '请选择需要上传的文件。' &&
+            input.title === '未选择文件', '浏览器界面为英文时，空状态提示与必填错误仍使用中文');
+          ok(input.labels[0].textContent.includes('原件') && input.getAttribute('aria-describedby') === status.id,
+            '文件选择器保留原件标签与状态说明');
+          const selectOriginal = () => {
+            const dt = new DataTransfer();
+            dt.items.add(new File(['original'], '原件（复印件）.pdf', { type: 'application/pdf' }));
+            input.files = dt.files;
+            input.dispatchEvent(new Event('change'));
+          };
+          selectOriginal();
+          ok(status.textContent === '原件（复印件）.pdf' && input.checkValidity(), '显示已选文件名');
+          input.form.reset();
+          await Promise.resolve();
+          ok(!input.files.length && status.textContent === '未选择文件', '表单重置同步文件名');
+          selectOriginal();
+          input.form.requestSubmit();
+          await new Promise(resolve => modal.addEventListener('close', resolve, { once: true }));
+          const [command, payload] = requests.at(-1);
+          ok(command === 'ops.subsidyMaterial' && payload.fileName === '原件（复印件）.pdf' &&
+            atob(payload.imageBase64) === 'original' &&
+            payload.kind === (action === '上传发票' ? 'invoice' : 'idFront'), '证件与发票提交原始文件');
+        }
         app.querySelector('[aria-label=勾选张甲]').click();
         find(app, '生成申报清单').click();
         ok(requests.at(-1)[1].residentIds[0] === 'p', '勾选完整材料按人签发');
@@ -262,10 +295,10 @@
           '过滤筛选清除不可见选项',
         );
         out.textContent = 'PASS';
-        document.body.dataset.result = 'pass';
+        document.documentElement.dataset.result = 'pass';
       } catch (e) {
         out.textContent = e.stack;
-        document.body.dataset.result = 'fail';
+        document.documentElement.dataset.result = 'fail';
       }
     </script>
   </body>

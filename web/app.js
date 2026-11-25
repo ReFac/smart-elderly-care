@@ -1,5 +1,5 @@
 import { openLinkedBedCard } from './features/med-rounds.js';
-import { chatLauncher, openChat, toggleChat, clearChat, checkChatUser } from './features/assistant-chat.js';
+import { chatLauncher, openChat, toggleChat, clearChat, checkChatUser, placeChat } from './features/assistant-chat.js';
 import { hasNewNotice, quickDestinations, staffNotices, supplyOrders } from './features/assistant-actions.js';
 import { loginScreen } from './features/access.js';
 import { redeemPasswordReset } from './features/identity.js';
@@ -22,17 +22,17 @@ import { pendingLeadCalls } from './features/leads.js';
 import { residentLabel, residentHref, staffLabel } from './features/people-labels.js';
 import { openDossier, residentWorkspaceTab } from './features/dossier.js';
 import { canOpenPermissionRequests, openPermissionRequests, pendingPermissionRequests } from './features/permission-requests.js';
-import { colorModeControl, setColorModeAccount } from './lib/color-mode.js';
+import { setDisplayAccount } from './lib/reading-display.js';
 
 import { restoreCarePlanTab } from './features/care-plan-editor.js';
-import { WorkspaceTabs } from './lib/workspace-tabs.js';
+import { WorkspaceTabs, TAB_LIMIT } from './lib/workspace-tabs.js';
 import { menuFor, deskPath, viewIcon } from './lib/desk-navigation.js';
 import { officeHome } from './features/office-home.js';
 
 const desk = new WorkspaceTabs();
 const expandedGroups = new Set();
-let deskMenu = [], sidebarScroll = 0, compact = false, largeText = false;
-let lastMenuGroup, restoredTabsFor;
+let deskMenu = [], sidebarScroll = 0, compact = false;
+let lastMenuGroup, restoredTabsFor, sidebarStamp;
 const { el, icon, button, toast } = ui;
 
 const root = document.getElementById('app');
@@ -82,7 +82,7 @@ function signedOut() {
   closeMenu();
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   document.documentElement.removeAttribute('data-theme');
-  setColorModeAccount();
+  setDisplayAccount();
   document.title = '登录 · ' + (branding.brandName || '医养管理平台');
   root.replaceChildren(
     loginScreen(async (username, password) => {
@@ -162,7 +162,7 @@ function applySnapshot(snapshot) {
   revision = snapshot.revision;
   branding = state.uiSettings;
   document.documentElement.dataset.theme = state.uiSettings.theme;
-  setColorModeAccount(state.user.id);
+  setDisplayAccount(state.user.id, state.displayPreferences);
   const bucket = 'nh-alerts:' + state.user.id;
   if (!seenAlerts.size) {
     try {
@@ -216,6 +216,10 @@ function go(destination, tab, onArrival, query) {
 
 function navigateHash(hash, onArrival) {
   closeMenu();
+  if (!desk.canOpen(hash) && !new URLSearchParams(hash.split('?')[1]).has('resident')) {
+    toast('页签已满，请取消固定一个页签，或先保存正在编辑的内容。');
+    return false;
+  }
   if (location.hash !== hash) {
     document.querySelectorAll('dialog[open]').forEach(d => d.close());
     residentOverlay = null;
@@ -229,7 +233,9 @@ function saveDesk() {
   if (!state || !restoredTabsFor) return;
   // Only route/view IDs belong in session storage. Never serialize a search, form, name or record.
   const keys = [...desk.pages.keys()].filter(key=>/^#[a-zA-Z]+(?:\?(?:view=cockpit|tab=[a-zA-Z0-9_-]+))?$/.test(key));
-  try { sessionStorage.setItem('nh-open-views',JSON.stringify({scope:restoredTabsFor,keys})); } catch {}
+  const pinned = keys.filter(key => desk.pages.get(key).pinned);
+  const recent = [...keys].sort((a,b) => desk.pages.get(a).lastUsed - desk.pages.get(b).lastUsed);
+  try { sessionStorage.setItem('nh-open-views',JSON.stringify({scope:restoredTabsFor,keys,pinned,recent})); } catch {}
 }
 
 function restoreDeskPages() {
@@ -239,14 +245,21 @@ function restoreDeskPages() {
   try { saved=JSON.parse(sessionStorage.getItem('nh-open-views')); } catch {}
   if (saved?.scope !== restoredTabsFor || !Array.isArray(saved.keys)) return;
   const visible = menuFor(context());
-  for (const key of saved.keys) {
+  for (const key of saved.keys.slice(-TAB_LIMIT)) {
     if (typeof key!=='string' || !/^#[a-zA-Z]+(?:\?(?:view=cockpit|tab=[a-zA-Z0-9_-]+))?$/.test(key)) continue;
     const [r,query]=key.slice(1).split('?');
     if (!routes.has(r) || !available(r)) continue;
     const params = new URLSearchParams(query),tab=params.get('tab') || undefined,view=params.get('view') || undefined;
     const path=deskPath(visible,r,tab,view);
     // Views without static labels are rendered and named on first access.
-    desk.ensure({key,route:r,tab,view,title:path.label || routes.get(r).label});
+    desk.ensure({key,route:r,tab,view,title:path.label || routes.get(r).label,
+      pinned:Array.isArray(saved.pinned) && saved.pinned.includes(key)});
+  }
+  if (Array.isArray(saved.recent)) {
+    for (const key of saved.recent.slice(-TAB_LIMIT)) {
+      const page = desk.pages.get(key);
+      if (page) page.lastUsed = ++desk.sequence;
+    }
   }
 }
 
@@ -263,7 +276,10 @@ function resetDesk() {
 function openWorkspaceTab(destination, spec) {
   if (!available(destination) || !spec?.id || typeof spec.render !== 'function') return false;
   const hash = '#' + destination + '?' + new URLSearchParams({work: spec.id});
-  desk.ensure({key:hash, route:destination, ...spec});
+  if (!desk.ensure({key:hash, route:destination, ...spec})) {
+    toast('页签已满，请取消固定一个页签，或先保存正在编辑的内容。');
+    return false;
+  }
   navigateHash(hash);
   return true;
 }
@@ -280,7 +296,14 @@ function updateTabStrip() {
 }
 
 function tabStrip() {
-  return desk.strip({activate: navigateHash, close: closeWorkspaceTab,
+  function pin(key) {
+    const page = desk.pages.get(key);
+    if (!page || page.home) return;
+    page.pinned = !page.pinned;
+    saveDesk();
+    updateTabStrip();
+  }
+  return desk.strip({activate: navigateHash, close: closeWorkspaceTab, pin,
     refresh: async () => {
       const here = desk.active;
       try { if (await readState()) { render(); if (desk.active === here) toast('已刷新当前页签'); } }
@@ -288,9 +311,13 @@ function tabStrip() {
     },
     manage: () => {
       const box = el('div', 'desk-tab-manager');
+      box.append(el('p', '', '已打开 ' + desk.pages.size + ' / ' + TAB_LIMIT + ' 个页签。满额时自动收起最久未使用的未固定页签。'));
       for (const page of desk.pages.values()) {
         const row = el('div');
         row.append(button(page.title, () => { dialog.close(); navigateHash(page.key); }, 'ghost'));
+        if (!page.home) row.append(button(page.pinned ? '取消固定' : '固定', () => {
+          dialog.close(); pin(page.key);
+        }));
         if (!page.pinned) row.append(button('关闭', () => {
           dialog.close(); closeWorkspaceTab(page.key);
         }));
@@ -305,7 +332,7 @@ function getRoute() {
   const params = new URLSearchParams(location.hash.split('?')[1]);
   const tab = params.get('tab');
   if (tab && available(original)) selectTab(original, tab);
-  if (original === 'assistants') {
+  if (original === 'assistants' && !available('assistants')) {
     const home = landing();
     window.history.replaceState(null, '', '#' + home);
     requestAnimationFrame(() => { if (state) openChat(context); });
@@ -443,13 +470,18 @@ async function submitChange({ action, url, payload, review = {}, dossierDialog }
       render();
     }
     if (!response.ok) throw new Error(result.error || '操作未保存');
+    if (action === 'access.settings' || action === 'access.mediaSettings') {
+      const page = desk.pages.get(desk.active);
+      if (page) page.state.unsaved = false;
+    }
     if (action === 'account.changePassword') {
       signedOut();
       return true;
     }
     if (!(await readState())) return true;
     const keptDossier = preserveDossier();
-    if (!keptDossier) document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+    const keepAdmission = action === 'ops.admissionOrder' && review.preserveForm?.open && prior.user.id === state.user.id;
+    if (!keptDossier && !keepAdmission) document.querySelectorAll('dialog[open]').forEach((d) => d.close());
     const effectIds = (result.affected || []).map((r) => r.entityId);
     focusIds = [
       ...new Set([...effectIds, payload.taskId, payload.residentId, payload.id].filter(Boolean)),
@@ -493,7 +525,7 @@ function context() {
       try { return await get(path); }
       finally {
         page.pendingReads--;
-        if (page.key !== desk.active) page.node = null;
+        if (page.key !== desk.active && !page.state.unsaved) page.node = null;
       }
     } : get,
     historyScope,
@@ -589,7 +621,6 @@ function sidebar() {
 const smallScreen = () => matchMedia('(max-width: 760px)').matches;
 function applyDeskSize() {
   root.classList.toggle('desk-compact',compact);
-  document.documentElement.classList.toggle('desk-large-text',largeText);
   root.querySelector('.menu-trigger')?.setAttribute('aria-expanded',
     String(smallScreen() ? root.classList.contains('menu-open') : !compact));
 }
@@ -823,7 +854,6 @@ function accountMenu() {
   }
   const dialog = detail('当前账号', info);
   info.append(
-    colorModeControl(),
     button(
       '个人中心',
       () => {
@@ -832,6 +862,7 @@ function accountMenu() {
       },
       'primary',
     ),
+    button('外观与显示', () => { dialog.close(); go('account','display'); }),
     button('退出登录', signOut),
   );
 }
@@ -919,9 +950,7 @@ function masthead(rootViews) {
       catch { toast('当前浏览器未开放全屏显示'); }
     }, 'icon','fullscreen');
     fullscreen.setAttribute('aria-label','切换全屏'); fullscreen.title = '切换全屏';
-    const size = button('', () => {largeText = !largeText; applyDeskSize(); size.setAttribute('aria-pressed',String(largeText));}, 'icon','font');
-    size.setAttribute('aria-label','放大字号'); size.title = '放大字号'; size.setAttribute('aria-pressed',String(largeText));
-    controls.append(search, fullscreen, size, bell);
+    controls.append(search, fullscreen, bell);
   }
   controls.prepend(chatLauncher(() => toggleChat(context)));
   const account = el('button', 'account-trigger');
@@ -941,13 +970,14 @@ function masthead(rootViews) {
   return bar;
 }
 
-let editing = false;
 root.addEventListener('input', (e) => {
-  if (e.target.closest('.access-settings')) editing = true;
+  if (e.target.closest('.access-settings')) {
+    const page = desk.pages.get(desk.active);
+    if (page) page.state.unsaved = true;
+  }
 });
 
 function render() {
-  editing = false;
   if (!state) return;
   route = getRoute();
   if (!available(route)) {
@@ -957,12 +987,17 @@ function render() {
   deskMenu = menuFor(context());
   const home = landing();
   const homeKey = '#' + home;
-  desk.ensure({key:homeKey,route:home,title:home === 'overview' ? '首页' : routes.get(home).label,pinned:true});
+  desk.ensure({key:homeKey,route:home,title:home === 'overview' ? '首页' : routes.get(home).label,pinned:true,home:true});
   restoreDeskPages();
   const params = new URLSearchParams(location.hash.split('?')[1]);
   const tab = params.get('tab') || undefined, view = params.get('view') || undefined;
   let key = location.hash || homeKey;
   if (params.has('resident') || params.has('bedcard')) key = '#' + route;
+  if (!desk.canOpen(key)) {
+    history.replaceState(null, '', desk.active || homeKey);
+    toast('页签已满，请取消固定一个页签，或先保存正在编辑的内容。');
+    return render();
+  }
   if (params.has('work') && !desk.pages.has(key)) {
     const restored = restoreWorkspaceDocument(route,params.get('work'));
     if (restored) desk.ensure({key,route,...restored});
@@ -979,22 +1014,23 @@ function render() {
   if (previous && switching) {
     previous.scroll = window.scrollY;
     // Detached views can discard late responses. Rebuild them when they are opened again.
-    if (previous.pendingReads) previous.node = null;
+    if (previous.pendingReads && !previous.state.unsaved) previous.node = null;
   }
   sidebarScroll = root.querySelector('.nav-list')?.scrollTop ?? sidebarScroll;
-  desk.active = key;
+  desk.activate(key);
   if (page.tab) selectTab(route,page.tab);
   else if (!page.render && !page.node) selectTab(route,undefined);
   root.classList.add('desk-shell');
   closeMenu();
   const wrap = el('div', 'app-main');
   let main = page.node;
-  if (!main || !switching) {
+  if (!main || (!switching && !page.state.unsaved)) {
     main = el('main','content'); main.id = 'content'; main.tabIndex = -1;
     main.dataset.route = route;
     if (page.view === 'cockpit' && !page.render) main.classList.add('desk-cockpit');
     if (page.render) main.append(page.render(context()));
     else if (route === 'overview') main.append(page.view === 'cockpit' ? dashboard(context()) : officeHome(context()));
+    else if (route === 'assistants') main.append(el('div', 'assistant-page'));
     else main.append(renderFeature(route, context()));
     page.node = main;
     if (tab && !page.render) {
@@ -1008,7 +1044,7 @@ function render() {
   const shade = el('button','menu-backdrop'); shade.type = 'button';
   shade.setAttribute('aria-label','收起业务导航'); shade.onclick = closeMenu;
   const rootViews = page.render ? null : main.querySelector('.fx-tabs[data-route="' + CSS.escape(route) + '"]');
-  if (rootViews) rootViews.hidden = true;
+  if (rootViews) rootViews.hidden = route !== 'account';
   const assistant = el('button', 'desk-assistant-float');
   assistant.type = 'button';
   assistant.title = '询问健康助理';
@@ -1017,7 +1053,19 @@ function render() {
   assistant.setAttribute('aria-controls', 'assistant-chat');
   assistant.append(icon('spark', 23));
   assistant.onclick = () => openChat(context);
-  root.replaceChildren(sidebar(),masthead(rootViews),shade,wrap,assistant);
+  // Keep native mouse/keyboard targets attached while a background revision refreshes the content.
+  // Any change of account, permitted menu, active destination or brand rebuilds the rail.
+  const nextSidebar = JSON.stringify([state.actorStamp, state.user.portalSelf, state.uiSettings.brandName,
+    deskMenu, route, page.tab, page.view]);
+  const rail = root.firstElementChild;
+  if (rail?.matches('.sidebar') && sidebarStamp === nextSidebar) {
+    while (rail.nextSibling) rail.nextSibling.remove();
+  } else {
+    root.replaceChildren(sidebar());
+    sidebarStamp = nextSidebar;
+  }
+  root.append(masthead(route === 'account' ? null : rootViews),shade,wrap,assistant);
+  placeChat(context, route === 'assistants' ? main.querySelector('.assistant-page') : null);
   root.querySelector('.nav-list').scrollTop = sidebarScroll;
   applyDeskSize();
   if (switching) window.scrollTo(0,page.scroll);
@@ -1195,7 +1243,7 @@ async function refresh() {
         sameRefreshVersion(check, deferredRefresh)) {
       const dialogs = [...document.querySelectorAll('dialog[open]')];
       if (dialogs.length === deferredRefresh.dialogCount &&
-          (dialogs.length || editing) &&
+          (dialogs.length || desk.pages.get(desk.active)?.state.unsaved) &&
           dialogs.every(dialog => deferredRefresh.dialogs.get(dialog) === dialogRefreshTarget(dialog))) return;
     }
     const snapshot = await get('/api/state');
@@ -1216,7 +1264,7 @@ async function refresh() {
       lostFamilyAccess ||
       JSON.stringify(state.user) !== JSON.stringify(snapshot.data.user);
     const dialogs = [...document.querySelectorAll('dialog[open]')];
-    if (editing && !changedUser && !dialogs.length) {
+    if (desk.pages.get(desk.active)?.state.unsaved && !changedUser && !dialogs.length) {
       deferRefresh(snapshot, dialogs);
       return;
     }

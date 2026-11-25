@@ -1,5 +1,6 @@
 // Sidebar entries target the same permission-checked routes as search and the assistant.
 export const deskMenu = [
+  { label: 'AI', icon: 'spark', route: 'assistants' },
   { label: '首页', icon: 'home', route: 'overview' },
   { label: '接待入住', icon: 'people', children: [
     ['leads', '接待管理'], ['residents', '入住管理'], ['residents', '退住记录', 'discharged'],

@@ -6,7 +6,7 @@
   padding: 0 0 12px;
 }
 .ct-panel h2 {
-  font-size: 17px;
+  font-size: 1.13333rem;
   margin: 0;
 }
 .ct-filter,
@@ -59,14 +59,14 @@
 }
 .ct-when strong,
 .ct-event span {
-  font-size: 13px;
+  font-size: 0.86667rem;
 }
 .ct-when small,
 .ct-event small,
 .ct-count,
 .ct-receipt-head span {
   color: var(--muted, #50647a);
-  font-size: 12px;
+  font-size: 0.8rem;
 }
 .ct-count::after {
   content: ' ▾';

@@ -84,6 +84,37 @@ class SubsidyFilingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "未来"):
             subsidies.read(self.store, self.owner, "2026-12")
 
+    def test_pending_resident_credentials_are_independent_of_monthly_subsidy_eligibility(self):
+        self.command("care.register", name="登记样例")
+        person = self.store.snapshot(self.owner)["data"]["residents"][-1]
+        self.assertNotIn(person["id"], {r["residentId"] for r in self.read()["rows"]})
+        self.command("access.create", kind="staff", role="自定义", displayName="接待样例", username="intake-example",
+                     password=self.pw, permissions=["intake", "audit"])
+        clerk, _ = self.store.login("intake-example", self.pw)
+        number = "11010519491231002X"
+        draft = dict(kind="idFront", residentId=person["id"], fileName=number+".png", imageBase64=PNG,
+                     reviewedFields=dict(name=person["name"], birthDate="1949-12-31", idNumber=number))
+        self.command("dossier.credential", clerk, **draft)
+        visible = self.store.snapshot(clerk)["data"]
+        self.assertNotIn(number, str(visible))
+        record = next(row for row in visible["residents"] if row["id"] == person["id"])["credentialMaterials"]["idFront"]
+        self.assertTrue(record["fields"]["idNumber"].endswith("002X"))
+        self.assertEqual(subsidies.original(self.store, clerk, record["id"], credential=True)[0], base64.b64decode(PNG))
+        with closing(self.store.connect()) as db:
+            self.assertIn(number, db.execute("SELECT reviewed_fields FROM subsidy_materials WHERE id=?", (record["id"],)).fetchone()[0])
+            self.assertNotIn(number, str([tuple(r) for r in db.execute("SELECT * FROM history_commits")]))
+        with self.assertRaises(PermissionError):
+            subsidies.original(self.store, clerk, record["id"])
+        with self.assertRaisesRegex(ValueError, "姓名"):
+            self.command("dossier.credential", clerk, **{**draft, "reviewedFields": {"name":"其他人"}})
+        with self.assertRaisesRegex(ValueError, "证件号码"):
+            self.command("dossier.credential", clerk, **{**draft, "reviewedFields": {"birthDate":"1999-12-31", "idNumber":number}})
+        self.store.facility_policy = lambda db, user: {"campusIds": []} if user["username"] == "intake-example" else {}
+        with self.assertRaises(PermissionError):
+            self.command("dossier.credential", clerk, **draft)
+        with self.assertRaises(PermissionError):
+            subsidies.original(self.store, clerk, record["id"], credential=True)
+
     def test_scoped_and_non_finance_accounts_cannot_access_person_or_rules(self):
         doc = self.upload("household", "户口本.png")
         self.command("facility.addCampus", name="独立分院")

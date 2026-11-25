@@ -10,6 +10,8 @@ def settle(state, payload, actor, today):
     if person.get("status") != "已退住" or not person.get("dischargedAt"):
         raise ValueError("仅可为已经办理退住的长辈结算")
     rid = person["id"]
+    if any(row["residentId"] == rid and row["status"] in ("待核实", "渠道处理中") for row in state.get("refunds", ())):
+        raise ValueError("请先核实待处理退款，再办理退住结算")
     bills = [bill for bill in state["bills"] if bill["residentId"] == rid]
     if any(bill["balance"] for bill in bills):
         raise ValueError("请先核对并结清所有待缴账单")
@@ -47,11 +49,13 @@ def settle(state, payload, actor, today):
         if method not in ("现金", "银行转账", "微信支付", "支付宝", "银联刷卡"):
             raise ValueError("请选择实际退款渠道")
         reference = text_field(payload, "reference", "退款流水或签收凭证号", 100)
-        if any(
+        if any(row.get("reference") == reference and row.get("channel") == method
+               for row in state.get("refunds", ())) or any(
             r.get("method") == method and r.get("reference") == reference
             for r in closed
         ):
             raise ValueError("这张退款凭证已经登记")
+    advance_sources = account.pop("sources", {}) if account else {}
     if account:
         account["amount"] = 0
     for bill, value in securities:
@@ -67,6 +71,7 @@ def settle(state, payload, actor, today):
             "operator": actor["displayName"],
             "actorId": actor["id"],
             "advance": float(advance),
+            "advanceSources": advance_sources,
             "security": float(security_total),
             "amount": float(total),
             "method": method,

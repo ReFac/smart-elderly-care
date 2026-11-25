@@ -3,16 +3,18 @@
 <output>运行中</output>
 <script type="module">
 import { openChat } from '../../web/features/assistant-chat.js';
-import { detail } from '../../web/lib/dialogs.js';
+import { detail, formDialog } from '../../web/lib/dialogs.js';
 import { button, icon } from '../../web/lib/ui.js';
 
 const output = document.querySelector('output');
-const state = {user: {id:'owner', kind:'owner'}, allowedActions:['access.create','dossier.confirmVisit','access.staffContract'],
+const state = {user: {id:'owner', kind:'owner'}, allowedActions:['access.create','dossier.confirmVisit','access.staffContract','dossier.credential','ops.subsidyMaterial'],
   uiSettings: {institutionName:'测试机构', hiddenRoutes:[]}, rolePresets: {护工:[]},
   permissionOptions:{}, campusOptions:[], accessManagement:{staffDuties:[]}, accounts:[{id:'staff1',kind:'staff',displayName:'李护理',role:'护士',username:'nurse'}], today:'2026-11-25',
   residents:[{id:'r1',name:'测试长辈',status:'在住'}]};
-const nav = [], network = [];
-const ctx = {state, available:()=>true, detail, ui:{button,icon}, go(route,tab,open){nav.push(route);open();},
+const nav = [], network = [], writes = [];
+const ctx = {state, available:()=>true, detail, dialog:formDialog, ui:{button,icon}, go(route,tab,open){nav.push(route);open();},
+  openWorkspaceTab(route, tab){nav.push(tab.id);return true;}, command(...args){writes.push(args);return true;},
+  get:async()=>({month:'2026-11',revision:7,rows:[{residentId:'r1',invoiceMonths:['2026-10']}]}),
   toast:message=>{throw Error(message);}, refreshWorkspace:async()=>true};
 const findButton = (label, root=document) => [...root.querySelectorAll('button')].find(b=>b.textContent.trim()===label);
 function check(value,message){if(!value)throw Error(message);}
@@ -25,6 +27,10 @@ window.fetch=async (url, opts={})=>{
   if(url.startsWith('/api/assistant/documents/pages/')) return new Response(new Blob(['fixture']),{headers:{'X-Page-Count':'2','Content-Type':'image/png'}});
   if(url==='/api/assistant/documents/preview'){
     network.push(opts.body.name);
+    if (opts.body.name === '身份证.png') return Response.json({category:'身份证正面', pageCount:1,
+      material:{fields:{name:'测试长辈', birthDate:'1949-12-31', idNumber:'11010519491231002X'}}});
+    if (opts.body.name === '国徽.png') return Response.json({category:'身份证反面', pageCount:1,
+      material:{fields:{authority:'测试签发机关',validity:'长期'}}});
     return Response.json(opts.body.name==='a.png' ? {category:'员工简历',excerpt:'个人简历',pageCount:1,
       resume:{fields:{displayName:{page:1,line:1,value:'林小禾'}},ambiguous:[]}} :
       opts.body.name==='c.png' ? {category:'劳动合同',contract:{number:'2026HY12',signedOn:'2026-09-01',startsOn:'2026-09-01'},pageCount:1} :
@@ -55,6 +61,7 @@ try {
   findButton('下一页',view).click();await waitFor(()=>view.textContent.includes('第 2 / 2 页'));
   view.close();
   findButton('确认分类').click();
+  check(!nav.length && !document.querySelector('dialog[open]'), '确认分类后保留对话，等待点击目标表单');
   findButton('打开新增员工表单').click();
   let form=await waitFor(()=>document.querySelector('dialog[open]'));
   check(nav[0]==='access' && form.querySelector('[name=displayName]').value==='林小禾','简历应预填真实新增表单');
@@ -75,8 +82,61 @@ try {
   const personInput=form.querySelector('[role=combobox]');personInput.value='测试';personInput.dispatchEvent(new Event('input'));
   form.querySelector('[role=option]').click();findButton('继续',form).click();findButton('继续',form).click();
   form.querySelector('[name=eventDate]').value='2026-11-21';findButton('继续',form).click();
-  check(form.textContent.includes('b.pdf') && !form.textContent.includes('a.png') &&
-    form.querySelector('.medical-file select').value==='检查报告','应只将已核对类别的医疗原件带入就诊向导');
+  const visitOriginals=[...form.querySelectorAll('.medical-file')];
+  check(visitOriginals.length===1 && visitOriginals[0].textContent.includes('b.pdf') &&
+    visitOriginals[0].querySelector('select').value==='检查报告','应只将已核对类别的医疗原件带入就诊向导');
+  const visitFiles=form.querySelector('input[type=file]'), summary=form.querySelector('.file-control-status');
+  check(summary.textContent==='b.pdf' && visitFiles.multiple, '回显已带入原件，保留多选');
+  const extra=new DataTransfer();
+  extra.items.add(new File(['1'],'第一张.png',{type:'image/png'}));
+  extra.items.add(new File(['2'],'第二张.png',{type:'image/png'}));
+  visitFiles.files=extra.files;visitFiles.dispatchEvent(new Event('change'));
+  check(summary.textContent==='已选 3 个文件：b.pdf、第一张.png、第二张.png' && !visitFiles.files.length,
+    '追加多张文件后显示整组名称，仍可重复使用同一选择器');
+  while(form.querySelector('.medical-file')) findButton('移除',form.querySelector('.medical-file')).click();
+  check(summary.textContent==='未选择文件', '逐个移除后显示空状态');
+  form.close();
+  openChat(()=>ctx);
+  findButton('关闭本组',review).click();
+  const ids=new DataTransfer();
+  for(const name of ['身份证.png','国徽.png']) ids.items.add(new File(['fixture'],name,{type:'image/png'}));
+  picker.files=ids.files;picker.dispatchEvent(new Event('change'));
+  findButton('识别并分类',review).click();
+  await waitFor(()=>findButton('确认分类',review));findButton('确认分类',review).click();
+  const originalRows=()=>[...review.querySelectorAll(':scope > ul > li')];
+  let [front,back]=originalRows();
+  check(!review.innerText.includes('11010519491231002X') && !document.querySelector('dialog[open]'),'分类后不得公开证号或自行打开档案');
+  check(front.querySelector('[role=combobox]').value.includes('测试长辈') && !back.querySelector('[role=combobox]').value,
+    '仅唯一姓名匹配可推荐，国徽面需人工选择');
+  findButton('打开长辈证件档案',front).click();
+  form=await waitFor(()=>document.querySelector('dialog[open]'));
+  check(nav.at(-1)==='resident-r1' && form.getAttribute('aria-label').includes('测试长辈'), '应跳转该长辈的档案');
+  check(form.querySelector('[name=idNumber]').type==='password' && form.querySelector('[name=birthDate]').value==='1949-12-31' &&
+    form.querySelector('.file-control-status').textContent==='身份证.png' && !writes.length,'证件字段及原件应预填并等候保存');
+  form.close();openChat(()=>ctx);
+  back=originalRows()[1];
+  check(findButton('打开补贴材料表单',back).disabled, '国徽面不能推断归属');
+  back.querySelector('[role=option]').click();
+  findButton('打开补贴材料表单',back).click();
+  form=await waitFor(()=>document.querySelector('dialog[open]'));
+  check(nav.at(-1)==='billing' && form.querySelector('[name=authority]').value==='测试签发机关' &&
+    form.querySelector('.file-control-status').textContent==='国徽.png' && !writes.length,'财务补贴应复用原件及核对字段且须人工确认');
+  form.querySelector('form').requestSubmit();
+  await waitFor(()=>writes.length);
+  check(writes[0][0]==='ops.subsidyMaterial' && writes[0][1].kind==='idBack' && writes[0][1].residentId==='r1',
+    '明确提交后才调用所选材料业务指令');
+  await waitFor(()=>!document.querySelector('dialog[open]'));
+  openChat(()=>ctx);
+  findButton('关闭本组',review).click();
+  state.residents.push({id:'r2',name:'测试长辈',status:'在住'});
+  const sameName=new DataTransfer();
+  sameName.items.add(new File(['fixture'],'身份证.png',{type:'image/png'}));
+  picker.files=sameName.files;picker.dispatchEvent(new Event('change'));
+  findButton('识别并分类',review).click();
+  await waitFor(()=>findButton('确认分类',review));findButton('确认分类',review).click();
+  front=originalRows()[0];
+  check(front.textContent.includes('有同名长辈') && !front.querySelector('[role=combobox]').value &&
+    findButton('打开长辈证件档案',front).disabled,'同名长辈必须手动区分和选择');
   output.textContent='PASS';
 } catch(error) {output.textContent='FAIL '+error.stack;}
 </script></html>

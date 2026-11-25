@@ -10,6 +10,7 @@ from . import chat_navigation, region, revenue, ward_brief
 
 
 ROUTES = {
+    "assistants": "AI 健康助理",
     "overview": "运营总览",
     "intake": "老人入住",
     "residents": "入住管理",
@@ -134,6 +135,7 @@ def evidence(store, db, actor, state, chosen, hours, topics):
         return {"说明": "当前仅提供本人可见界面的使用帮助，没有提供院务记录。"}
     data = access.project(db, state, actor, store.facility_policy)
     now = store.now()
+    today = now.date().isoformat()
     since = now - timedelta(hours=hours)
     area = chosen["label"] if chosen else "当前账号授权范围"
     facts = {
@@ -152,8 +154,14 @@ def evidence(store, db, actor, state, chosen, hours, topics):
         facts["当前床位"] = {
             "在住人数": len(current),
             "床位数": len(beds),
-            "空床数": sum(not bool(b.get("residentId")) for b in beds),
+            "空床数": sum(b["status"] == "空闲" and not b.get("residentId") for b in beds),
         }
+        if policy.has(actor, "care") or policy.has(actor, "intake"):
+            bed_ids = {b["id"] for b in beds}
+            facts["当前床位"]["今日新入住登记数"] = sum(
+                move.get("kind") == "入住" and move.get("date") == today and move.get("bedId") in bed_ids
+                for move in data["bedMoves"]
+            )
     room_filter = chat_navigation.room_capacity(topics)
     if room_filter and "beds" in actor["routes"] and any(
         policy.has(actor, grant) for grant in (*facility.READ_GRANTS, facility.MANAGE_GRANT)
@@ -168,7 +176,6 @@ def evidence(store, db, actor, state, chosen, hours, topics):
                    for r in matches["rooms"]],
         }
     if policy.has(actor, "care"):
-        today = now.date().isoformat()
         tasks = [t for t in data["tasks"] if t["residentId"] in current]
         facts["照护工单"] = {
             "今日计划按当前状态": dict(
@@ -199,7 +206,6 @@ def evidence(store, db, actor, state, chosen, hours, topics):
             facts["经销员或供应商绩效资料"] = (
                 "当前没有此类台账，不能据库存推断供应商表现。"
             )
-    today = now.date().isoformat()
     if policy.has(actor, "health.overview"):
         residents = campus_access.projection(db, state, actor)["residents"] if actor.get("facilityScope") else state["residents"]
         current_health = {p["id"] for p in residents if p.get("status") == "在住"}
@@ -217,6 +223,10 @@ def evidence(store, db, actor, state, chosen, hours, topics):
             "今日新增实收（含预缴）": summary["todayGross"], "今日扣费后净入账": summary["todayNet"] if summary["todayNet"] is not None else "历史凭证手续费待核对",
             "截至今日待缴余额": summary["outstanding"],
         }
+        if summary["monthRefunds"]:
+            facts["到账与欠款（元）"].update({
+                "今日已核实退款": summary["todayRefunds"], "本月已核实退款": summary["monthRefunds"],
+            })
         bills = [b for b in data["bills"] if b.get("residentId") in current]
         facts["在住账单当前状态（按账单笔数统计）"] = dict(
             Counter(b["status"] for b in bills)

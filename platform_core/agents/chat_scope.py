@@ -81,6 +81,23 @@ FOLLOW_UP = re.compile(
     re.I,
 )
 
+_TODAY = r"(?:今天|今日|现在|目前|这会儿)"
+_HOME = r"(?:(?:我们|咱们|咱)?(?:这个|这家)?(?:养老院|疗养院|机构|院里|院内|院区)|我院|本院|全院|咱院)"
+_OVERVIEW_SUBJECT = rf"(?:{_TODAY}(?:的?{_HOME})?|{_HOME}(?:的?{_TODAY})?)"
+_STATUS = r"(?:怎么样|怎样|咋样|如何|还好[吗么]|有(?:什么|哪些)(?:事儿?|变化|情况))"
+_OPERATIONS = r"(?:整体|总体)?(?:运营|经营|运行|院务)?"
+OVERVIEW = re.compile(
+    r"(?:你好|您好)?(?:请问|想问一下|问一下|我想了解一下|帮我看看|帮我看一下|给我说说|说说|看看|汇报一下)?"
+    + _OVERVIEW_SUBJECT
+    + rf"的?{_OPERATIONS}(?:(?:情况|状况|状态)?{_STATUS}|情况|状况|概况|简报|总结|报告)"
+    + r"(?:了|啦)?(?:吗|么|呢|啊|呀|吧)?"
+)
+
+
+def overview_question(text):
+    query = re.sub(r"[\s，、。！？,?.!]", "", normalized(text))
+    return OVERVIEW.fullmatch(query) is not None
+
 
 def normalized(text):
     return normalize("NFKC", text).strip().casefold()
@@ -103,9 +120,10 @@ def conversation_subject(text, previous=""):
     text = normalized(text)
     if obvious_unrelated(text):
         return False
-    if (public_subjects(text) or INSTITUTION.search(text) or SHORT_WORKSPACE.fullmatch(text)
+    if (overview_question(text) or public_subjects(text) or INSTITUTION.search(text) or SHORT_WORKSPACE.fullmatch(text)
             or GREETINGS.fullmatch(text) or NEXT_STEPS.fullmatch(text)):
         return True
     previous = normalized(previous)
     return bool(FOLLOW_UP.fullmatch(text) and not obvious_unrelated(previous)
-                and (public_subjects(previous) or INSTITUTION.search(previous) or SHORT_WORKSPACE.fullmatch(previous)))
+                and (overview_question(previous) or public_subjects(previous)
+                     or INSTITUTION.search(previous) or SHORT_WORKSPACE.fullmatch(previous)))

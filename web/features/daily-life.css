@@ -2,17 +2,17 @@
 .group-heading, .group-attendance-heading, .group-form-actions, .group-event { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .group-heading { flex-wrap:wrap; }
 .group-heading h2, .group-heading h3, .group-attendance h3, .group-sections h3, .life-day h4 { margin:0; color:var(--ink); }
-.group-heading h2 { font-size:18px; }
-.group-heading h3 { font-size:16px; }
+.group-heading h2 { font-size:1.2rem; }
+.group-heading h3 { font-size:1.06667rem; }
 .group-heading small { display:block; margin-top:4px; }
 .group-scope, .group-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .group-scope { grid-template-columns:minmax(160px,1fr) minmax(180px,1.25fr) minmax(150px,.65fr); background:var(--soft); padding:14px; border-radius:7px; }
 .group-scope .field, .group-form-grid .field { min-width:0; }
 .group-sections { display:grid; gap:20px; }
-.group-sections h3, .group-attendance h3 { font-size:14px; }
+.group-sections h3, .group-attendance h3 { font-size:0.93333rem; }
 .group-event { justify-content:flex-start; padding:11px 0; border-bottom:1px solid var(--line); }
 .group-event .fx-named { flex:1; }
-.group-count, .group-attendance-heading strong { color:var(--accent); font-size:13px; }
+.group-count, .group-attendance-heading strong { color:var(--accent); font-size:0.86667rem; }
 .dialog.group-dialog { width:min(770px,calc(100% - 32px)); }
 .group-editor, .group-attendance { display:grid; gap:10px; min-width:0; }
 .group-editor { gap:16px; }
@@ -22,22 +22,22 @@
 .group-person-list { max-height:min(33vh,350px); overflow:auto; border:1px solid var(--line); border-radius:8px; }
 .group-person { display:grid; grid-template-columns:minmax(155px,1fr) minmax(125px,1fr); gap:10px; align-items:center; padding:8px 12px; }
 .group-person + .group-person { border-top:1px solid var(--line); }
-.group-person-check, .group-select-all, .life-date { display:flex; align-items:center; gap:8px; font-size:13px; }
+.group-person-check, .group-select-all, .life-date { display:flex; align-items:center; gap:8px; font-size:0.86667rem; }
 .group-person-check input, .group-select-all input { width:16px; height:16px; accent-color:var(--accent); }
-.group-intake-note summary { cursor:pointer; color:var(--accent); font-size:12px; }
+.group-intake-note summary { cursor:pointer; color:var(--accent); font-size:0.8rem; }
 .group-intake-note input, .life-date input { border:1px solid var(--line); border-radius:6px; background:white; padding:5px 8px; font:inherit; }
 .group-intake-note input { width:100%; margin-top:5px; }
 .group-intake-note[hidden] { display:none; }
 .group-form-actions { justify-content:flex-end; }
 .group-editor .form-error:empty { display:none; }
 .personal-life { display:grid; gap:16px; }
-.personal-life .life-event p, .personal-life .rounds-card p { font-size:16px; line-height:1.7; }
+.personal-life .life-event p, .personal-life .rounds-card p { font-size:1.06667rem; line-height:1.7; }
 .life-days { display:grid; gap:12px; }
-.life-day h4 { font-size:13px; }
+.life-day h4 { font-size:0.86667rem; }
 .life-day ol { list-style:none; margin:8px 0 0 5px; padding:0; border-left:2px solid var(--line); }
 .life-event { position:relative; display:grid; grid-template-columns:100px 1fr; gap:12px; padding:4px 0 12px 14px; }
 .life-event::before { content:""; position:absolute; top:10px; left:-5px; width:8px; height:8px; border-radius:50%; background:var(--accent); }
-.life-event time { font-size:12px; color:var(--muted); }
+.life-event time { font-size:0.8rem; color:var(--muted); }
 .life-event p { margin:3px 0; }
 @media (max-width:680px) { .group-scope { grid-template-columns:1fr; } .group-heading { align-items:flex-start; } .life-event { grid-template-columns:1fr; gap:2px; } }
 

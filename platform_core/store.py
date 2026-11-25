@@ -15,10 +15,11 @@ from .care import timeline as care_timeline
 from . import protected_docs, secure_storage, staff_employment, storage_assets
 from . import lead_contacts, lead_intake, medical_visits, people_labels, visit_schedule
 from . import care_areas, daily_life, med_rounds, medication_reports, resident_health, scheduled_work
-from . import permission_requests, visitor_access
+from . import permission_requests, visitor_access, display_preferences
 from .bootstrap import empty_workspace
 from .care import trial_expiry, trial_followups
 from . import backups, history, rounds
+from . import sample
 from .access_policy import can_record_scale
 from .care import archive_retention
 from . import (
@@ -75,6 +76,7 @@ class Store:
         *,
         facility_policy=None,
         initial_data="demo",
+        prepare_sample=False,
         code_senders=None,
         reset_link_senders=None,
         initial_owner_password=None,
@@ -96,6 +98,7 @@ class Store:
         self.code_senders = dict(code_senders or {})
         self.reset_link_senders = dict(reset_link_senders or {})
         self.facility_policy = facility_policy
+        self.created_workspace = False
         with closing(self.connect()) as db, db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("BEGIN IMMEDIATE")
@@ -110,6 +113,7 @@ class Store:
             subsidies.init(db)
             protected_docs.init(db)
             activity.init(db)
+            sample.schema(db)
             if not db.execute("SELECT 1 FROM workspace WHERE id=1").fetchone():
                 day = now().date().isoformat()
                 data = (
@@ -118,7 +122,11 @@ class Store:
                     else empty_workspace()
                 )
                 db.execute("INSERT INTO workspace VALUES (1, 0, ?)", (encode(data),))
+                db.execute("INSERT INTO workspace_installation(id,mode,sample_version) VALUES(1,?,?)",
+                           (initial_data, 0 if prepare_sample else -1))
+                self.created_workspace = True
             access.init(db, initial_owner_password)
+            display_preferences.init(db)
             permission_requests.init(db)
             visitor_access.init(db)
             if version < 4:
@@ -300,6 +308,7 @@ class Store:
                 data["careScale"] = CATALOG
             from . import identity
 
+            data["displayPreferences"] = display_preferences.read(db, user)
             data["identityContacts"] = identity.contacts(db, user["id"])
             data["identityChannels"] = sorted(identity.senders(self))
             from .agents.change_review import category
@@ -372,6 +381,7 @@ class Store:
             dossier.project(db, data, user, today)
             dossier.project_roster(db, data, user)
             medical_visits.project(db, data, user)
+            sample.project(db, data, user)
             rounds_family.project(db, data, user)
             beds = campus_access.allowed_beds(db, user, include_rooms=True)
             if user["kind"] in ("owner", "staff") and any(
@@ -429,10 +439,11 @@ class Store:
 
     def payment_channels(self, token):
         from .operations.checkout import enabled_channels
+        from .operations import terminal
 
         with closing(self.connect()) as db:
             access.require(self.actor(db, token), "finance")
-            return {"channels": enabled_channels()}
+            return {"channels": enabled_channels(), "terminalChannels": list(terminal.CHANNELS) if terminal.configured_id() else []}
 
     def payment_order_status(self, token, order_id):
         from .operations.checkout import authorized_order, cached_payment_link
@@ -973,6 +984,9 @@ class Store:
                     summary = care_areas.command(db, data, user, action, payload, now)
                 elif action in subsidies.ACTIONS:
                     summary = subsidies.command(db, data, user, action, payload, now)
+                elif action in ("ops.requestRefund", "ops.confirmRefund", "ops.cancelRefund"):
+                    from .operations import refunds
+                    summary = refunds.command(data, action, payload, user, today)
                 elif action == "ops.dischargeSettlement":
                     from .operations.discharge_settlement import settle
 

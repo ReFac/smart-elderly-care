@@ -23,6 +23,7 @@ DOMAINS = {
     "ops.pay": "收款核销",
     "ops.deposit": "收款核销",
     "ops.paymentOrder": "收款核销",
+    "ops.admissionOrder": "收款核销",
     "ops.importReceipt": "收款核销",
     "access.create": "账号授权",
     "access.update": "账号授权",
@@ -138,13 +139,13 @@ def inspect(db, revision, action, actor, rid):
             bills[bill["id"]] = bill
         if any(money(a, "amount") < 0 for a in owned("deposits")):
             raise ValueError("预交账户结余异常")
-        if action in ("ops.paymentOrder", "ops.importReceipt"):
+        if action in ("ops.paymentOrder", "ops.admissionOrder", "ops.importReceipt"):
             for row in owned("paymentOrders"):
-                if row["billId"] not in bills or money(row, "amount") <= 0:
+                if (row.get("purpose") != "admission" and row["billId"] not in bills) or money(row, "amount") <= 0:
                     raise ValueError("收款订单的归属或金额异常")
         if action == "ops.importReceipt":
             for row in owned("channelReceipts"):
-                if row["billId"] not in bills or money(row, "billAmount") + money(
+                if (row["billId"] and row["billId"] not in bills) or money(row, "billAmount") + money(
                     row, "depositAmount"
                 ) != money(row, "amount"):
                     raise ValueError("到账凭证的账单核销与转预交金额不符")

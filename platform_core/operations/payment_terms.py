@@ -6,6 +6,7 @@ from .records import CENT, text_field, whole_number
 
 RATE_CHANNELS = ("微信支付", "支付宝", "银联刷卡", "银行转账")
 OFFLINE_CHANNELS = ("现金", "银行转账", "微信支付", "支付宝")
+CASH_METHODS = frozenset(("线下登记", "线下刷卡登记", "微信支付", "支付宝", "银联刷卡"))
 
 
 def configure(state, payload, today):

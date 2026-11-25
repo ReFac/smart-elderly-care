@@ -104,8 +104,17 @@
     importExpenses(ctx);
     const dialog = document.querySelector('dialog[open]');
     const file = dialog.querySelector('[type=file]');
-    const dt = new DataTransfer(); dt.items.add(new File(['demo'], 'statement.csv'));
-    file.files = dt.files; file.dispatchEvent(new Event('change'));
+    const selectStatement = () => {
+      const dt = new DataTransfer(); dt.items.add(new File(['demo'], 'statement.csv'));
+      file.files = dt.files; file.dispatchEvent(new Event('change'));
+    };
+    selectStatement();
+    const source = dialog.querySelector('select');
+    check(dialog.querySelector('.file-control-status').textContent === 'statement.csv', '对账单显示文件名');
+    change(source, 'electricity');
+    check(!file.files.length && dialog.querySelector('.file-control-status').textContent === '未选择文件', '更换来源清空旧凭证');
+    change(source, 'bank');
+    selectStatement();
     const button = (label) => [...dialog.querySelectorAll('button')].find(b => b.textContent.trim() === label);
     button('预览文件').click();
     await until(() => dialog.querySelectorAll('tbody tr').length === 4);

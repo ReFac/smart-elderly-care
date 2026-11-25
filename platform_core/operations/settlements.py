@@ -1,6 +1,7 @@
 """Cash vouchers, independently confirmed channel receipts and overdue follow-up."""
 
 from decimal import Decimal
+import re
 
 from . import payment_terms
 from .billing import apply_deposit, get_account, post_receipt
@@ -72,9 +73,45 @@ def create_order(state, p, today):
     return f"为账单生成{p['channel']}商户订单 {number}"
 
 
+def admission_order(state, p, today):
+    from . import checkout, terminal
+
+    if set(p) != {"residentId", "channel", "amount", "collection", "requestId"}:
+        raise ValueError("请选择长辈档案、渠道和定额")
+    person = lookup(state, "residents", p["residentId"], "长辈档案")
+    if person["status"] != "未入住" and not (
+        person.get("stayType") == "trial" and person["status"] in ("在住", "试住到期待确认")
+    ):
+        raise ValueError("请选择待办理正式入住的档案")
+    channel, collection = p["channel"], p["collection"]
+    terminal_id = ""
+    if collection == "terminal" and channel in terminal.CHANNELS:
+        terminal_id = terminal.configured_id()
+        if not terminal_id:
+            raise ValueError("机构尚未配置收银终端")
+    elif collection != "qr" or channel not in checkout.enabled_channels():
+        raise ValueError("机构尚未开通所选收款渠道")
+    amount = currency_amount(p["amount"], "商户定额", zero=False)
+    if not isinstance(p["requestId"], str) or not re.fullmatch(r"[a-f0-9]{32}", p["requestId"]):
+        raise ValueError("收款请求号无效")
+    orders = state.setdefault("paymentOrders", [])
+    for order in orders:
+        if order.get("requestId") == p["requestId"]:
+            if not (order["residentId"] == person["id"] and order["amount"] == float(amount)
+                    and order["channel"] == channel and order.get("collection") == collection):
+                raise ValueError("同一请求的收款信息发生变化")
+            return "沿用原入住收款订单 " + order["id"]
+    number = new_id("NH")
+    orders.insert(0, dict(id=number, residentId=person["id"], billId="", purpose="admission",
+                          channel=channel, collection=collection, terminalId=terminal_id,
+                          requestId=p["requestId"], amount=float(amount), status="待支付", date=today,
+                          feeRateBps=payment_terms.rate_for(state, channel)))
+    return f"为入住预收生成{channel}定额订单 {number}"
+
+
 def settle(state, p, today, *, verification):
     channel = p.get("channel")
-    if channel not in CHANNELS:
+    if channel not in CHANNELS and not (channel == "银联刷卡" and verification == "终端签名通知"):
         raise ValueError("请选择有效支付渠道")
     txn = text_field(p, "transactionId", "渠道交易号", 100)
     amount = currency_amount(p.get("amount"), "实收金额", zero=False)
@@ -84,6 +121,12 @@ def settle(state, p, today, *, verification):
         (r for r in state.get("paymentOrders", []) if r["id"] == order_id), None
     )
     if order:
+        if (order.get("collection") == "terminal") != (verification == "终端签名通知"):
+            raise ValueError("收款方式不匹配")
+        if order.get("collection") == "terminal" and order["terminalId"] != p.get("terminalId"):
+            raise ValueError("收银终端与订单不匹配")
+        if order.get("purpose") == "admission" and verification not in ("渠道签名通知", "终端签名通知"):
+            raise ValueError("入住在线收款须由签名回执确认")
         if (
             order["channel"] != channel
             or Decimal(str(order["amount"])) != amount
@@ -92,17 +135,12 @@ def settle(state, p, today, *, verification):
             raise ValueError("订单的渠道、金额或账单不匹配")
         bill_id = order["billId"]
     else:
-        if verification == "渠道签名通知":
+        if verification in ("渠道签名通知", "终端签名通知"):
             raise ValueError("找不到已登记的商户订单")
         bill_id = p.get("billId")
-    bill = lookup(state, "bills", bill_id, "账单")
-    if any(
-        r.get("channel") == channel
-        and not r.get("originBillId")
-        and (r.get("transactionId") == txn or r.get("merchantOrder") == order_id)
-        for r in state["depositEntries"]
-    ):
-        raise ValueError("此笔交易已单独登记为预缴金，请核对原始凭证")
+    advance = bool(order and order.get("purpose") == "admission")
+    bill = None if advance else lookup(state, "bills", bill_id, "账单")
+    resident_id = order["residentId"] if advance else bill["residentId"]
     receipts = state.setdefault("channelReceipts", [])
     for prior in receipts:
         if prior["channel"] == channel and (
@@ -117,6 +155,13 @@ def settle(state, p, today, *, verification):
             ) == (bill_id, txn, order_id, amount, day):
                 return prior, False
             raise ValueError("渠道流水或商户订单已关联另一笔记录")
+    if any(
+        r.get("channel") == channel
+        and not r.get("originBillId")
+        and (r.get("transactionId") == txn or r.get("merchantOrder") == order_id)
+        for r in state["depositEntries"]
+    ):
+        raise ValueError("此笔交易已单独登记为预缴金，请核对原始凭证")
     if order and order["status"] != "待支付":
         raise ValueError("商户订单已处理")
     receipt = dict(
@@ -125,7 +170,7 @@ def settle(state, p, today, *, verification):
         transactionId=txn,
         merchantOrder=order_id,
         billId=bill_id,
-        residentId=bill["residentId"],
+        residentId=resident_id,
         amount=float(amount),
         paidDate=day,
         date=today,
@@ -138,7 +183,7 @@ def settle(state, p, today, *, verification):
         origin["paymentRef"] = p["paymentRef"]
     allocation = post_receipt(
         state,
-        resident_id=bill["residentId"],
+        resident_id=resident_id,
         bill=bill,
         amount=amount,
         method="线下登记" if verification == "线下登记核对" else channel,

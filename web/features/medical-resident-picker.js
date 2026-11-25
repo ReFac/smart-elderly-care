@@ -5,7 +5,7 @@ function searchable(text) {
   return (text || '').normalize('NFKC').toLocaleLowerCase().replace(/(\d)(?:号房|病房|号室|房间|房|室|号)(?=\s|$)/g, '$1');
 }
 
-export function medicalResidentPicker(ctx, candidates, selectedId, onSelection) {
+export function medicalResidentPicker(ctx, candidates, selectedId, onSelection, limit = Infinity) {
   const beds = new Map((ctx.state.beds || []).map(bed => [bed.id, bed]));
   const nameCounts = new Map();
   for (const person of candidates) nameCounts.set(person.name, (nameCounts.get(person.name) || 0) + 1);
@@ -48,7 +48,8 @@ export function medicalResidentPicker(ctx, candidates, selectedId, onSelection) 
 
   function showOptions() {
     const words = searchable(input.value.trim()).split(/\s+/).filter(Boolean);
-    choices = selected ? [] : entries.filter(entry => words.every(word => entry.search.some(value => value.includes(word))));
+    const matches = selected ? [] : entries.filter(entry => words.every(word => entry.search.some(value => value.includes(word))));
+    choices = matches.slice(0, limit);
     highlighted = -1;
     input.removeAttribute('aria-activedescendant');
     list.hidden = choices.length === 0;
@@ -66,6 +67,7 @@ export function medicalResidentPicker(ctx, candidates, selectedId, onSelection) 
     status.textContent = selected ? '已选 ' + selected.location
       : !entries.length ? '当前没有可办理的长辈。'
         : !choices.length ? '未找到匹配的长辈，请换用姓名或房号搜索。'
+          : matches.length > limit ? `已显示前 ${limit} 位，请输入姓名或房号缩小范围。`
           : `${choices.length} 位可选。请选择名单中的长辈。`;
   }
 

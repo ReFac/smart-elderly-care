@@ -1,19 +1,46 @@
 import { el, icon } from './ui.js';
 
+export const TAB_LIMIT = 10;
+
 export class WorkspaceTabs {
   pages = new Map();
   active = null;
+  sequence = 0;
 
-  clear() { this.pages.clear(); this.active = null; }
+  clear() { this.pages.clear(); this.active = null; this.sequence = 0; }
+
+  activate(key) {
+    this.active = key;
+    this.pages.get(key).lastUsed = ++this.sequence;
+  }
+
+  oldestClosable() {
+    let candidate;
+    for (const page of this.pages.values()) {
+      if (!page.pinned && !page.state.unsaved && (!candidate || page.lastUsed < candidate.lastUsed)) candidate = page;
+    }
+    return candidate;
+  }
+
+  canOpen(key) {
+    return this.pages.has(key) || this.pages.size < TAB_LIMIT || Boolean(this.oldestClosable());
+  }
 
   invalidate() {
-    for (const page of this.pages.values()) page.node = null;
+    for (const page of this.pages.values()) {
+      if (!page.state.unsaved) page.node = null;
+    }
   }
 
   ensure(spec) {
     let page = this.pages.get(spec.key);
     if (!page) {
-      page = { ...spec, state: {}, scroll: 0, node: null, pendingReads: 0 };
+      if (this.pages.size >= TAB_LIMIT) {
+        const oldest = this.oldestClosable();
+        if (!oldest) return null;
+        this.pages.delete(oldest.key);
+      }
+      page = { ...spec, state: {}, scroll: 0, node: null, pendingReads: 0, lastUsed: ++this.sequence };
       this.pages.set(spec.key, page);
     }
     return page;
@@ -27,7 +54,7 @@ export class WorkspaceTabs {
     if (this.active === key) return keys[index - 1] || keys[index + 1];
   }
 
-  strip({ activate, close, refresh, manage }) {
+  strip({ activate, close, refresh, manage, pin }) {
     const bar = el('div', 'desk-tabbar');
     const list = el('div', 'desk-tabs');
     list.setAttribute('role', 'tablist');
@@ -62,6 +89,11 @@ export class WorkspaceTabs {
         }
       };
       pair.append(tab);
+      if (!page.home && (page.pinned || selected)) {
+        const b = tool((page.pinned ? '取消固定' : '固定') + page.title, 'pin', () => pin(key));
+        b.className = 'desk-tab-pin'; b.setAttribute('aria-pressed',String(Boolean(page.pinned)));
+        pair.append(b);
+      }
       if (!page.pinned) {
         const x = tool('关闭' + page.title, 'close', () => close(key));
         x.className = 'desk-tab-close';

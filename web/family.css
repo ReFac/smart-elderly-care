@@ -78,7 +78,7 @@
 }
 .family-resident-heading,.family-place {display:flex;align-items:center;gap:10px;}
 .family-resident-heading .fx-named strong {font-size:1.12rem;}
-.family-place {color:var(--muted);font-size:var(--desk-small-size,13px);}
+.family-place {color:var(--muted);font-size:var(--desk-small-size,0.86667rem);}
 .family-service-desk .family-mark {background:var(--soft);color:var(--accent);}
 .family-views,.family-subviews {display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
 .family-views {background:var(--desk-surface,var(--paper));border:1px solid var(--line);border-radius:6px;padding:4px 8px;}
@@ -92,11 +92,11 @@
 .family-service-desk .family-profile-details .fx-family-details {padding:0 14px 14px;}
 
 .family-tour-published {display:grid;gap:8px;}
-.family-tour-published > h2 {font-size:var(--desk-row-size,15px);margin:0;color:var(--ink);}
+.family-tour-published > h2 {font-size:var(--desk-row-size,1rem);margin:0;color:var(--ink);}
 .family-tour-desk .room-tour-empty {min-height:112px;padding:12px;gap:4px;background:var(--desk-surface,var(--paper));}
 .family-tour-desk .room-tour-empty-icon {width:32px;height:32px;}
 .family-tour-desk .room-tour-empty-icon svg {width:19px;height:19px;}
-.family-tour-desk .room-tour-empty h2 {font-size:14px;}
+.family-tour-desk .room-tour-empty h2 {font-size:0.93333rem;}
 .family-tour-desk .room-tour-empty p,.family-tour-desk .room-scene-title p,.family-tour-demo header p {margin:4px 0 0;}
 .family-tour-desk .room-scene-title {border-top:0;background:var(--desk-surface,var(--paper));}
 .family-tour-desk .room-scene-frame {overflow:hidden;background:var(--soft);}

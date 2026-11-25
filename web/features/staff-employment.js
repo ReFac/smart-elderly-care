@@ -1,13 +1,14 @@
 import { staffLabel } from './people-labels.js';
 import { asBase64 } from './dossier.js';
 import { btn, facts, node, section } from './shared.js';
+import { fileControl } from '../lib/file-control.js';
 
 function input(form, title, type, name, required = true) {
   const element = node('input');
   element.type = type;
   element.name = name;
   element.required = required;
-  form.append(node('label', 'field', [node('span', '', title), element]));
+  form.append(node('label', 'field', [node('span', '', title), type === 'file' ? fileControl(element) : element]));
   return element;
 }
 

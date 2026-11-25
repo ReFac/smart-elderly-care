@@ -5,7 +5,7 @@ from datetime import timedelta
 import json
 from uuid import uuid4
 
-from .. import access, activity, campus_access, care_areas, dossier
+from .. import access, activity, campus_access, care_areas, dossier, resident_credentials
 from .dispatch import unrestricted
 from .records import month_bounds, parse_day
 
@@ -16,7 +16,7 @@ KINDS = {
     "invoice": "发票",
 }
 DEFAULT = {"minimumDays": 30, "invoiceMonths": 1}
-ACTIONS = ("ops.subsidyRules", "ops.subsidyMaterial", "ops.subsidyList")
+ACTIONS = ("dossier.credential", "ops.subsidyRules", "ops.subsidyMaterial", "ops.subsidyList")
 
 
 def init(db):
@@ -26,6 +26,8 @@ def init(db):
         id TEXT PRIMARY KEY, resident_id TEXT NOT NULL, kind TEXT NOT NULL, month TEXT NOT NULL,
         name TEXT NOT NULL, mime TEXT NOT NULL, digest TEXT NOT NULL, original BLOB NOT NULL,
         at TEXT NOT NULL, actor TEXT NOT NULL)""")
+    if "reviewed_fields" not in {r[1] for r in db.execute("PRAGMA table_info(subsidy_materials)")}:
+        db.execute("""ALTER TABLE subsidy_materials ADD COLUMN reviewed_fields TEXT NOT NULL DEFAULT '{}'""")
     db.execute(
         "CREATE INDEX IF NOT EXISTS subsidy_material_by_person ON subsidy_materials(resident_id,kind,month)"
     )
@@ -191,15 +193,15 @@ def read(store, token, month):
         }
 
 
-def original(store, token, document_id):
+def original(store, token, document_id, *, credential=False):
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
         user = store.actor(db, token)
-        access.require(user, "finance")
+        access.require(user, "intake" if credential else "finance")
         meta = db.execute(
-            "SELECT resident_id,mime FROM subsidy_materials WHERE id=?", (document_id,)
+            "SELECT resident_id,mime,kind FROM subsidy_materials WHERE id=?", (document_id,)
         ).fetchone()
-        if not meta:
+        if not meta or (credential and meta[2] == "invoice"):
             raise ValueError("找不到材料原件")
         campus_access.require_resident(db, user, meta[0])
         revision = db.execute(
@@ -209,8 +211,8 @@ def original(store, token, document_id):
             db,
             revision,
             store.now().isoformat(timespec="seconds"),
-            "ops.readSubsidyMaterial",
-            "查阅补贴申报原件",
+            "dossier.readCredential" if credential else "ops.readSubsidyMaterial",
+            "查阅长辈证件原件" if credential else "查阅补贴申报原件",
             user,
             {"residentId": meta[0]},
             {},
@@ -221,10 +223,62 @@ def original(store, token, document_id):
         return binary, meta[1]
 
 
+def store_original(db, p, user, at, person, invoice):
+    rid, kind = p["residentId"], p["kind"]
+    fields = resident_credentials.reviewed(kind, p.get("reviewedFields", {}), person)
+    encoded = json.dumps(fields, ensure_ascii=False, sort_keys=True)
+    name = p.get("fileName")
+    if (
+        not isinstance(name, str)
+        or not 1 <= len(name) <= 120
+        or any(ord(c) < 32 or c in "/\\" for c in name)
+    ):
+        raise ValueError("原件名称无效")
+    raw, mime, digest = dossier.photo_payload(p, allow_pdf=True)
+    if not raw:
+        raise ValueError("请选择 PDF、JPEG 或 PNG 原件")
+    name = resident_credentials.NUMBER.sub("已遮盖证号", name)
+    prior = db.execute(
+        "SELECT name,digest,reviewed_fields FROM subsidy_materials WHERE resident_id=? AND kind=? AND month=? ORDER BY rowid DESC LIMIT 1",
+        (rid, kind, invoice),
+    ).fetchone()
+    if prior and tuple(prior) == (name, digest, encoded):
+        return "已留存相同原件，本次沿用当前版本"
+    if mime == "application/pdf":
+        from .. import pdf_original
+
+        pdf_original.pages(raw)
+    db.execute(
+        "INSERT INTO subsidy_materials VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            uuid4().hex,
+            rid,
+            kind,
+            invoice,
+            name,
+            mime,
+            digest,
+            raw,
+            at,
+            user["displayName"],
+            encoded,
+        ),
+    )
+    return f"留存 {person} 的{KINDS[kind]}原件"
+
+
 def command(db, state, user, action, p, now):
+    at = now.isoformat(timespec="seconds")
+    if action == "dossier.credential":
+        access.require(user, "intake")
+        rid, kind = p.get("residentId"), p.get("kind")
+        campus_access.require_resident(db, user, rid, state)
+        person = next((r for r in state["residents"] if r["id"] == rid), None)
+        if not person or person["status"] in ("已退住", "归档到期") or kind not in ("idFront", "idBack", "household"):
+            raise ValueError("请选择可编辑的长辈档案和证件类型")
+        return store_original(db, p, user, at, person["name"], "")
     access.require(user, "finance")
     day = now.date().isoformat()
-    at = now.isoformat(timespec="seconds")
     if action == "ops.subsidyRules":
         if not unrestricted(user):
             raise PermissionError("请由全院财务负责人设置机构申报规则")
@@ -259,44 +313,7 @@ def command(db, state, user, action, p, now):
             kind != "invoice" and invoice
         ):
             raise ValueError("发票月份不属于此期备料范围")
-        name = p.get("fileName")
-        if (
-            not isinstance(name, str)
-            or not 1 <= len(name) <= 120
-            or any(ord(c) < 32 or c in "/\\" for c in name)
-        ):
-            raise ValueError("原件名称无效")
-        raw, mime, digest = dossier.photo_payload(p, allow_pdf=True)
-        if not raw:
-            raise ValueError("请选择 PDF、JPEG 或 PNG 原件")
-        if any(
-            m["kind"] == kind
-            and m["month"] == invoice
-            and m["name"] == name
-            and m["digest"] == digest
-            for m in rows[rid]["materials"]
-        ):
-            return "已留存相同原件，本次沿用当前版本"
-        if mime == "application/pdf":
-            from .. import pdf_original
-
-            pdf_original.pages(raw)
-        db.execute(
-            "INSERT INTO subsidy_materials VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (
-                uuid4().hex,
-                rid,
-                kind,
-                invoice,
-                name,
-                mime,
-                digest,
-                raw,
-                at,
-                user["displayName"],
-            ),
-        )
-        return f"留存 {rows[rid]['name']} 的{KINDS[kind]}原件"
+        return store_original(db, p, user, at, rows[rid]["name"], invoice)
     ids = p.get("residentIds")
     if (
         not isinstance(ids, list)

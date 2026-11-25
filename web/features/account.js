@@ -1,6 +1,6 @@
 import { residentLabel, staffLabel } from './people-labels.js';
 import { menuFor } from '../lib/desk-navigation.js';
-import { colorModeControl } from '../lib/color-mode.js';
+import { accountDisplay } from './account-display.js';
 import { openEmployment } from './staff-employment.js';
 import { bindFlow, passwordFlow } from './identity.js';
 import { passkeyButton, passkeySettings } from './passkeys.js';
@@ -83,9 +83,10 @@ export function accountCenter(ctx) {
     ctx,
     '个人中心',
     '',
-    colorModeControl(),
+    null,
     tabs('account',[
       ['identity','账户资料',()=>identity(ctx)],
+      ['display','外观与显示',()=>accountDisplay(ctx)],
       ['grants','我的权限',()=>grants],
       ['modules','可用页面',()=>moduleLinks(ctx)],
     ]),

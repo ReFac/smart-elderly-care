@@ -138,7 +138,7 @@ def projection(db, state, user):
 
 
 def authorize_command(db, user, action, payload, state):
-    if action == "ops.dischargeSettlement":
+    if action in ("ops.dischargeSettlement", "ops.requestRefund", "ops.confirmRefund", "ops.cancelRefund"):
         return require_resident(db, user, payload.get("residentId"), state)
     if action in ("ops.subsidyList", "ops.subsidyMaterial", "ops.subsidyRules"):
         # Filing commands recheck the complete authorized roster and every selected person.
@@ -146,7 +146,7 @@ def authorize_command(db, user, action, payload, state):
     if action.startswith("permissionRequest."):
         # The request and its one-time edit are checked against the selected approver's scope.
         return
-    if action in ("dossier.profile", "ops.bill", "ops.deposit", "ops.residentBillingPolicy"):
+    if action in ("dossier.profile", "ops.bill", "ops.deposit", "ops.admissionOrder", "ops.residentBillingPolicy"):
         require_resident(db, user, payload.get("residentId"), state)
     elif action in ("care.approvePlan", "care.revisePlan"):
         plan = next((r for r in state["plans"] if r["id"] == payload.get("planId")), None)

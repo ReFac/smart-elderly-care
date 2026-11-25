@@ -8,9 +8,9 @@
 }
 .lead-counts > div { display: grid; gap: 5px; padding: 12px 20px; }
 .lead-counts > div + div { border-inline-start: 1px solid var(--line); }
-.lead-counts dt { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; }
+.lead-counts dt { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 0.86667rem; }
 .lead-counts dt svg { color: var(--accent); }
-.lead-counts dd { margin: 0; font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.lead-counts dd { margin: 0; font-size: 1.73333rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .lead-detail-head, .lead-day-info, .lead-hours, .lead-confirm-phone { display: flex; align-items: center; gap: 10px; }
 .lead-detail-head { flex-wrap: wrap; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .lead-detail-head .badge { margin-inline-start: auto; }
@@ -20,25 +20,25 @@
 .lead-events { list-style: none; padding: 0; margin: 0; }
 .lead-events li { display: grid; grid-template-columns: 145px 1fr; gap: 10px; padding: 9px 0; }
 .lead-events li + li { border-top: 1px solid var(--line); }
-.lead-events time, .lead-booking span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.lead-events time, .lead-booking span { color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 .lead-events li > div { padding-inline-start: 10px; border-inline-start: 2px solid #b9cbe8; }
-.lead-events strong, .lead-events li p { font-size: 13px; }
+.lead-events strong, .lead-events li p { font-size: 0.86667rem; }
 .lead-events li p { white-space: pre-wrap; margin: 2px 0 0; }
-.lead-event-outcome { font-size: 13px; color: #224780; }
+.lead-event-outcome { font-size: 0.86667rem; color: #224780; }
 .lead-arrangements { display: flex; align-items: start; flex-wrap: wrap; gap: 6px; }
 .lead-schedule, .lead-booking-detail { display: grid; gap: 14px; min-width: 0; }
 .lead-booking-detail { justify-items: start; }
-.lead-day-info { flex-wrap: wrap; padding: 8px 18px; border-block: 1px solid var(--line); background: #f7f9fc; font-size: 13px; color: var(--muted); }
+.lead-day-info { flex-wrap: wrap; padding: 8px 18px; border-block: 1px solid var(--line); background: #f7f9fc; font-size: 0.86667rem; color: var(--muted); }
 .lead-hours { gap: 5px; margin-inline-start: auto; }
-.lead-day-message { margin: 0; padding: 15px 18px; font-size: 13px; }
+.lead-day-message { margin: 0; padding: 15px 18px; font-size: 0.86667rem; }
 .lead-grid-scroll { max-height: clamp(270px, 38vh, 530px); overflow: auto; }
-.lead-grid { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
+.lead-grid { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 0.86667rem; }
 .lead-grid thead th { position: sticky; z-index: 2; top: 0; text-align: left; color: #455673; background: #eff2f7; }
 .lead-grid th, .lead-grid td { border-bottom: 1px solid #e0e5ec; padding: 5px 12px; }
 .lead-grid td { min-width: 125px; border-inline-start: 1px solid #e0e5ec; }
 .lead-grid .lead-clock-col { width: 128px; white-space: nowrap; font-variant-numeric: tabular-nums; position: sticky; left: 0; z-index: 1; }
 .lead-grid thead .lead-clock-col { z-index: 3; padding-block: 8px; }
-.lead-grid tbody th { background: #f7f9fc; font-size: 12px; font-weight: 550; color: #50617b; }
+.lead-grid tbody th { background: #f7f9fc; font-size: 0.8rem; font-weight: 550; color: #50617b; }
 .lead-grid tr:last-child td, .lead-grid tr:last-child th { border-bottom: 0; }
 .lead-slot, .lead-booking { width: 100%; border-radius: 4px; padding: 5px 9px; font: inherit; text-align: left; cursor: pointer; }
 .lead-slot { color: #4a6478; background: #fafcfd; border: 1px dashed #c5d2db; }
@@ -49,13 +49,13 @@
 .lead-grid tbody tr { height: 40px; }
 .lead-booking-callback { background: #edf7f1; border-color: #b1d5be; border-inline-start-color: #35845c; color: #21593c; }
 .lead-booking:focus-visible, .lead-slot:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.lead-book-hint, .lead-confirm-phone { grid-column: 1 / -1; margin: 0; font-size: 13px; line-height: 1.5; }
+.lead-book-hint, .lead-confirm-phone { grid-column: 1 / -1; margin: 0; font-size: 0.86667rem; line-height: 1.5; }
 .lead-book-hint { color: var(--muted); }
 .lead-confirm-phone { align-items: flex-start; }
 .lead-confirm-phone input { margin-top: 3px; }
 @media (max-width: 650px) {
   .lead-counts > div { padding: 9px; }
-  .lead-counts dt { font-size: 12px; }
+  .lead-counts dt { font-size: 0.8rem; }
   .lead-counts dt svg { display: none; }
   .lead-events li { grid-template-columns: 1fr; gap: 3px; }
 }

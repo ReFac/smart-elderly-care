@@ -1,5 +1,6 @@
 import { node } from './shared.js';
 import { holdToSpeak } from './agent-voice.js';
+import { fileControl } from '../lib/file-control.js';
 
 export function voiceProposal(ctx, tasks, requestId) {
   const form = node('form', 'fx-profile');
@@ -84,7 +85,7 @@ export function voiceProposal(ctx, tasks, requestId) {
     sync();
   });
   form.append(label('拟完成的工单', task),
-    node('div', 'fx-actions', [voice.control, label('或选择录音文件转写', file)]), status,
+    node('div', 'fx-actions', [voice.control, label('或选择录音文件转写', fileControl(file))]), status,
     label('转写原文或手工输入', transcript), label('拟写入的执行记录', note), error, submit);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();

@@ -2,6 +2,7 @@ export const groups = [
   [
     '工作空间',
     [
+      ['assistants', 'AI', 'spark'],
       ['overview', '运营总览', 'grid'],
       ['inbox', '预警与确认', 'bell'],
       ['history', '最近改动', 'history'],

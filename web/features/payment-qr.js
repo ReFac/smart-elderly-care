@@ -91,7 +91,7 @@ export async function showCheckout(ctx, order, confirmed = false) {
 export function checkoutAction(ctx, order, channels) {
   const slot = node('span');
   channels.then((available) => {
-    if (available.includes(order.channel)) {
+    if (order.collection !== "terminal" && available.includes(order.channel)) {
       slot.append(link(ctx, '显示收款码', () => showCheckout(ctx, order)));
     }
   });

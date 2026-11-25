@@ -105,3 +105,26 @@ class PersonalAccountTests(unittest.TestCase):
         self.assertIn("assistants", updated["selfAccess"]["routes"])
         self.assertIn("gw.confirm", updated["allowedActions"])
         self.assertNotIn("inbox", updated["selfAccess"]["routes"])
+
+    def test_display_preferences_are_private_and_detect_stale_devices(self):
+        from platform_core.display_preferences import settings
+        from platform_core.store import Conflict
+        token, user = self.create("family-pref", kind="family", residentId="r001")
+        second, _ = self.store.login("family-pref", self.current)
+        values = dict(mode="system", level=10, family="serif", density="compact", motion="reduced")
+        request = dict(version=0, values=values, expectedAccount=user["id"])
+        saved = settings(self.store, token, request)
+        self.assertEqual(saved, self.store.snapshot(second)["data"]["displayPreferences"])
+        self.assertEqual(settings(self.store, token, request), saved)
+        self.assertIsNone(settings(self.store, self.owner)["values"])
+        with self.assertRaises(Conflict):
+            settings(self.store, second, {**request, "values": {**values, "mode": "light"}})
+        with self.assertRaises(Conflict):
+            settings(self.store, self.owner, request)
+        for invalid in ({**request, "accountId": self.owner_user["id"]},
+                        {**request, "values": {**values, "level": True}},
+                        {**request, "values": {**values, "mode": "custom"}}):
+            with self.assertRaises(ValueError):
+                settings(self.store, token, invalid)
+        with self.assertRaises(SignedOut):
+            settings(self.store, None, request)
