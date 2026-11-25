@@ -1,3 +1,4 @@
+import { interfaceText } from '../lib/locale.js';
 import { displayLocale } from '../lib/locale.js';
 import { btn, facts, field, node, page, section, select, table } from './shared.js';
 
@@ -98,6 +99,18 @@ export function deploymentConsole(ctx) {
       ...(own?[['监听地址',running.host + ':' + running.port],['访问入口',view.publicOrigin || '本机访问'],
         ['模型端点',running.endpoint],['端口来源',view.portPinned?'启动命令指定':'部署配置']]:[]),
     ]))];
+    if (view.agentRuntimes) {
+      const {pi, deerflow} = view.agentRuntimes;
+      const piStatus = pi.nodeSupported === false
+        ? interfaceText('需使用 Node.js') + ' ≥ ' + pi.minimumNode + (pi.nodeVersion ? ' · ' + interfaceText('当前版本') + ' ' + pi.nodeVersion : '')
+        : pi.installed ? interfaceText('已安装') + ' ' + pi.version : interfaceText('待安装') + ' ' + pi.requiredVersion;
+      sections.push(section('健康助理的执行组件', facts([
+        ['Pi · 员工对话', piStatus],
+        ['DeerFlow · 就诊整理与定时简报', deerflow.backend === 'direct' ? '已切换为平台直连'
+          : deerflow.ready ? interfaceText('已安装') + ' ' + deerflow.version : interfaceText('待核对安装') + ' ' + deerflow.expectedVersion],
+        ['院务系统', '负责排队、授权、计量和员工签认'],
+      ])));
+    }
     if (own) {
       const d=view.draft;
       const details=d?facts([['应用策略',view.policy==='next-start'?'已批准 · 下次服务重启应用':'等待 Owner 批准'],

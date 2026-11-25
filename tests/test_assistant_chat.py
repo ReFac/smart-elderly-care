@@ -106,6 +106,31 @@ class ChatTests(unittest.TestCase):
                 self.store, self.owner, picked, sample_wav(), True, conversation=True
             )["transcriptId"]
 
+    def test_missing_pi_never_spends_the_initial_model_reservation(self):
+        with patch.object(chat.pi_runtime, "_current", side_effect=chat.pi_runtime.Unavailable(chat.pi_runtime.SETUP)):
+            with self.assertRaisesRegex(chat.Unavailable, "Pi 对话服务"):
+                self.ask("今天院里怎么样", "missing-runtime")
+        self.transport.assert_not_called()
+        with closing(self.store.connect()) as db:
+            row = db.execute("SELECT status,charged,reason FROM api_usage WHERE request='chat/missing-runtime'").fetchone()
+        self.assertEqual(tuple(row), ("closed", 0, "pi_unavailable"))
+
+    def test_visit_button_correlates_only_its_signed_in_origin(self):
+        message = self.ask("帮我整理这次就诊资料", "visit-origin")["messages"][-1]
+        self.assertEqual(message["runtime"], "pi")
+        self.assertEqual(message["action"]["kind"], "uploadVisitRecords")
+        self.ask("库存情况", "stock")
+        with closing(self.store.connect()) as db:
+            owner = self.store.actor(db, self.owner)["id"]
+            self.assertEqual(chat.upload_task(db, owner, "visit-origin"), message["taskId"])
+            for actor, request in ((owner, "stock"), ("other", "visit-origin")):
+                with self.assertRaises(ValueError):
+                    chat.upload_task(db, actor, request)
+        limited = self.staff(["assistants"])
+        denied = self.ask("帮我整理本次就诊资料", "limited-visit", token=limited)["messages"][-1]
+        self.assertIsNone(denied["action"])
+        self.assertNotIn("taskId", denied)
+
     def test_observe_inventory_then_calculate_and_trace_without_arguments(self):
         from platform_core.agents.chat_math import Arithmetic
         def first(_key, body):
@@ -301,12 +326,49 @@ class ChatTests(unittest.TestCase):
                 "requestId": "in-progress-read", "region": {}, "sentence": 1,
             }, transport=lambda _key, content: clips.append(content) or b"voice")
             self.assertEqual(clips, [first, second])
+            with closing(self.store.connect()) as db:
+                steps = db.execute("""SELECT m.kind,u.taskId FROM media_usage m JOIN agent_task_usage u
+                    ON u.meter='media' AND u.actor=m.actor AND u.receipt=m.id
+                    WHERE m.id=? OR m.reference=? ORDER BY m.rowid""", (receipt, "in-progress-read")).fetchall()
+            self.assertEqual([(r[0], r[1]) for r in steps], [
+                (kind, saved["messages"][-1]["taskId"]) for kind in ("asr", "tts", "tts")
+            ])
             self.assertEqual([e["type"] for e in events[:3]], ["begin", "text", "speech"])
             with self.assertRaises(Conflict):
                 chat.reply(self.store, self.owner, {"requestId": "second-use", "text": "再说一次"},
                            progress=progress, voice_receipt=receipt)
         finally:
             progress.close()
+
+    def test_voice_with_reading_off_links_asr_and_pi_without_permitting_tts(self):
+        receipt = self.voice_receipt()
+        question = {"requestId": "silent-voice", "text": "请说明探访安排", "region": {}}
+        with closing(self.store.connect()) as db:
+            owner = self.store.actor(db, self.owner)["id"]
+            task = provider.task_usage.for_receipt(db, "media", owner, receipt)
+        self.assertRegex(task, r"^voice-[a-f0-9]{24}$")
+        for token, scope in ((self.staff(["care","voice"], "another-speaker"), {}),
+                             (self.owner, {"buildingId":"building-main"})):
+            with self.assertRaises(PermissionError):
+                chat.reply(self.store, token, {**question, "region":scope},
+                           voice_receipt=receipt, transport=self.transport)
+        self.transport.assert_not_called()
+        result = chat.reply(self.store, self.owner, question, voice_receipt=receipt, transport=self.transport)
+        self.assertEqual(result["messages"][-1]["taskId"], task)
+        self.assertEqual(chat.reply(self.store, self.owner, question, voice_receipt=receipt,
+                                    transport=self.transport), result)
+        with self.assertRaises(Conflict):
+            chat.reply(self.store, self.owner, {**question, "requestId":"duplicated-voice"},
+                       voice_receipt=receipt, transport=self.transport)
+        self.transport.assert_called_once()
+        with self.assertRaises(PermissionError), patch.object(read_aloud, "synthesize") as tts:
+            read_aloud.listen(self.store, self.owner, {
+                "scopeKey":result["scopeKey"], "generation":result["generation"],
+                "requestId":question["requestId"], "region":{}, "part":0,
+            })
+        tts.assert_not_called()
+        with closing(self.store.connect()) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM agent_task_usage WHERE taskId=?", (task,)).fetchone()[0], 2)
 
     def test_read_aloud_requires_voice_in_current_scope_before_cloud_call(self):
         another = self.staff(["care", "voice"], "speaker_two")

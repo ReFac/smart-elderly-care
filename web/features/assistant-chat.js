@@ -13,6 +13,8 @@ import { canDraftProfile } from './assistant-materials.js';
 import { workbookButton } from './assistant-workbook.js';
 import { dictationReview } from './assistant-dictation.js';
 
+import { openAgentLearning } from './agent-learning.js';
+
 const path = '/api/assistant/chat';
 const dayLabel = new Intl.DateTimeFormat(displayLocale, {
   year: 'numeric',
@@ -150,7 +152,9 @@ function buildChat(getContext, actor, area, region, label) {
     floating.expand();
     if (!input.disabled) input.focus({preventScroll:true});
   });
-  const header = node('header', 'assistant-header', [mark(), titles, recents, expand, close]);
+  const jobs = canAct(ctx, 'dossier.confirmVisit') ? control('整理任务', 'folder', 'assistant-icon-control',
+    async () => (await import('./visit-job-list.js')).openVisitJobs(getContext())) : null;
+  const header = node('header', 'assistant-header', [mark(), titles, jobs, recents, expand, close]);
   const floating = floatingWindow(panel, header, ctx.state.user.id);
   const log = el('section', 'assistant-log');
   log.setAttribute('role', 'log');
@@ -263,20 +267,27 @@ function buildChat(getContext, actor, area, region, label) {
     if (intake.present) log.scrollTop = log.scrollHeight;
   }, accompany);
   const filePicker = !area && canReadDocuments(ctx) ? el('input') : null;
-  const uploadButton = filePicker ? control('上传图片', 'file', 'assistant-attachment', () => filePicker.click()) : null;
+  let uploadOrigin = '';
+  function chooseFiles(origin = '') {
+    if (!filePicker || uploadButton.disabled || destroyed || !canReadDocuments(getContext())) return;
+    uploadOrigin = origin;
+    filePicker.click();
+  }
+  const uploadButton = filePicker ? control('上传图片', 'file', 'assistant-attachment', () => chooseFiles()) : null;
   if (filePicker) {
     filePicker.type = 'file';
     filePicker.multiple = true;
     filePicker.accept = '.pdf,.png,.jpeg,.jpg,.xlsx,.xls,application/pdf,image/png,image/jpeg,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     filePicker.hidden = true;
     uploadButton.title = '上传图片、PDF 或 Excel 工作簿，核对资料后预填表单';
-    const receive = files => {
+    const receive = (files, origin = '') => {
       if (!files.length || uploadButton.disabled) return;
-      try { intake.start(Array.from(files)); }
+      try { intake.start(Array.from(files), origin); }
       catch (cause) { problem(cause.message); }
     };
     filePicker.addEventListener('change', () => {
-      receive(filePicker.files);
+      receive(filePicker.files, uploadOrigin);
+      uploadOrigin = '';
       filePicker.value = '';
     });
     panel.addEventListener('dragover', event => {
@@ -400,13 +411,19 @@ function buildChat(getContext, actor, area, region, label) {
       }
       body.append(trace);
     }
-    if (!mine && item.action?.kind === 'uploadResidentProfile' && canDraftProfile(getContext()) && canReadDocuments(getContext())) {
-      const attach = control(en ? (area ? 'Open facility assistant to upload' : 'Upload resident documents') : area ? '前往机构助理上传资料' : '上传长辈资料', 'file', 'assistant-action', () => {
+    const visitUpload = item.action?.kind === 'uploadVisitRecords';
+    const uploadAllowed = visitUpload ? getContext().state.allowedActions?.includes('dossier.confirmVisit') : canDraftProfile(getContext());
+    if (!mine && (visitUpload || item.action?.kind === 'uploadResidentProfile') && uploadAllowed && canReadDocuments(getContext())) {
+      const attach = control(en ? (area ? 'Open facility assistant to upload' : 'Upload resident documents') : area ? '前往机构助理上传资料' : visitUpload ? '上传就诊资料' : '上传长辈资料', 'file', 'assistant-action', () => {
         if (intake.present) { intake.card.scrollIntoView({block:'nearest'}); return; }
         if (area) openChat(getContext);
-        current?.chooseFile();
+        current?.chooseFile(item.taskId ? item.requestId : '');
       });
-      body.append(attach, workbookButton(getContext()));
+      body.append(attach);
+      if (!visitUpload) body.append(workbookButton(getContext()));
+    }
+    if (!mine && item.at && ['staff', 'owner'].includes(getContext().state.user.kind)) {
+      body.append(control('改进回答', 'edit', 'assistant-action', () => openAgentLearning(getContext(), region.campusId)));
     }
     const links = assistantPageLinks(getContext(), item);
     if (links.length) {
@@ -616,9 +633,9 @@ function buildChat(getContext, actor, area, region, label) {
     const page = startPage.slice(1).split('?')[0] || 'overview';
     const speechRequested = Boolean(voiceTranscriptId && reader.voicePreference);
     if (!retry || retry.text !== text || retry.page !== page || retry.webSearch !== network.enabled ||
-      retry.voiceTranscriptId !== (speechRequested ? voiceTranscriptId : ''))
+      retry.voiceTranscriptId !== voiceTranscriptId || retry.readAloud !== speechRequested)
       retry = { text, page, id: crypto.randomUUID(), webSearch: network.enabled,
-        voiceTranscriptId: speechRequested ? voiceTranscriptId : '' };
+        voiceTranscriptId, readAloud: speechRequested };
     sending = true;
     reader.stop();
     partial = '';
@@ -644,7 +661,7 @@ function buildChat(getContext, actor, area, region, label) {
         scopeKey,
         generation,
         readAloud: speechRequested,
-        ...(speechRequested ? { voiceTranscriptId: retry.voiceTranscriptId } : {}),
+        ...(retry.voiceTranscriptId ? { voiceTranscriptId: retry.voiceTranscriptId } : {}),
       }, request.signal, event => {
         if (destroyed) return;
         if (event.type === 'begin' && !panel.hidden) {
@@ -772,9 +789,7 @@ function buildChat(getContext, actor, area, region, label) {
     actor,
     area,
     hide,
-    chooseFile() {
-      if (filePicker && !uploadButton.disabled && !destroyed && canReadDocuments(getContext())) filePicker.click();
-    },
+    chooseFile: chooseFiles,
     show() {
       floating.expand();
       if (reader.popup.parentNode !== composer) {

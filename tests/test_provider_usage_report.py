@@ -116,6 +116,29 @@ class ReportTests(unittest.TestCase):
             ),
         )
 
+    def test_one_task_groups_runtime_handoffs_without_revealing_other_jobs(self):
+        from platform_core.provider import task_usage
+        key = task_usage.identifier("chat", self.staff_id, "合成请求")
+        with closing(self.store.connect()) as db, db:
+            with task_usage.scope("pi", key):
+                self._token(db, self.staff_id, "plan", billing=13)
+                task_usage.attach(db, "tokens", self.staff_id, "plan")
+                with task_usage.scope("deerflow", key):
+                    self._token(db, "health-review", "draft", billing=23, attributed=self.staff_id)
+                    task_usage.attach(db, "tokens", "health-review", "draft")
+                self._media(db, "attachment", "ocr", 4)
+                task_usage.attach(db, "media", self.staff_id, "attachment")
+            self._token(db, self.staff_id, "unrelated", billing=100)
+            task_usage.attach(db, "tokens", self.staff_id, "unrelated")
+        report = usage_report.read(self.store, self.owner, {"taskId": key})
+        self.assertEqual(report["summary"]["tokens"], 36)
+        self.assertEqual(report["summary"]["ocrPages"], 4)
+        self.assertCountEqual([r["runtime"] for r in report["records"]["items"]], ["pi","deerflow","pi"])
+        with self.assertRaises(PermissionError):
+            usage_report.read(self.store, self.staff, {"taskId": key})
+        with self.assertRaises(ValueError):
+            usage_report.read(self.store, self.owner, {"taskId": "姓名"})
+
     def test_reports_only_confirmed_units_and_keeps_missing_breakdowns_distinct(self):
         with closing(self.store.connect()) as db, db:
             self._token(

@@ -49,7 +49,7 @@ def overview(db, state, user, now):
         jobs = sum(r[0] in ids for r in db.execute("SELECT resident FROM rounds_jobs"))
         add(
             "health-rounds",
-            "健康助理巡查与提醒",
+            "日常起居助理巡查与提醒",
             "已启用" if policy["enabled"] else "已暂停",
             f"每 {policy['intervalMinutes']} 分钟检查，{policy['notifyAt']} 起处理当日提醒与获授权家属的推送。"
             "按长辈已设定的自动生成方式执行。",
@@ -58,6 +58,13 @@ def overview(db, state, user, now):
             count=jobs,
             next_at=policy["nextRunAt"],
         )
+        if access.has(user, "medical") and access.has(user, "clinical"):
+            health = db.execute("SELECT enabled,interval_min,next_at FROM rounds_health_policy WHERE singleton=1").fetchone()
+            health_jobs = sum(row[0] in ids for row in db.execute("SELECT resident FROM rounds_health_jobs"))
+            add("health-review", "健康复核助理", "已启用" if health[0] else "已暂停",
+                f"每 {health[1]} 分钟逐人核对健康资料，在个人档案中保留带出处的草稿。",
+                "settings" if owner else "residents", "rounds" if owner else "",
+                count=health_jobs, next_at=health[2] if health[0] else None)
     if access.has(user, "care"):
         tasks = [
             row

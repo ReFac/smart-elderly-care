@@ -24,6 +24,7 @@ PERMISSIONS = {
     "notices.publish": "向全体员工发布通知",
     "reports": "报送及经营视图",
     "assistants": "向健康助理询问已授权的业务",
+    "assistants.reviewRules": "审核、发布和撤回本院区的助理写作规则",
     "gateway.simulate": "登记模拟设备事件",
     "alerts": "护士复核预警并记录处置",
     "voice": "向健康助理语音提问、发起语音变更申请",

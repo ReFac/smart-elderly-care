@@ -40,7 +40,7 @@ def observe(actions, selected):
     return {name: allowed[name].read() for name in selected}
 
 
-def from_response(response, actions, *, offered=None, trace=None):
+def requested_calls(response, actions, *, offered=None):
     calls = response["choices"][0]["message"].get("tool_calls")
     if not isinstance(calls, list) or not 1 <= len(calls) <= MAX_ACTIONS:
         raise ValueError("云端资料请求格式无效")
@@ -62,6 +62,12 @@ def from_response(response, actions, *, offered=None, trace=None):
         if not isinstance(arguments, dict) or (arguments and not hasattr(current[name], "execute")):
             raise ValueError("此工具仅接受已授权的参数")
         selected[name] = arguments
+    return selected
+
+
+def from_response(response, actions, *, offered=None, trace=None):
+    current = {action.name: action for action in actions}
+    selected = requested_calls(response, current.values(), offered=offered)
     observation = {}
     for name, args in selected.items():
         started = monotonic()

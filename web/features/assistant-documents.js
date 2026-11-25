@@ -46,6 +46,7 @@ export function documentIntake(getContext, changed, hide) {
   const card = node('section', 'assistant-document-card');
   card.setAttribute('aria-label', '健康助理文件整理');
   let rows = [], stage = '', active, originalDialog, progress = '';
+  let uploadHeaders = {};
 
   function stop() {
     if (active) {
@@ -64,10 +65,12 @@ export function documentIntake(getContext, changed, hide) {
     stage = progress = '';
     render();
   }
-  function start(files) {
+  function start(files, originRequest = '') {
     if (!canReadDocuments(getContext())) throw Error('当前账号没有文件整理权限。');
     if (rows.length) throw Error('请先处理或关闭当前这组文件。');
     rows = documentFiles(files);
+    uploadHeaders = {'X-Upload-Group': crypto.randomUUID()};
+    if (originRequest) uploadHeaders['X-Chat-Request'] = originRequest;
     if (rows.some(row => row.workbook) && !canDraftProfile(getContext())) {
       rows = [];
       throw Error('处理长辈登记工作簿需要档案编辑权限。');
@@ -94,7 +97,7 @@ export function documentIntake(getContext, changed, hide) {
             continue;
           }
           const response = await fetch('/api/assistant/documents/preview', {
-            method: 'POST', headers: { 'Content-Type': row.mime }, body: row.file, signal: request.signal,
+            method: 'POST', headers: { 'Content-Type': row.mime, ...uploadHeaders }, body: row.file, signal: request.signal,
           });
           const result = await response.json();
           if (request.signal.aborted) return;
@@ -160,7 +163,7 @@ export function documentIntake(getContext, changed, hide) {
     if (!canOpenVisit(getContext())) return getContext().toast('当前账号没有核对就诊记录的权限。');
     if (document.querySelector('dialog[open]')) return getContext().toast('请先关闭当前业务窗口。');
     hide();
-    openVisitEditor(getContext(), null, mode, '', chosen.map(({ file, mime, category }) => ({file, mime, category})));
+    openVisitEditor(getContext(), null, mode, '', chosen.map(({ file, mime, category }) => ({file, mime, category})), uploadHeaders);
   }
   function fileRow(row) {
     const title = node('strong', '', privateFilename(row.file.name));

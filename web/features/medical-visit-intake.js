@@ -75,7 +75,7 @@ function attachmentsInput(ctx, rows, changed) {
   ]) };
 }
 
-export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '', originals = []) {
+export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '', originals = [], uploadHeaders = {}) {
   if (!canAct(ctx, 'dossier.confirmVisit')) return ctx.toast('当前账号没有就诊病例核对权限。');
   if (resident && !visitCandidates(ctx).some(row => row.id === resident.id)) return ctx.toast('这份档案当前只读。');
   const ai = mode === 'ai';
@@ -226,7 +226,7 @@ export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '',
         });
         if (!dialog.open) return;
         const response = await fetch('/api/residents/' + encodeURIComponent(person.id) + '/medical-visits/preview', {
-          method: 'POST', headers: {'Content-Type': 'application/json'}, signal: active.signal,
+          method: 'POST', headers: {'Content-Type': 'application/json', ...uploadHeaders, ...(ai ? {Prefer:'respond-async'} : {})}, signal: active.signal,
           body: JSON.stringify({
             requestId, revision: (ctx.current?.() || ctx).state.revision,
             visitId: existing?.id || '', mode, fields: {eventDate: targetDate}, attachments,
@@ -238,6 +238,14 @@ export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '',
         if (response.status === 401) { await ctx.refreshWorkspace(); return; }
         if (!response.ok) throw new Error(draft.error || '资料整理失败，请重试。');
         if (!dialog.open) return;
+        if (response.status === 202) {
+          const {openVisitJobs} = await import('./visit-job-list.js');
+          if (dialog.open) {
+            dialog.close();
+            openVisitJobs(ctx.current?.() || ctx, draft.draftId);
+          }
+          return;
+        }
         if (draft.residentId !== person.id || draft.fixedDate !== targetDate ||
             (draft.parentVisitId || '') !== (existing?.id || '') || draft.attachments.length !== rows.length ||
             !draft.attachments.every((attachment, i) => attachment.bytes === rows[i].file.size &&

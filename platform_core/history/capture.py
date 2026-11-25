@@ -21,8 +21,10 @@ PREFIXES = {
     "account": ("accounts",),
     "permissionRequest": ("permission_requests",),
     "agent": ("agent_",),
+    "learning": ("agent_rule_",),
     "rounds": (
         "rounds_policy",
+        "rounds_health_policy",
         "rounds_modes",
         "rounds_observations",
         "rounds_reports",

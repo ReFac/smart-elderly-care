@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .. import access_policy
 from ..agents import specialists
-from . import completions, deepseek, late_receipts, search_usage, token_receipt
+from . import completions, deepseek, late_receipts, search_usage, task_usage, token_receipt
 from .late_receipts import late_usage as late_usage, unsettled as unsettled
 
 DEFAULT_MODEL = "deepseek-flash"
@@ -40,6 +40,7 @@ def init(db):
     db.execute("CREATE INDEX IF NOT EXISTS api_usage_plan ON api_usage(planId)")
     token_receipt.init(db)
     search_usage.init(db)
+    task_usage.init(db)
     late_receipts.init(db)
     generation.init(db)
 
@@ -387,6 +388,7 @@ def plan(
                 allowance,
             ),
         )
+        task_usage.attach(db, "tokens", uid, request_id)
     # The network call never holds a workspace transaction. Unknown billing keeps its reservation.
     outcome = deepseek.complete(
         transport or completions.send, key, body, allowed, allowance=allowance

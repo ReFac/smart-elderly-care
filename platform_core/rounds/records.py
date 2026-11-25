@@ -111,7 +111,9 @@ def visible_report(report, user):
 
 
 def card(db, person, user):
+    from .specialists import drafts
     selection = mode(db, person["id"])
+    report = visible_report(latest(db, person), user)
     return {
         "residentId": person["id"],
         "mode": selection,
@@ -121,7 +123,8 @@ def card(db, person, user):
         "canGenerate": active(person),
         "canConfigure": access.has(user, "care") and active(person),
         "canObserve": access.has(user, "clinical") and active(person),
-        "latest": visible_report(latest(db, person), user),
+        "latest": report,
+        "agentDrafts": drafts(db, person, user, report),
     }
 
 
@@ -143,10 +146,13 @@ def audit(db, now, action, summary, actor, state, rid, comment=""):
     return revision
 
 
-def report_source(db, state, person, now, *, clinical):
+def report_source(db, state, person, now, *, clinical, actor=None):
+    from ..agents import growth
     from ..provider.generation import fingerprint
 
     data = build(db, state, person, now)
+    data["dailyStyle"] = growth.guidance(db, actor, "daily-life", bed_id=person["bedId"])
+    data["clinicalStyle"] = growth.guidance(db, actor, "health-review", bed_id=person["bedId"]) if clinical and actor else ""
     digest = fingerprint(["daily-life-v2", data])
     previous = db.execute(
         """SELECT fingerprint,json_extract(payload,'$.clinicalReviewed')
@@ -161,33 +167,41 @@ def report_source(db, state, person, now, *, clinical):
     )
 
 
-def interpret(store, data, *, clinical, attributed_actor=None):
+def interpret(store, data, *, clinical, attributed_actor=None, scheduled_daily=False, authorize=None):
+    from ..agents import deerflow_worker
+    from ..provider import task_usage
+
+    task_id = task_usage.identifier("round", data["residentId"], data["stayId"], data["day"], "daily-life")
     rows = narrative.paragraphs(
         store,
         data["residentId"],
         "care",
         data["dailyFacts"],
-        attributed_actor=attributed_actor,
+        attributed_actor=attributed_actor, task_id=task_id, style=data["dailyStyle"], authorize=authorize,
     )
-    if clinical:
+    if clinical and scheduled_daily:
+        # Keep authorized legacy inbox signals and family-safe observations available.
+        # The scheduled daily-life model only receives the daily living evidence above.
+        rows.extend({**row, "source": "records"} for row in data["clinicalFacts"])
+    elif clinical:
         rows.extend(
             narrative.paragraphs(
                 store,
                 data["residentId"],
                 "clinical",
                 data["clinicalFacts"],
-                attributed_actor=attributed_actor,
+                attributed_actor=attributed_actor, task_id=task_id, style=data["clinicalStyle"], authorize=authorize,
             )
         )
-    return {"changes": rows, "clinical": clinical}
+    return {"changes": rows, "clinical": clinical, "taskId": task_id, "draftRuntime": deerflow_worker.backend()}
 
 
 def make_report(db, state, person, now, actor, prepared, comment="", *, clinical):
     from ..store import Conflict
-    from ..provider import model_name
+    from ..provider import completions, model_name
 
     data, digest, already_saved = report_source(
-        db, state, person, now, clinical=clinical
+        db, state, person, now, clinical=clinical, actor=actor if actor.get("kind") in ("staff", "owner") else None
     )
     if already_saved:
         return False
@@ -198,7 +212,10 @@ def make_report(db, state, person, now, actor, prepared, comment="", *, clinical
         and not prepared[1]["clinical"]
     ):
         raise Conflict("巡查依据已变化，请按最新记录重新生成")
-    data["source"] = "deepseek"
+    data.update(taskId=prepared[1]["taskId"], draftRuntime=prepared[1]["draftRuntime"])
+    data.pop("dailyStyle", None)
+    data.pop("clinicalStyle", None)
+    data["source"] = completions.provider_name()
     data["model"] = model_name()
     data["clinicalReviewed"] = clinical
     data["changes"] = [

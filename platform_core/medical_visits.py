@@ -29,6 +29,7 @@ FIELDS = {
 
 
 def init(db):
+    from . import visit_jobs
     db.execute("""CREATE TABLE IF NOT EXISTS dossier_visit_originals(
         id TEXT PRIMARY KEY, resident_id TEXT NOT NULL, image_hash TEXT NOT NULL,
         original BLOB NOT NULL, mime TEXT NOT NULL, UNIQUE(resident_id,image_hash))""")
@@ -55,6 +56,7 @@ def init(db):
         for op in ("UPDATE", "DELETE"):
             db.execute(f"""CREATE TRIGGER IF NOT EXISTS {table}_no_{op} BEFORE {op}
                 ON {table} BEGIN SELECT RAISE(ABORT,'就诊原件及签认记录不可覆盖'); END""")
+    visit_jobs.init(db)
 
 
 def _fields(raw, today, *, date_required=False, signed=False):
@@ -264,7 +266,7 @@ def _stage(db, rid, actor, request, name, mode, fields, files, visit_id, fixed_d
     ).fetchone()
 
 
-def preview(store, token, rid, p):
+def preview(store, token, rid, p, *, enqueue=False, task_id=None):
     """Keep originals before cloud OCR. A draft is visible only to its operator."""
     from .store import Conflict
 
@@ -320,13 +322,26 @@ def preview(store, token, rid, p):
             visit_id,
             fixed_date,
         )
+        if enqueue:
+            from . import visit_jobs
+            ticket = visit_jobs.enqueue(db, draft, token, fields, visit_id, fixed_date, task_id)
+
+    if enqueue:
+        store.visit_job_wakeup.set()
+        return ticket
+    return _complete(store, token, draft, files, fields, visit_id, fixed_date,
+                     lambda db: _session(store, db, token, rid), task_id=task_id)
+
+
+def _complete(store, token, draft, files, fields, visit_id, fixed_date, session, *, task_id=None):
+    """Only persist an unsigned result after rechecking the live grant."""
+    rid, name, mode, did = (draft[key] for key in ("resident_id", "resident_name", "mode", "id"))
     manifest = json.loads(draft["attachments"])
-    did = draft["id"]
     if not draft["result"]:
 
-        def authorize(db, session):
-            user, current_name, _ = _session(store, db, session, rid)
-            if user["id"] != actor["id"] or current_name != name:
+        def authorize(db, _token):
+            user, current_name, _ = session(db)
+            if user["id"] != draft["actor"] or current_name != name:
                 raise PermissionError("经办人或长辈身份发生变化，请重新核对")
             return user
 
@@ -338,7 +353,7 @@ def preview(store, token, rid, p):
         }
         if mode == "ai":
             result = visit_extraction.organize(
-                store, token, actor["id"], rid, name, files, manifest, fields, authorize
+                store, token, draft["actor"], rid, name, files, manifest, fields, authorize, draft_id=did, task_id=task_id
             )
         if fixed_date:
             result["fixedDate"] = fixed_date
@@ -353,8 +368,8 @@ def preview(store, token, rid, p):
             )
     with closing(store.connect()) as db, db:
         db.execute("BEGIN")
-        actor, current_name, revision = _session(store, db, token, rid)
-        if current_name != name:
+        actor, current_name, revision = session(db)
+        if current_name != name or actor["id"] != draft["actor"]:
             raise ValueError("长辈姓名已更新，请重新核对本组资料")
         ready = db.execute(
             "SELECT result FROM dossier_visit_drafts WHERE id=? AND actor=?",

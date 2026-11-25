@@ -5,10 +5,10 @@ from datetime import datetime
 from hashlib import sha256
 import json
 from pathlib import Path
-from threading import BoundedSemaphore, Lock
+from threading import BoundedSemaphore, Event, Lock
 from zoneinfo import ZoneInfo
 
-from .agents import agent_protocol
+from .agents import agent_protocol, growth
 from .system_monitor import Presence
 from .room_context import room_context, validate_proposal
 from .operations import expense_import, subsidies
@@ -90,6 +90,7 @@ class Store:
             self.path
         )
         self.now = now
+        self.visit_job_wakeup = Event()
         self._daily_maintenance_lock = Lock()
         self._trials_checked = None
         self._archive_checked = None
@@ -115,6 +116,7 @@ class Store:
             subsidies.init(db)
             protected_docs.init(db)
             activity.init(db)
+            growth.init(db)
             sample.schema(db)
             if not db.execute("SELECT 1 FROM workspace WHERE id=1").fetchone():
                 day = now().date().isoformat()
@@ -177,7 +179,9 @@ class Store:
         self.rounds = rounds.RoundService(self)
 
     def actor(self, db, token):
-        actor = viewer(db, token)
+        return self.scoped_actor(db, viewer(db, token))
+
+    def scoped_actor(self, db, actor):
         if (
             actor["kind"] == "family"
             and db.execute(

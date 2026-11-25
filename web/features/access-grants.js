@@ -5,7 +5,7 @@ const grantGroups = [
   ['入住与照护', ['residents', 'intake', 'care', 'care.schedule', 'care.areas', 'facility.manage', 'clinical', 'clinical.rules', 'health.overview']],
   ['医疗档案与亲属', ['medical', 'medical.write', 'relatives', 'family.share']],
   ['机构运营', ['inventory', 'finance', 'longCare', 'shifts', 'reports']],
-  ['智能协作与设备', ['assistants', 'gateway.simulate', 'alerts', 'voice', 'voice.confirm']],
+  ['智能协作与设备', ['assistants', 'assistants.reviewRules', 'gateway.simulate', 'alerts', 'voice', 'voice.confirm']],
   ['人员与审计', ['staff.manage', 'permissions.approve', 'audit']],
 ];
 

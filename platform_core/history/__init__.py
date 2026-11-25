@@ -90,7 +90,7 @@ def record(
         )
     source = (
         "agent"
-        if action.startswith("agent.") or actor["id"] == "rounds-agent"
+        if action.startswith("agent.") or actor["id"] in ("rounds-agent", "daily-life", "health-review")
         else "system"
         if actor["id"] in ("platform-operator", "archive-service", "trial-service", "scheduled-work", "demo-operator", "billing-lifecycle")
         or actor["id"].startswith("channel-")

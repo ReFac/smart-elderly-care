@@ -339,10 +339,15 @@ def _valid_token(token):
 def authenticate(db, token):
     if not _valid_token(token):
         return None
+    return account_from_session_hash(db, _token_hash(token))
+
+
+def account_from_session_hash(db, digest):
+    """For an already queued job, recheck its original session without storing a bearer token."""
     row = db.execute(
         """SELECT a.* FROM accounts a JOIN sessions s ON a.id=s.account_id
                    WHERE s.token_hash=? AND s.expires>? AND a.enabled=1""",
-        (_token_hash(token), int(time.time())),
+        (digest, int(time.time())),
     ).fetchone()
     return _public(row) if row else None
 

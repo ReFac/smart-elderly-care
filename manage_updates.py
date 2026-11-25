@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 from platform_core import updates
-from platform_core.update_deploy import Launcher, app_file
+from platform_core.update_deploy import BUNDLED, DEERFLOW_ASSETS, PI_ASSETS, Launcher, app_file
 
 
 ROOT = Path(__file__).resolve().parent
@@ -30,7 +30,12 @@ def build(version, output, keyfile, notes):
     with ZipFile(archive, "x", ZIP_DEFLATED, compresslevel=6) as package:
         package.write(ROOT / "server.py", "server.py")
         # Bundle Markdown and connector metadata below the application prefix accepted by older launchers.
-        resources = "platform_core/agents/bundled/"
+        resources = BUNDLED
+        for asset in (*PI_ASSETS, *DEERFLOW_ASSETS):
+            path = ROOT / asset
+            if not path.is_file() or path.resolve() != path:
+                raise ValueError(f"运行时发布材料缺失或不是普通文件：{asset}")
+            package.write(path, resources + asset)
         package.write(ROOT / "docs/examples/workspace-mcp.json", resources + "workspace-mcp.json")
         for manifest in sorted(ROOT.glob("requirements-*.txt")):
             package.write(manifest, resources + manifest.name)
@@ -40,7 +45,7 @@ def build(version, output, keyfile, notes):
         for entry in ("platform_core", "web"):
             for path in sorted((ROOT / entry).rglob("*")):
                 name = path.relative_to(ROOT).as_posix()
-                if not path.is_symlink() and path.is_file() and app_file(name):
+                if not name.startswith(resources) and not path.is_symlink() and path.is_file() and app_file(name):
                     package.write(path, name)
     digest = sha256()
     with archive.open("rb") as stream:

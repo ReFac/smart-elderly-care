@@ -9,7 +9,7 @@ import zlib
 
 from .. import access
 from ..care.records import lookup
-from . import audio_adapters, media, voice_cleanup
+from . import audio_adapters, media, task_usage, voice_cleanup
 
 
 # Ogg uses a non-reflected CRC-32 without initial/final XOR. The standard library
@@ -321,7 +321,11 @@ def require_chat_receipt(db, user, selected, receipt):
             (receipt, user["id"], reference),
         ).fetchone()
     ):
-        raise PermissionError("朗读只用于本人在当前对话里按住说话的语音消息")
+        raise PermissionError("语音回执与当前经办人或工作区域不匹配")
+    # Older clients may still have an unlinked receipt. Only its own speaker
+    # in the original region may attach it to the conversation.
+    return (task_usage.for_receipt(db, "media", user["id"], receipt)
+            or task_usage.link_chat_voice(db, user["id"], receipt))
 
 
 def transcribe(store, token, reference, raw, authorize, audit_scope=None, *, feature):

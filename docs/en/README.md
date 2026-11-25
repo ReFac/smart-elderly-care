@@ -24,6 +24,7 @@
 
 | Task | Guide |
 | --- | --- |
+| Trace a conversation, document handoff or scheduled brief | [Pi, DeerFlow 2.0 and workspace responsibilities](agent-components.md) |
 | Understand responsibilities, evidence and staff approval | [Agent handbook](agent-handbook.md) |
 | Connect the assistant to a trusted MCP tool server | [MCP and community skills](agent-handbook.md#extend-with-an-existing-mcp-or-community-skill) |
 | Discover and call the A2A service | [Agent Card and protocol](agent-protocol.md) |

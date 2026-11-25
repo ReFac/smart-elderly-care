@@ -1,6 +1,7 @@
 import {internationalDeployment, nameEditor, postalEditor} from '../lib/international-profile.js';
 import { residentLabel, residentAnchor, staffLabel } from './people-labels.js';
 import { monitors, monitorPage } from './system-monitor.js';
+import { openAgentLearning } from './agent-learning.js';
 import { backupPanel } from './backups.js';
 import { roundsSettings } from './rounds-desk.js';
 import { passwordFlow, sendPasswordReset } from './identity.js';
@@ -669,6 +670,7 @@ function settings(ctx) {
     node('p', 'fx-muted', config.unlimited ? '按实际调用统计用量，可在「AI 用量」查看明细。'
       : '云端规划按机构另购套餐启用。开通、续期与额度调整由平台运营方办理。'),
   ]);
+  deep.append(btn(ctx, '管理助理写作规则', () => openAgentLearning(ctx)));
   deep.append(btn(ctx, '查看助理工具与技能', async () => {
     try {
       const response = await fetch('/api/assistant/extensions');

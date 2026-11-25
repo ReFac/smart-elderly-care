@@ -6,6 +6,7 @@ import logging
 import json
 
 from .report import attention
+from .specialists import DAILY, NAMES, outcome
 
 from .. import history, rounds_family
 from .records import (
@@ -22,9 +23,9 @@ from .records import (
 )
 
 AGENT = {
-    "id": "rounds-agent",
-    "displayName": "健康助理定时巡查",
-    "username": "rounds-agent",
+    "id": DAILY,
+    "displayName": NAMES[DAILY],
+    "username": DAILY,
 }
 LOG = logging.getLogger(__name__)
 
@@ -82,6 +83,8 @@ def tick(store, halt):
                         "INSERT OR REPLACE INTO rounds_delivery_sweep VALUES(1,?,?)",
                         (day, settings["notifyAt"]),
                     )
+                if not residents:
+                    outcome(db, DAILY, "本轮没有自动生成的在住长辈", now)
                 next_run = (
                     (now + timedelta(minutes=settings["intervalMinutes"])).isoformat()
                     if normal_due
@@ -137,7 +140,12 @@ def tick(store, halt):
                             db, state, person, now, clinical=True
                         )
                 if person and not unchanged:
-                    prepared = (digest, interpret(store, data, clinical=True))
+                    def still_scheduled():
+                        _, live = inputs()
+                        if not live or live["_stayId"] != person["_stayId"] or live["bedId"] != person["bedId"]:
+                            raise ValueError("生活巡查范围已变化")
+                    prepared = (digest, interpret(store, data, clinical=True, scheduled_daily=True,
+                                                  authorize=still_scheduled))
                 with db:
                     db.execute("BEGIN IMMEDIATE")
                     owned = db.execute(
@@ -148,9 +156,11 @@ def tick(store, halt):
                         continue
                     state, person = inputs()
                     if person:
-                        completed += make_report(
+                        created = make_report(
                             db, state, person, now, AGENT, prepared, clinical=True
                         )
+                        completed += created
+                        outcome(db, DAILY, "已生成起居简报" if created else "资料未变", now)
                     db.execute(
                         "DELETE FROM rounds_jobs WHERE resident=? AND day=? AND retry_at=?",
                         (job[0], job[1], lease),
@@ -158,10 +168,12 @@ def tick(store, halt):
             except Exception:
                 wait = timedelta(minutes=min(60, 2 ** min(job[2], 6)))
                 with db:
-                    db.execute(
+                    changed = db.execute(
                         "UPDATE rounds_jobs SET attempts=attempts+1,retry_at=? WHERE resident=? AND day=? AND retry_at=?",
                         ((now + wait).isoformat(), job[0], job[1], lease),
-                    )
+                    ).rowcount
+                    if changed:
+                        outcome(db, DAILY, "生成未完成，等待重试", now)
                 LOG.error("一项长辈巡查生成失败，将按退避间隔重试")
         if not halt.is_set():
             delivered = deliver_due(db, store.now, halt, business_state)

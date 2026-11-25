@@ -55,6 +55,7 @@ def heavy_request(method, path, content_length):
             "/api/medical-visits/originals/", "/api/dossier/credentials/", "/api/finance/subsidies/materials/", "/api/finance/expense-import/files/", "/tour-media/",
         )) or (
             path.startswith("/api/documents/") and ("/pages/" in path or path.endswith("/image"))
+        ) or (path.startswith("/api/assistant/visit-jobs/") and "/originals/" in path
         ) or (path.startswith("/api/staff/") and path.endswith("/original"))
     try:
         large = int(content_length or 0) >= LARGE_BODY

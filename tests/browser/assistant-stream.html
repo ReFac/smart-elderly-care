@@ -90,9 +90,8 @@
     if (path === container + '/stream') {
       const payload = JSON.parse(options.body);
       check(options.headers.Accept === 'application/x-ndjson', '使用流式答复接口');
-      check(payload.readAloud
-        ? payload.voiceTranscriptId === voiceReceipts.at(-1)
-        : !Object.hasOwn(payload, 'voiceTranscriptId'), '只为语音朗读提交转写凭证');
+      if (payload.voiceTranscriptId || payload.readAloud)
+        check(payload.voiceTranscriptId === voiceReceipts.at(-1), '语音消息提交本次转写凭证');
       const turn = {payload, signal: options.signal, done: false};
       turns.push(turn);
       if (payload.text === '兼容完整答复') return Response.json(finalize(turn));
@@ -162,11 +161,19 @@
     const checkSpeech = find('.assistant-read-option input');
     check(!checkSpeech.disabled && !checkSpeech.checked, '语音朗读默认关闭，可在录音前勾选');
     const typed = ping('普通文字答复');
-    check(typed.payload.readAloud === false, '普通文字请求关闭朗读');
+    check(!typed.payload.readAloud && !typed.payload.voiceTranscriptId, '普通文字请求关闭朗读，不关联语音回执');
     beginSpeech(typed);
     finish(typed);
     await until(() => !input().readOnly, '文字请求完成');
     check(!calls.length && popup().hidden, '文字消息不发起朗读');
+
+    await speak('不用朗读也关联转写');
+    const silent = turns.at(-1);
+    check(!silent.payload.readAloud && silent.payload.voiceTranscriptId === voiceReceipts.at(-1),
+      '关闭朗读仍提交本次转写凭证');
+    finish(silent);
+    await until(() => !input().readOnly, '关闭朗读的语音消息已完成');
+    check(!calls.length && popup().hidden, '转写凭证不会启用朗读');
 
     checkSpeech.closest('label').click();
     check(checkSpeech.checked, '点击朗读标签可在按住说话前开启朗读');

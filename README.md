@@ -18,16 +18,21 @@
 
 主助理处理对话，交班时可让照护与物资 Agent 分别查证。定时巡查按机构设置的周期，逐位读取长辈的签认及观察记录，在档案中整理出有来源的简报。[Agent 手册](docs/agent-handbook.md) · [定时巡查](docs/rounds.md)
 
+[查看 Pi、DeerFlow 2.0 与院务系统的具体分工](docs/agent-components.md)
+
 ## 本机启动
 
-在 Linux 上安装 Python 3.11+、SQLCipher 开发库和 Poppler 后，从仓库根目录运行。以下命令会在独立路径创建虚构机构。首次交互启动时，终端会请你为账号 `owner` 设置密码。
+在 Linux 上安装 Python 3.11+、Node.js 22.19+（含 npm）、SQLCipher 开发库和 Poppler 后，从仓库根目录运行。以下命令会在独立路径创建虚构机构。首次交互启动时，终端会请你为账号 `owner` 设置密码。
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements-storage.txt -r requirements-payments.txt -r requirements-harness.txt -r requirements-a2a.txt
+npm ci --prefix runtimes/pi --omit=dev --ignore-scripts
 python server.py --db .local/careops-demo.sqlite3 --initial-data demo --port 8765
 ```
+
+要运行就诊资料整理和定时简报，另用 Python 3.12 或更高版本安装固定版本的 DeerFlow 工作进程。Owner 可在部署控制台核对 Pi 和 DeerFlow 的安装状态。[DeerFlow 安装步骤](deploy/deerflow/README.md)
 
 打开[本机工作台](http://localhost:8765/?workspace=1)，从左栏的 **AI** 或右上角的 **健康助理** 开始。模型、OCR 和语音需要已开通的服务；可以先浏览虚构档案、床位与工单。正式机构使用空白加密库、HTTPS 和独立恢复密钥。[服务配置](docs/deployment-console.md) · [正式部署](docs/quick-deploy.md)
 

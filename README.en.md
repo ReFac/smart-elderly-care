@@ -18,16 +18,21 @@ A multi-agent workspace for residential and integrated medical care. Staff can a
 
 The main assistant handles conversation. Care and supply specialists can look up evidence for a handover. Scheduled rounds use the institution’s configured interval to prepare individual summaries from signed care records and documented observations. Staff can follow each summary back to its source. [Agent handbook](docs/en/agent-handbook.md)
 
+[See how Pi, DeerFlow 2.0 and the workspace share a task](docs/en/agent-components.md)
+
 ## Run locally
 
-Start with Linux, Python 3.11 or newer, the SQLCipher development library and Poppler. From the repository root, create a fictional institution in a separate database. The first interactive launch prompts for the `owner` account password.
+Start with Linux, Python 3.11+, Node.js 22.19+ with npm, the SQLCipher development library and Poppler. From the repository root, create a fictional institution in a separate database. The first interactive launch prompts for the `owner` account password.
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements-storage.txt -r requirements-payments.txt -r requirements-harness.txt -r requirements-a2a.txt
+npm ci --prefix runtimes/pi --omit=dev --ignore-scripts
 NH_DEPLOYMENT_LANGUAGE=en python server.py --db .local/careops-demo-en.sqlite3 --initial-data demo --port 8765
 ```
+
+For visit documents and scheduled resident summaries, install the pinned DeerFlow worker in a separate Python 3.12+ environment. The Owner deployment console shows the status of both Pi and DeerFlow. [Worker installation](deploy/deerflow/README.en.md)
 
 Open the [local workspace](http://localhost:8765/?workspace=1) and select **AI** or **Health assistant**. You can browse sample records, beds and work orders before configuring paid services. Model answers, OCR and voice need an enabled provider. Start a production installation with an empty encrypted database, HTTPS and separate recovery keys. [Service configuration](docs/en/deployment-console.md) · [Production deployment](docs/en/quick-deploy.md)
 

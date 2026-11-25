@@ -8,7 +8,7 @@ from time import monotonic
 
 ROOT = Path(__file__).resolve().parents[1]
 GROUPS = {
-    "chat": ("test_assistant_chat", "test_chat_web_search", "test_chat_capacity", "test_chat_provider_failure"),
+    "chat": ("test_pi_conversation", "test_assistant_chat", "test_chat_web_search", "test_chat_capacity", "test_chat_provider_failure"),
     "workflow": ("test_agent_runtime", "test_brief_workflow", "test_agent_audit"),
     "tools": ("test_mcp_plugins", "test_community_skills", "test_agent_protocol", "test_resident_workbook"),
     "documents": ("test_assistant_documents", "test_deployment_language"),

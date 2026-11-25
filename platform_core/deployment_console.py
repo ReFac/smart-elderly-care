@@ -158,6 +158,7 @@ def owner(store, conn, token):
 
 
 def inspect(store, token, server):
+    from .agents import pi_runtime, deerflow_worker
     with closing(store.connect()) as business:
         user = owner(store, business, token)
         plan = provider.status(business, user)
@@ -206,6 +207,7 @@ def inspect(store, token, server):
     connection_info.update(host=server.server_address[0], port=server.server_port)
     return {
         "mode": "operator" if mode else "managed",
+        "agentRuntimes": {"pi": pi_runtime.installation(), "deerflow": deerflow_worker.installation()},
         "profile": "licensed-medical" if store.clinical_archive_protection else "residential",
         "locale": deployment_language.public(store.deployment_language),
         "language": store.deployment_language,

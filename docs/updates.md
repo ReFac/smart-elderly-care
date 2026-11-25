@@ -30,6 +30,12 @@ python3 manage_updates.py build --version 0.2.1 --output ./release-0.2.1 --key-f
 
 把 ZIP 程序包上传至配置的同一 HTTPS 路径，再发布 `latest.json`。每次改变发布包都使用新的版本号。清单签名覆盖产品、版本、包名、文件体积、SHA-256 与发布说明。安装前会再次核对签名与包摘要。发布包包含工作台资源和机构服务代码，系统级依赖仍由部署方预先提供。
 
+### 随版更新 Pi 和 DeerFlow
+
+签名包包含 Pi 对话桥、DeerFlow 工作进程、运行配置与依赖清单。启动器保持原安装目录为工作目录。锁与本机预置版本一致时，候选版本直接复用已安装的生产依赖。升级期间不开启包管理器。候选服务开放前会使用一轮虚构中文对话加载 Pi，并启动已启用的 DeerFlow 证据进程。两个检查都不访问机构记录或云模型。
+
+依赖有变时，可在服务环境设置只读目录 `NH_AGENT_RUNTIME_STORE` 的绝对路径，按锁预置新版本并保留上一版本。Pi 的目录为 `pi/<package-lock.json 的 SHA-256>/`，包含此次签名版本的 `package.json`、`package-lock.json` 以及按锁安装的生产 `node_modules`。DeerFlow 的目录为 `deerflow/<依次拼接 requirements.txt、sdk.txt 原始字节的 SHA-256>/`，包含这两个文件和独立的 `venv/bin/python`。用该版本的部署说明在维护窗口预装，服务账号只读。锁不匹配或 SDK 无法加载时，候选版本不会开放，启动器恢复升级前快照与原服务。[Pi 安装](quick-deploy.md) · [DeerFlow 安装](../deploy/deerflow/README.md)
+
 ## 时间点和失败回退
 
 托管启动器停止旧服务并确认资料库已释放，再建立并隔离恢复核验完整 `.akbak` 时间点。快照包含该机构工作库中的全部已提交资料，包括数据库内的原件、护理及医疗记录。外部托管素材和平台运营密库沿用各自的保管与备份方式。

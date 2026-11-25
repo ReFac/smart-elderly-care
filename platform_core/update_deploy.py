@@ -24,14 +24,21 @@ from .backups import audit, enqueue_deliveries, identifier, private_directory, p
 
 
 MAX_UNPACKED = 600 * 1024 * 1024
+BUNDLED = "platform_core/agents/bundled/"
+PI_ASSETS = ("runtimes/pi/conversation.mjs", "runtimes/pi/package.json", "runtimes/pi/package-lock.json")
+DEERFLOW_ASSETS = ("deploy/deerflow/worker.py", "deploy/deerflow/worker-config.yaml",
+                   "deploy/deerflow/requirements.txt", "deploy/deerflow/sdk.txt")
 
 
 def app_file(name):
+    if name.startswith((BUNDLED + "runtimes/", BUNDLED + "deploy/")):
+        return name[len(BUNDLED):] in (*PI_ASSETS, *DEERFLOW_ASSETS)
     parts = name.split("/")
     return name == "server.py" or (
         len(parts) >= 2 and parts[0] in ("platform_core", "web")
         and all(re.fullmatch(r"[a-zA-Z0-9_-][a-zA-Z0-9_.-]{0,150}", part) for part in parts)
-        and "__pycache__" not in parts and not name.endswith((".pyc", ".pyo"))
+        and not {"__pycache__", "node_modules"} & set(parts)
+        and not name.lower().endswith((".pyc", ".pyo", ".db", ".sqlite", ".sqlite3", ".akbak", ".pem", ".key"))
     )
 
 
@@ -51,6 +58,9 @@ def unpack_archive(archive, release, destination):
                 entries = bundle.infolist()
                 names = {entry.filename for entry in entries}
                 required = {"server.py", "platform_core/store.py", "web/index.html"}
+                for bridge, assets in (("pi_runtime", PI_ASSETS), ("deerflow_worker", DEERFLOW_ASSETS)):
+                    if f"platform_core/agents/{bridge}.py" in names:
+                        required.update(BUNDLED + asset for asset in assets)
                 if (
                     not required <= names or not 3 <= len(entries) <= 5000
                     or len(entries) != len(names)

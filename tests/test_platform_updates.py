@@ -3,16 +3,24 @@ from datetime import datetime
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
+import os
+import shutil
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import unittest
-from zipfile import ZipFile
+from unittest.mock import Mock, patch
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
+import manage_updates
 from platform_core import secure_storage, updates
 from platform_core.store import Store
-from platform_core.update_deploy import protection, restore_previous, unpack_archive
+from platform_core.update_deploy import (
+    BUNDLED, DEERFLOW_ASSETS, PI_ASSETS, Launcher, app_file, protection, restore_previous, unpack_archive,
+)
 
 
 class PlatformUpdateTests(unittest.TestCase):
@@ -131,5 +139,75 @@ class PlatformUpdateTests(unittest.TestCase):
             bundle.writestr("web/index.html", "<html>")
             bundle.writestr("outside.txt", "wrong target")
         with self.assertRaisesRegex(ValueError, "不支持"):
+            unpack_archive(archive, self.signed(archive.read_bytes())["release"], self.root / "code")
+        self.assertFalse((self.root / "code").exists())
+
+    def test_signed_worker_bundle_runs_from_release_and_previous_release_without_network_install(self):
+        key = self.root / "private.pem"
+        key.write_bytes(self.key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
+        output = self.root / "发布"
+        manage_updates.build("0.2.1", output, key, "中文候选版本")
+        manifest = updates.ReleaseSource(self.url, self.keyfile).verify(updates.read_json(output / "latest.json"))
+        package = output / manifest["artifact"]
+        with ZipFile(package) as files:
+            names = set(files.namelist())
+            self.assertTrue({BUNDLED + asset for asset in (*PI_ASSETS, *DEERFLOW_ASSETS)} <= names)
+            self.assertFalse(any("node_modules" in name or ".local/" in name for name in names))
+        # Match the long-running launcher's cwd and isolation while importing
+        # the actual newly unpacked application's code at both cutover and rollback.
+        script = ("import sys;sys.path.insert(0,sys.argv[1]);"
+                  "from platform_core.agents import runtime_assets as r;"
+                  "assert str(r.ROOT)==sys.argv[1];r.verify_candidate()")
+        env = {"PATH": os.environ["PATH"], "LANG": "C.UTF-8", "NH_UPDATE_MANAGED": "1"}
+        launcher = Launcher(manage_updates.ROOT, self.store.path, 8765)
+        launcher.source = updates.ReleaseSource(self.url, self.keyfile)
+        launch = launcher.environment("0.2.1", "自检", None)
+        for setting in ("NH_DEERFLOW_PYTHON", "NH_AGENT_RUNTIME_STORE", "PYTHONPATH"):
+            if setting in launch:
+                env[setting] = launch[setting]
+
+        attempts = []
+
+        def start(folder, version, *, gate=None):
+            checked = subprocess.run([sys.executable, "-c", script, str(folder)], cwd=manage_updates.ROOT,
+                                     capture_output=True, env=env, timeout=40)
+            attempts.append((version, checked.returncode == 0))
+            if checked.returncode:
+                raise updates.UpdateError("候选运行时未通过启动检查")
+
+        # Exercise the production staging, signature, snapshot, activation and recovery
+        # paths. The socket liveness boundary is represented by the real worker probe.
+        launcher.process = Mock()
+        launcher.process.poll.return_value = 0
+        shutil.copyfile(package, launcher.folder / "application-0.2.1.zip")
+        updates.atomic_json(launcher.staged, updates.read_json(output / "latest.json"))
+        with patch.object(launcher, "start", side_effect=start):
+            launcher.install({"version": "0.2.1", "actor": self.owner["id"]})
+            self.assertEqual(updates.read_json(launcher.outcome)["state"], "installed")
+            newer = launcher.folder / "application-0.2.2.zip"
+            with ZipFile(package) as source, ZipFile(newer, "w", ZIP_DEFLATED) as target:
+                for name in source.namelist():
+                    data = source.read(name)
+                    if name == BUNDLED + "runtimes/pi/package-lock.json":
+                        data += b"\n"
+                    target.writestr(name, data)
+            updates.atomic_json(launcher.staged, self.signed(newer.read_bytes(), version="0.2.2"))
+            launcher.install({"version": "0.2.2", "actor": self.owner["id"]})
+        outcome = updates.read_json(launcher.outcome)
+        self.assertEqual(outcome["state"], "failed")
+        self.assertTrue(outcome["snapshotId"])
+        self.assertEqual(launcher.installed()[1], "0.2.1")
+        self.assertEqual(attempts, [("0.2.1", True), ("0.2.2", False), ("0.2.1", True)])
+
+    def test_missing_worker_source_and_private_or_unlisted_files_are_rejected(self):
+        for name in ("web/node_modules/runtime.js", "web/tenant.sqlite3", "web/key.pem",
+                     BUNDLED + "runtimes/pi/surprise.js", BUNDLED + "deploy/deerflow/worker.env"):
+            self.assertFalse(app_file(name))
+        archive = self.root / "release.zip"
+        with ZipFile(archive, "w") as files:
+            for name in ("server.py", "platform_core/store.py", "web/index.html",
+                         "platform_core/agents/deerflow_worker.py"):
+                files.writestr(name, "")
+        with self.assertRaisesRegex(ValueError, "目录"):
             unpack_archive(archive, self.signed(archive.read_bytes())["release"], self.root / "code")
         self.assertFalse((self.root / "code").exists())

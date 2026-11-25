@@ -15,6 +15,7 @@ export const quickDestinations = [
   { label: '用药安全筛查', words: '用药冲突 过敏核对 重复用药', route: 'medications', tab: 'safety' },
   { label: '药品接收登记', words: '药品交接台账 交接药品 家属送药', route: 'medications', tab: 'receiving', grant: 'care.receiveMedication' },
   { label: '定时工单', words: '自动工单 伙食排期 伙食工单 定时巡查 菜单 照护排程', route: 'care', tab: 'scheduledWork', grant: 'care.completeTask' },
+  { label: '长辈档案自动整理', words: '长辈健康变化 今日生活 定时巡查 生成周期 Agent 运行状态', route: 'settings', tab: 'rounds' },
   { label: 'AI 用量', words: 'DeepSeek 用量 模型用量 API 用量 Token 用量 OCR ASR 缓存命中率 员工用量', route: 'settings', tab: 'deepseekUsage' },
   { label: '登记集体活动', words: '集体用餐 早餐 午餐 晚餐 登记餐单', route: 'care', tab: 'groupLife', grant: 'care.proposeGroupActivity' },
   { label: '核对活动参加名单', words: '集体活动待确认 用餐签认', route: 'care', tab: 'groupLife', grant: 'care.confirmGroupActivity' },

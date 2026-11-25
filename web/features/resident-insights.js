@@ -1,5 +1,6 @@
 import { displayLocale } from '../lib/locale.js';
 import { residentLabel } from './people-labels.js';
+import { localStamp, residentSpecialists } from './round-specialists.js';
 import { node, choose, btn, badge, field, select, hasGrant, today } from './shared.js';
 
 const modes = { inherit: '跟随机构', auto: '定时生成', manual: '手动生成' };
@@ -11,18 +12,6 @@ const evidenceTypes = {
   groupActivity: '活动出席确认',
   reviewedFall: '跌倒现场核实记录',
 };
-export const localStamp = (value) =>
-  value
-    ? new Intl.DateTimeFormat(displayLocale, {
-        timeZone: 'Asia/Shanghai',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }).format(new Date(value))
-    : '尚无记录';
-
 export async function roundsWrite(ctx, url, data, revision, review) {
   const answer = await ctx.confirmChange({ allowComment: true, ...review });
   if (!answer) return null;
@@ -32,7 +21,11 @@ export async function roundsWrite(ctx, url, data, revision, review) {
     body: JSON.stringify({ ...data, revision, comment: answer.comment || '' }),
   });
   const result = await res.json();
-  if (!res.ok) throw new Error(result.error || '保存失败，请刷新后重试');
+  if (!res.ok) {
+    const error = new Error(result.error || '保存失败，请刷新后重试');
+    error.status = res.status;
+    throw error;
+  }
   return result;
 }
 
@@ -211,7 +204,7 @@ export function residentInsights(ctx, residentId, {compact = false} = {}) {
           node(
             'small',
             'fx-muted',
-            report
+            info.agentDrafts ? '按本人本次入住的记录整理' : report
               ? (report.source === 'deepseek' ? '健康助理' : '历史巡查记录') + ' · ' + localStamp(report.generatedAt)
               : '尚未生成巡查简报',
           ),
@@ -223,7 +216,7 @@ export function residentInsights(ctx, residentId, {compact = false} = {}) {
       info.canGenerate
         ? btn(
             ctx,
-            report ? '更新简报' : '生成简报',
+            report ? '更新巡查简报' : '生成巡查简报',
             () =>
               submit(
                 url + '/generate',
@@ -263,7 +256,7 @@ export function residentInsights(ctx, residentId, {compact = false} = {}) {
     } else {
       contents.push(node('p', 'rounds-empty', compact
         ? '最近两天暂无可展示的生活简报。' : report
-        ? '这份简报来自旧版护理统计。点击「更新简报」，即可查看近期的生活记录。'
+        ? '这份简报来自旧版护理统计。点击「更新巡查简报」，即可查看近期的生活记录。'
         : '生成后可查看最近两天已记录的起居、三餐和活动。'));
     }
     if (!compact && currentFormat && report.cough?.noticeable) {
@@ -342,8 +335,16 @@ export function residentInsights(ctx, residentId, {compact = false} = {}) {
       });
       contents.push(extra);
     }
+    const specialistNotes = residentSpecialists(ctx, info.agentDrafts, residentId, compact);
+    let notes = contents;
+    if (specialistNotes) {
+      notes = [specialistNotes];
+      if (!compact && report) notes.push(node('details', 'rounds-handoff', [
+        node('summary', '', '查看原巡查简报与护理建议'), ...contents,
+      ]));
+    }
     box.replaceChildren(
-      head, ...contents, ...(controls ? [controls] : []),
+      head, ...notes, ...(controls ? [controls] : []),
       node('p', 'rounds-warning', [
         ctx.ui.icon('shield', 16),
         'AI 可能出错。请核对原始记录；诊断、用药和治疗决定须由医护人员作出。',

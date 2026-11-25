@@ -13,6 +13,16 @@ NURSE = {"kind": "staff", "permissions": ["assistants", "clinical"]}
 
 
 class CommunitySkillsTests(unittest.TestCase):
+    def test_scheduled_skills_are_bundled_and_visible_to_the_assigned_role(self):
+        care = {"kind":"staff", "permissions":["assistants", "care"]}
+        self.assertIn("resident-daily-life", {s["name"] for s in skills.catalog(care)})
+        self.assertNotIn("resident-health-review", {s["name"] for s in skills.catalog(care)})
+        self.assertIn("resident-health-review", {s["name"] for s in skills.catalog(NURSE)})
+        for name in ("resident-daily-life", "resident-health-review"):
+            self.assertTrue(skills.scheduled_guidance(name))
+        with self.assertRaises(ValueError):
+            skills.scheduled_guidance("internal-comms")
+
     def test_bundled_permissions_sources_and_document_guidance(self):
         self.assertIn("resident-record-intake", {s["name"] for s in skills.catalog(OWNER)})
         self.assertNotIn("resident-record-intake", {s["name"] for s in skills.catalog(NURSE)})

@@ -2,6 +2,10 @@
 
 [Documentation](README.md) · [中文版](../agent-handbook.md) · [Institution workspace manual](workspace-manual.md) · [Owner deployment console](deployment-console.md)
 
+Staff use one conversation to ask questions and open work in the institution. Specialist agents prepare answers and drafts from the records each role can read. Operators can reuse reviewed community skills, attach tools through the official MCP SDK, and expose selected institutional read operations to other agents.
+
+Pi handles conversations and DeerFlow 2.0 processes scoped evidence. See the [component and maintenance guide](agent-components.md) for ownership of deployment, permissions and staff sign-off.
+
 ## Using the assistant as a member of staff
 
 Open AI in the sidebar, Health assistant (健康助理) at the top right, or the floating assistant icon. They lead to the same conversation. Click a button in an answer to open its business page. The assistant shrinks to a draggable companion window for follow-up questions. The larger floating window remembers its position. Press Enter to send text or Shift + Enter for a new line. Hold the speech button to record, then release to transcribe, clean up and send. Select Read aloud (朗读) to hear answers to spoken questions. The playback window supports pause, resume and exit. Check names, room numbers, amounts and exceptions such as “except for” against the transcript and the review form. [Conversation and voice](../agent-runtime.md)
@@ -30,6 +34,17 @@ On an English deployment, try “How are things today?”, “Create a resident 
 6. **Workbook.** Download the registration template, or download a workbook containing the fields already recognised from an original. In WPS, Excel or LibreOffice keep headers in row one and use one resident per row. For a multi-sheet workbook, name the registration sheet `Resident registration` or `长辈登记`. Each import accepts up to 500 data rows and 64 columns. Supported fields include name, birth date, phone, language, marital status, education, former occupation, native place, birthplace and current address. Select a row, verify the source and resident and resolve formula or option warnings before saving. Uploading or downloading a workbook alone creates no admission or charge. [Upload and workbook instructions](../assistant-harness.md)
 
 **When a step fails.** If there is an explanation without a filing button, check both the assistant grant and the action grant for the destination. If there are duplicate names or a resident is missing, verify branch, assignment and record ID. Eligible staff can request temporary access and an authorised approver must sign under their real name. For upload problems check type, size and the current group. The destination business form also supports manual entry. For a provider failure, keep the source, note the request ID and time, and ask the Owner to check institution AI usage (机构设置 → AI 用量) and service status. Subscription, provider account balance, media configuration and network availability can fail independently. Check the ledger before retrying a submission. [Workspace permissions](workspace-manual.md) · [Provider and usage](../provider.md)
+
+### Schedule a resident’s health review and daily living summary
+
+| Where | What to do |
+| --- | --- |
+| System management → Institution settings → Scheduled rounds (定时巡查) | As Owner, open the schedule for Health changes (长辈健康变化) or Daily life (今日生活) under 长辈档案自动整理. Enable or pause each one separately, enter an interval of 5–1,440 minutes and confirm the agent and interval. System monitoring → Scheduled tasks also links to these settings. |
+| Generation and notification settings on the same page | Choose the institution’s default generation mode and the time for in-app notifications. In the resident’s detailed record, open Facility timeline → Recent changes → Generation settings to inherit the default or choose automatic or manual generation. Both schedules respect the resident’s selection. |
+| Resident summary or detailed record → Facility timeline | Read dated drafts under Recent changes. Daily life uses confirmed attendance, meals and care records. Health changes requires medical and clinical permissions and draws on observations, vital signs and attributable health records. Expand the evidence for each item to check its date, type and source ID. Entries from earlier days retain their original dates. |
+| Checking progress | Inspect the previous outcome, next run, pending jobs and jobs waiting for a retry. The pending count includes retries. A draft identifies the date and source or model. If an expected result is missing, check the resident assignment, generation mode and schedule, then refresh the queue. Verify or enter observations when records are missing. |
+
+Authorised staff review health drafts. Prescriptions, diagnoses, task signatures and family contact each follow their own business process. Family delivery of daily life updates follows resident consent and the recipient’s subscription. Clinical review drafts are visible only to authorised staff.
 
 ## Taking over as a development or delivery agent
 

@@ -7,7 +7,7 @@ from http.client import HTTPException
 import json
 from urllib.error import HTTPError, URLError
 
-from . import completions, deepseek, token_receipt
+from . import completions, deepseek, task_usage, token_receipt
 
 
 def init(db):
@@ -135,6 +135,7 @@ def generate(
                 attributed_actor,
             ),
         )
+        task_usage.attach(db, "tokens", actor, request)
     status, reason, tokens, result = "uncertain", "provider_unavailable", 0, None
     remote_receipt = None
     try:

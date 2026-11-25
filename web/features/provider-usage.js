@@ -157,11 +157,21 @@ function time(at) {
   return Number.isNaN(date.getTime()) ? '—' : stamp.format(date);
 }
 
-function recordsGrid(records) {
+function recordsGrid(records, selectTask) {
+  const runtimes = { pi: 'Pi', deerflow: 'DeerFlow 2.0', platform: '院务系统' };
+  function taskLink(row) {
+    if (!row.taskId) return '—';
+    const button = node('button', 'usage-row-filter', row.taskId);
+    button.type = 'button';
+    button.addEventListener('click', () => selectTask(row.taskId));
+    return button;
+  }
   return tableGrid([
     ['调用时间', row => time(row.at)],
     ['经办账号', row => row.actorLabel],
     ['功能', row => row.featureLabel],
+    ['执行组件', row => runtimes[row.runtime] || '—'],
+    ['任务编号', taskLink],
     ['状态', row => statusBadge(row.status)],
     ['已核实用量', row => amount(row.amount, row.unit), true],
     ['预留量', row => row.reserved > 0 ? amount(row.reserved, row.unit) : '—', true],
@@ -203,6 +213,10 @@ export function providerUsage(ctx) {
   features.name = 'feature';
   const actors = node('select', 'fx-input');
   actors.name = 'actorId';
+  const task = node('input', 'fx-input');
+  task.name = 'taskId';
+  task.placeholder = '粘贴或点击明细中的任务编号';
+  task.value = previous.taskId || '';
   selectOptions(features, '全部功能', [], '');
   selectOptions(actors, '全部账号', [], '');
 
@@ -211,12 +225,12 @@ export function providerUsage(ctx) {
   const reset = ctx.ui.button('本月', () => {
     start.value = monthStart;
     end.value = currentDay;
-    features.value = actors.value = '';
+    features.value = actors.value = task.value = '';
     form.requestSubmit();
   }, 'secondary');
   const form = node('form', 'usage-filters', [
     label('开始日期', start), label('结束日期', end),
-    label('功能', features), label('经办账号', actors),
+    label('功能', features), label('经办账号', actors), label('任务编号', task),
     node('div', 'usage-filter-actions', [reset, submit]),
   ]);
   const root = node('section', 'usage-page', [
@@ -229,7 +243,7 @@ export function providerUsage(ctx) {
 
   let generation = 0;
   let selected = previous.view;
-  let criteria = { start: previous.start, end: previous.end, feature: previous.feature, actorId: previous.actorId };
+  let criteria = { start: previous.start, end: previous.end, feature: previous.feature, actorId: previous.actorId, taskId: task.value };
   let data;
 
   const preferences = () => { lastSelection = { owner, ...criteria, view: selected }; };
@@ -264,7 +278,11 @@ export function providerUsage(ctx) {
         node('h3', '', title),
         viewControls,
       ]),
-      rows.length ? records ? recordsGrid(rows) : groupGrid(rows, selected, setFilter)
+      rows.length ? records ? recordsGrid(rows, id => {
+        task.value = id;
+        features.value = actors.value = '';
+        form.requestSubmit();
+      }) : groupGrid(rows, selected, setFilter)
         : node('p', 'fx-empty', '此筛选范围内没有调用记录。'),
     ]);
     if (records && picked.total > picked.pageSize) {
@@ -321,7 +339,7 @@ export function providerUsage(ctx) {
       start.focus();
       return;
     }
-    criteria = { start: start.value, end: end.value, feature: features.value, actorId: actors.value };
+    criteria = { start: start.value, end: end.value, feature: features.value, actorId: actors.value, taskId: task.value.trim() };
     preferences();
     load();
   });

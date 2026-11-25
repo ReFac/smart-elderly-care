@@ -5,7 +5,7 @@ import json
 from uuid import uuid4
 
 from .. import access, history, provider, rounds
-from . import completions, deepseek, token_receipt
+from . import completions, deepseek, task_usage, token_receipt
 
 CHECKS = {
     "past_due": "先核对已过计划时刻的工单，确认有无漏记或仍需跟进。",
@@ -139,6 +139,7 @@ def generate(store, token, rid, data, *, transport=None):
                 hold,
             ),
         )
+        task_usage.attach(db, "tokens", actor["id"], request)
         history.watch(db, "rounds.prioritize")
         db.execute(
             "INSERT INTO rounds_priorities(report,actor,request,generated_at) VALUES(?,?,?,?)",

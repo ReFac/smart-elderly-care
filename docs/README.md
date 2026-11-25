@@ -26,6 +26,7 @@
 
 | 任务 | 操作说明 |
 | --- | --- |
+| 查清 Pi、DeerFlow 2.0 和院务系统分别做什么 | [组件分工、签认和回执](agent-components.md) |
 | 了解主助理与专业 Agent 如何分工、如何验收 | [Agent 手册](agent-handbook.md) · [运行时与检查点](agent-runtime.md) |
 | 接入 MCP、Excel 或经审核的社区技能 | [工具与技能配置](assistant-harness.md) · [技能来源](../skills/UPSTREAM.md) |
 | 让另一个 Agent 查询院内只读统计 | [A2A Agent Card 与调用方法](agent-protocol.md) |

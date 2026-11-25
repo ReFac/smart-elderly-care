@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta
 import json
 import re
 
-from . import ZONE, local_time
+from . import ZONE, local_time, task_usage
 
 
 FEATURES = {
@@ -27,6 +27,7 @@ FEATURES = {
     "care.scheduledMealVoiceParse": "伙食工单 · 口述解析",
     "care.roundPriorities": "照护巡查 · 事项优先级",
     "care.roundNarrative": "照护巡查 · 生活简报",
+    "care.healthReview": "健康复核 · 在住长辈资料",
     "care.taskAsr": "照护工单 · 语音转写",
     "dossier.documentOcr": "医疗档案 · OCR",
     "assistant.documentOcr": "健康助理 · 文件识别",
@@ -51,6 +52,8 @@ FEATURES = {
 
 AUTOMATED_ACTORS = {
     "rounds-agent": "机构自动任务 · 照护巡查",
+    "daily-life": "机构自动任务 · 日常起居助理",
+    "health-review": "机构自动任务 · 健康复核助理",
     "change-review": "机构自动任务 · 改动复核",
     "dossier-summary": "历史服务账号 · 档案摘要",
 }
@@ -73,6 +76,7 @@ def _parameters(query, now):
         "end",
         "actorId",
         "feature",
+        "taskId",
         "page",
     }:
         raise ValueError("用量筛选参数无效")
@@ -106,7 +110,10 @@ def _parameters(query, now):
         raise ValueError("请选择有效功能")
     if not isinstance(page, str) or not re.fullmatch(r"[1-9][0-9]{0,7}", page):
         raise ValueError("页码无效")
-    return start, end, actor, feature, int(page)
+    task_id = query.get("taskId", "")
+    if not isinstance(task_id, str) or task_id and not task_usage.TASK_ID.fullmatch(task_id):
+        raise ValueError("任务编号无效")
+    return start, end, actor, feature, int(page), task_id
 
 
 def _time_window(start, end):
@@ -141,7 +148,7 @@ token AS (
       CASE WHEN u.status IN ('pending','uncertain') THEN u.allowance
         WHEN l.verified IS NULL AND l.reported>l.original THEN l.reported-l.original ELSE 0 END AS reserved,
       u.providerTokens, u.inputTokens, u.cachedInputTokens AS cacheHitTokens,
-      u.uncachedInputTokens AS cacheMissTokens, u.outputTokens
+      u.uncachedInputTokens AS cacheMissTokens, u.outputTokens, 'tokens' AS meter, u.actor AS billingActor
     FROM api_usage u
     LEFT JOIN api_late_usage l ON l.actor=u.actor AND l.request=u.request
     LEFT JOIN assistant_turns t ON t.actor=u.actor AND t.request=substr(u.request,6) AND u.feature IS NULL AND u.request LIKE 'chat/%'
@@ -164,7 +171,7 @@ media AS (
         WHEN 'asr' THEN 'seconds' WHEN 'tts' THEN 'characters' END AS unit,
       charged AS amount, CASE WHEN state IN ('pending','uncertain') THEN reserved ELSE 0 END AS reserved,
       NULL AS providerTokens, NULL AS inputTokens, NULL AS cacheHitTokens,
-      NULL AS cacheMissTokens, NULL AS outputTokens
+      NULL AS cacheMissTokens, NULL AS outputTokens, 'media' AS meter, actor AS billingActor
     FROM media_usage INDEXED BY media_usage_by_time
     WHERE kind IN ('ocr','asr','tts') AND at >= :start AND at < :end
 ),
@@ -177,17 +184,20 @@ search AS (
        'calls' AS unit, coalesce(verified,status='ok') AS amount,
        CASE WHEN verified IS NULL AND status IN ('pending','uncertain') THEN 1 ELSE 0 END AS reserved,
        NULL AS providerTokens, NULL AS inputTokens, NULL AS cacheHitTokens,
-       NULL AS cacheMissTokens, NULL AS outputTokens
+       NULL AS cacheMissTokens, NULL AS outputTokens, 'search' AS meter, actor AS billingActor
     FROM api_search_usage WHERE createdAt >= :start AND createdAt < :end
-)
-SELECT * FROM token UNION ALL SELECT * FROM media UNION ALL SELECT * FROM search
+),
+all_calls AS (SELECT * FROM token UNION ALL SELECT * FROM media UNION ALL SELECT * FROM search)
+SELECT c.*, t.taskId, t.runtime FROM all_calls c
+LEFT JOIN agent_task_usage t ON t.meter=c.meter AND t.actor=c.billingActor AND t.receipt=c.ordinal
+WHERE :taskId='' OR t.taskId=:taskId
 ORDER BY at DESC, actorId, unit, ordinal
 """
 
 
-def _read_ledger(db, start, end):
+def _read_ledger(db, start, end, task_id):
     lower, upper = _time_window(start, end)
-    return db.execute(LEDGER, {"start": lower, "end": upper})
+    return db.execute(LEDGER, {"start": lower, "end": upper, "taskId": task_id})
 
 
 def _summary():
@@ -265,7 +275,7 @@ def _groups(groups, labels):
     ]
 
 
-def _report(db, start, end, actor, feature, page):
+def _report(db, start, end, actor, feature, page, task_id):
     directory = _directory(db)
     people = {
         uid: option
@@ -277,7 +287,7 @@ def _report(db, start, end, actor, feature, page):
     total, items = _summary(), []
     by_feature, by_actor, by_day = (defaultdict(_summary) for _ in range(3))
     offset = (page - 1) * PAGE_SIZE
-    for row in _read_ledger(db, start, end):
+    for row in _read_ledger(db, start, end, task_id):
         uid = row["actorId"]
         if uid not in people:
             people[uid] = _actor(uid, directory)
@@ -295,6 +305,8 @@ def _report(db, start, end, actor, feature, page):
                     actorLabel=people[uid]["label"],
                     feature=fid,
                     featureLabel=FEATURES[fid],
+                    runtime=row["runtime"],
+                    taskId=row["taskId"],
                     status=row["status"],
                     unit=row["unit"],
                     amount=row["amount"],

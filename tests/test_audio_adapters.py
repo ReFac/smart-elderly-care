@@ -214,8 +214,8 @@ class AudioGatewayUsageTests(unittest.TestCase):
                 ),
             )
             db.execute(
-                """INSERT INTO assistant_turns(actor,scope,generation,request,fingerprint,asked,answered,question,answer,hours,voice_receipt)
-                VALUES(?,?,?,?,?,'','','','请复核。',24,?)""",
+                """INSERT INTO assistant_turns(actor,scope,generation,request,fingerprint,asked,answered,question,answer,hours,voice_receipt,read_aloud)
+                VALUES(?,?,?,?,?,'','','','请复核。',24,?,1)""",
                 (user["id"], scope, "fixture-generation", "voice-turn", "", receipt),
             )
         return user, {

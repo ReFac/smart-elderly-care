@@ -1,0 +1,6 @@
+# Isolated imports used by the DeerFlow 2.0 evidence graph.
+langchain==1.2.15
+langgraph==1.1.9
+PyYAML==6.0.3
+python-dotenv==1.2.2
+tiktoken==0.14.0

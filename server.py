@@ -20,8 +20,8 @@ from platform_core.agents import chat
 from platform_core.operations import expense_import
 from platform_core.backups import exchange
 from platform_core import access, deployment_language, facility, http_capacity, updates, visitor_access
-from platform_core import daily_life, lead_intake, medical_visits, resident_health, scheduled_work
-from platform_core.provider import round_priorities
+from platform_core import daily_life, lead_intake, medical_visits, resident_health, scheduled_work, visit_jobs
+from platform_core.provider import round_priorities, task_usage
 from platform_core.store import Conflict, SignedOut, Store, encode
 
 ROOT = Path(__file__).resolve().parent
@@ -242,7 +242,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/provider/usage":
             from platform_core.provider import usage_report
 
-            query = self.query_fields({"start", "end", "feature", "actorId", "page"})
+            query = self.query_fields({"start", "end", "feature", "actorId", "page", "taskId"})
             return self.send_json(200, usage_report.read(self.store, self.token(), query))
         reported = re.fullmatch(r"/api/residents/([A-Za-z0-9_-]{1,100})/(reported-medications|drug-names)", path)
         if reported:
@@ -277,6 +277,12 @@ class Handler(BaseHTTPRequestHandler):
         if personal_brief:
             return self.send_json(200, self.store.rounds.personal_brief(self.token(), personal_brief[1]))
         original = re.fullmatch(r"/api/medical-visits/originals/([a-f0-9]{32})", path)
+        job = re.fullmatch(r"/api/assistant/visit-jobs(?:/([a-f0-9]{32})(?:/originals/([a-f0-9]{32}))?)?", path)
+        if job:
+            result = visit_jobs.visible(self.store, self.token(), job[1] or "", attachment_id=job[2] or "")
+            if job[2]:
+                return self.respond(200, *result)
+            return self.send_json(200, result)
         if original:
             raw, mime = medical_visits.original(self.store, self.token(), original[1])
             return self.respond(200, raw, mime)
@@ -303,6 +309,11 @@ class Handler(BaseHTTPRequestHandler):
         if expense_file:
             raw = expense_import.original(self.store, self.token(), expense_file[1])
             return self.respond(200, raw, "application/octet-stream")
+        if path == "/api/assistant/learning":
+            from platform_core.agents import growth
+
+            params = self.query_fields({"campusId", "topic"})
+            return self.send_json(200, growth.read(self.store, self.token(), params.get("campusId", ""), params.get("topic", "")))
         if path == "/api/assistant/extensions":
             from platform_core.agents import community_skills, mcp_plugins
 
@@ -747,8 +758,12 @@ class Handler(BaseHTTPRequestHandler):
             mime = self.headers.get_content_type()
             if mime not in ("application/pdf", "image/png", "image/jpeg"):
                 raise InvalidMedia("请选择 PDF、PNG 或 JPEG 原件")
-            return self.send_json(200, document_intake.preview(
-                self.store, token, self.read_body(8 * 1024 * 1024), mime))
+            task = visit_jobs.upload_task(self.store, token, self.headers.get("X-Chat-Request"), self.headers.get("X-Upload-Group"))
+            raw = self.read_body(8 * 1024 * 1024)
+            if task:
+                with task_usage.scope("platform", task):
+                    return self.send_json(200, document_intake.preview(self.store, token, raw, mime))
+            return self.send_json(200, document_intake.preview(self.store, token, raw, mime))
         if path == "/api/staff/resume/preview":
             from platform_core import staff_resume
 
@@ -762,6 +777,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.store, self.read_json(2048), self.client_address[0], self.token()
             )
             return self.send_json(201, {"user": user}, self.session_cookie(token))
+        learning = re.fullmatch(r"/api/assistant/learning/(preview|propose|review)", path)
+        if learning:
+            from platform_core.agents import growth
+
+            return self.send_json(200, growth.change(self.store, self.token(), learning[1], self.read_json(SMALL_BODY)))
         if path == "/api/public/visitor/wechat-contact":
             from platform_core import wechat_tour
             return self.send_json(202, wechat_tour.receive(self.store, self.read_json(1024), self.client_address[0]))
@@ -785,8 +805,13 @@ class Handler(BaseHTTPRequestHandler):
             token = self.token()
             self.store.version(token)
             group = self.read_json(VISIT_GROUP_BODY)
-            result = medical_visits.preview(self.store, token, visit[1], group)
-            return self.send_json(200, result)
+            task = visit_jobs.upload_task(self.store, token, self.headers.get("X-Chat-Request"), self.headers.get("X-Upload-Group"))
+            enqueue = self.headers.get("Prefer") == "respond-async"
+            result = medical_visits.preview(self.store, token, visit[1], group, enqueue=enqueue, task_id=task)
+            return self.send_json(202 if enqueue else 200, result)
+        retry = re.fullmatch(r"/api/assistant/visit-jobs/([a-f0-9]{32})/retry", path)
+        if retry:
+            return self.send_json(200, visit_jobs.visible(self.store, self.token(), retry[1], retry=True))
         if path == "/api/public/leads":
             payload = self.read_json(8192)
             return self.send_json(202, lead_intake.submit(self.store, payload, self.client_address[0]))
@@ -1285,6 +1310,14 @@ def serve_institution(args, origin, initial_password):
     from platform_core import deployment_console, sample, sms_delivery
     from platform_core.operations import checkout, merchant_refunds
 
+    gate = Path(os.environ["NH_UPDATE_GATE"]) if os.environ.get("NH_UPDATE_GATE") else None
+    if gate:
+        from platform_core.agents.runtime_assets import verify_candidate
+        try:
+            verify_candidate()
+        except (ValueError, RuntimeError, OSError) as error:
+            raise SystemExit("候选版本的 Agent 运行时未就绪，请核对预置依赖") from error
+
     try:
         workers, heavy_workers = http_capacity.configured_limits()
         codes, links = sms_delivery.configured()
@@ -1303,7 +1336,6 @@ def serve_institution(args, origin, initial_password):
             store.logout(token)
     store.sample_pending_login = sample.pending(store)
     update_service = updates.UpdateService(store)
-    gate = Path(os.environ["NH_UPDATE_GATE"]) if os.environ.get("NH_UPDATE_GATE") else None
     handler = partial(
         Handler, store=store, public_origin=origin, demo_public_tour=args.demo_public_tour,
         update_service=update_service, update_gate=gate, update_boot=os.environ.get("NH_UPDATE_BOOT"),
@@ -1318,6 +1350,7 @@ def serve_institution(args, origin, initial_password):
         worker = Thread(target=dispatch_scheduled_work, args=(store, stopped), name="scheduled-work", daemon=True)
         auto = Thread(target=dispatch_updates, args=(update_service, stopped), name="platform-updates", daemon=True)
         refunds = Thread(target=merchant_refunds.poll, args=(store, stopped), name="merchant-refunds", daemon=True)
+        documents = Thread(target=visit_jobs.dispatch, args=(store, stopped), name="visit-documents", daemon=True)
 
         def start_services():
             while gate and not gate.is_file():
@@ -1327,6 +1360,7 @@ def serve_institution(args, origin, initial_password):
                 store.backups.start()
                 store.rounds.start()
                 worker.start()
+                documents.start()
                 if checkout.enabled_channels():
                     refunds.start()
                 if update_service.managed:
@@ -1341,6 +1375,7 @@ def serve_institution(args, origin, initial_password):
             pass
         finally:
             stopped.set()
+            store.visit_job_wakeup.set()
             startup.join(timeout=1)
             if worker.ident is not None:
                 worker.join(timeout=12)
@@ -1348,6 +1383,8 @@ def serve_institution(args, origin, initial_password):
                 auto.join(timeout=1)
             if refunds.ident is not None:
                 refunds.join(timeout=10)
+            if documents.ident is not None:
+                documents.join(timeout=2)
             store.rounds.stop()
             store.backups.stop()
 

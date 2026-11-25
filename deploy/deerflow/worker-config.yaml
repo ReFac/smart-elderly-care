@@ -1,0 +1,12 @@
+# The SDK imports its skill loader during startup. Its catalog lives in the
+# worker's empty temporary home. CareOps supplies only reviewed skill text.
+models: []
+tools: []
+tool_groups: []
+sandbox:
+  use: deerflow.sandbox.local:LocalSandboxProvider
+  allow_host_bash: false
+memory:
+  enabled: false
+skill_evolution:
+  enabled: false

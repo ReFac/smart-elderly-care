@@ -1,6 +1,7 @@
 """Count the provider's standalone web searches separately from model tokens."""
 
 from datetime import timedelta
+from . import task_usage
 
 
 def init(db):
@@ -26,6 +27,7 @@ def reserve(db, actor, request, plan_id, now):
     )
     if not created.rowcount:
         raise ValueError("这次联网搜索已经登记，请查看原回复")
+    task_usage.attach(db, "search", actor, request)
 
 
 def settle(db, actor, request, status, now):

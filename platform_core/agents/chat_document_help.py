@@ -27,7 +27,23 @@ def intent(text, previous_question=""):
                 not re.search(r"简历|员工|工单|报销|发票|药品|别的|不想|不用", text))
 
 
-def reply(user, routes):
+UPLOAD_ACTIONS = frozenset({"uploadResidentProfile", "uploadVisitRecords"})
+
+
+def visit_intent(text):
+    # A lookup of existing medical history still uses the normal navigation flow.
+    return bool(re.search(r"就诊资料|就诊材料|病历(?:资料|照片|图片)|会诊资料|CT(?:图|片)", text, re.I)
+                and re.search(r"上传|补传|整理|归档|发给|帮我填|识别|导入", text))
+
+
+def reply(user, routes, *, visit=False):
+    if visit:
+        if user["kind"] not in ("owner", "staff") or not all(
+                policy.has(user, grant) for grant in ("assistants", "clinical", "medical", "medical.write")):
+            return "上传就诊资料需要当前岗位具有临床与医疗档案编辑权限。", None
+        return ("点击「上传就诊资料」，选取同一次就诊的图片或 PDF，核对所属长辈。"
+                "资料整理完成后，请查看原件和草稿，确认后保存病例。",
+                {"kind": "uploadVisitRecords", "title": "上传就诊资料"})
     if (user["kind"] not in ("owner", "staff") or not policy.has(user, "assistants") or
             "dossier.profile" not in policy.allowed_actions(user) or
             not ({"dossier", "residents"} & set(routes))):

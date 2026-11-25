@@ -19,7 +19,7 @@ function content(ctx,view,data) {
       {label:'有效活跃会话',view:r=>r.sessions},{label:'最后活动',view:r=>localTime(r.lastSeen)}],
   });
   if (view === 'timers') return node('div','fx-profile',[
-    table(ctx,{ title:'后台定时服务',rows, cols:[
+    table(ctx,{ title:'后台定时服务',rows, action:btn(ctx,'长辈档案自动整理',()=>ctx.go('settings','rounds')), cols:[
       {label:'服务',view:r=>r.name},{label:'任务标识',view:r=>r.worker},
       {label:'运行状态',view:r=>badge(ctx,r.active?'运行中':'未运行',r.active?'green':'amber')},
     ]}),

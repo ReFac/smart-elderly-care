@@ -25,7 +25,7 @@ from .records import (
     staff,
     workspace,
 )
-from . import scheduler
+from . import health_review, scheduler, specialists
 
 LOG = logging.getLogger(__name__)
 ID = r"[A-Za-z0-9_-]{1,100}"
@@ -36,6 +36,7 @@ class RoundService:
         self.store = store
         self.halt = Event()
         self.thread = None
+        self.health_thread = None
 
     @staticmethod
     def matches(path, write):
@@ -73,7 +74,7 @@ class RoundService:
             if path == "/api/rounds/settings":
                 if user["kind"] != "owner":
                     raise PermissionError("仅 Owner 可查看机构巡查设置")
-                return {"revision": revision, "settings": policy(db)}
+                return {"revision": revision, "settings": policy(db), "agents": specialists.schedules(db)}
             if path == "/api/rounds/inbox":
                 beds = campus_access.allowed_beds(db, user, include_rooms=True)
                 clinical = access.has(user, "clinical")
@@ -138,14 +139,22 @@ class RoundService:
                     raise ValueError("仅可为有床位的在住长辈执行巡查")
                 clinical = access.has(user, "clinical")
                 data, digest, unchanged = report_source(
-                    db, state, person, now, clinical=clinical
+                    db, state, person, now, clinical=clinical, actor=user
                 )
                 if not unchanged and revision != body["revision"]:
                     raise Conflict("数据已更新，请刷新后重试")
+            def still_authorized():
+                with closing(self.store.connect()) as db:
+                    current = self.store.actor(db, token)
+                    _, state_now = workspace(db)
+                    stayed = locate(db, state_now, current, person["id"])
+                    if (stayed["_stayId"] != person["_stayId"] or stayed["bedId"] != person["bedId"]
+                            or (clinical and not access.has(current, "clinical"))):
+                        raise PermissionError("巡查范围已变化，请重新生成")
             if not unchanged:
                 prepared = (
                     digest,
-                    interpret(self.store, data, clinical=clinical, attributed_actor=user["id"]),
+                    interpret(self.store, data, clinical=clinical, attributed_actor=user["id"], authorize=still_authorized),
                 )
         with closing(self.store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -161,7 +170,10 @@ class RoundService:
                     raise PermissionError("仅 Owner 可修改机构巡查设置")
                 person = None
                 history.watch(db, "rounds.settings")
-                changed = update_settings(db, body, now)
+                if "agentId" in body:
+                    changed = specialists.configure(db, body, now)
+                else:
+                    changed = update_settings(db, body, now)
                 summary = "调整机构任务巡查和推送设置"
             else:
                 person = locate(db, state, user, path.split("/")[-2])
@@ -216,36 +228,46 @@ class RoundService:
                         person["id"] if person else "",
                         comment,
                     )
-            response = card(db, person, user) if person else {"settings": policy(db)}
+            response = card(db, person, user) if person else {"settings": policy(db), "agents": specialists.schedules(db)}
             return {"revision": revision, "changed": changed, **response}
 
-    def tick(self):
+    def _daily_tick(self):
         from ..care import archive_retention, trial_expiry
 
         trial_expiry.maintain(self.store)
         archive_retention.maintain(self.store)
         return scheduler.tick(self.store, self.halt)
 
+    def tick(self):
+        return {**self._daily_tick(), "healthDrafts": health_review.tick(self.store, self.halt)}
+
     def start(self):
         if self.thread and self.thread.is_alive():
             return
         self.halt.clear()
 
-        def worker():
+        def daily_work():
+            self._daily_tick()
+            from ..agents import change_review
+            change_review.process_pending(self.store, self.halt)
+
+        def worker(work):
             while not self.halt.is_set():
                 try:
-                    self.tick()
-                    from ..agents import change_review
-
-                    change_review.process_pending(self.store, self.halt)
+                    work()
                 except Exception:
                     LOG.exception("定时巡查未完成，将在下一次检查时重试")
                 self.halt.wait(60)
 
-        self.thread = Thread(name="resident-rounds", target=worker, daemon=True)
+        self.thread = Thread(name="resident-daily-life", target=worker, args=(daily_work,), daemon=True)
+        self.health_thread = Thread(name="resident-health-review", target=worker,
+                                    args=(lambda: health_review.tick(self.store, self.halt),), daemon=True)
         self.thread.start()
+        self.health_thread.start()
 
     def stop(self):
         self.halt.set()
         if self.thread:
             self.thread.join()
+        if self.health_thread:
+            self.health_thread.join()

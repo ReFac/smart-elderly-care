@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener
 from uuid import uuid4
 
-from . import active, audio_adapters, deepseek, latest, local_time, read_key
+from . import active, audio_adapters, deepseek, latest, local_time, read_key, task_usage
 from .media import ENDPOINT, record_late_charge
 
 CHUNK = 600
@@ -56,29 +56,29 @@ def listen(store, token, payload, *, transport=None):
         if not thread or thread["generation"] != payload["generation"]:
             raise PermissionError("对话已变化，请重新打开健康助理")
         row = db.execute(
-            "SELECT answer,voice_receipt FROM assistant_turns WHERE actor=? AND scope=? AND generation=? AND request=?",
+            "SELECT answer,voice_receipt,read_aloud FROM assistant_turns WHERE actor=? AND scope=? AND generation=? AND request=?",
             (actor["id"], scope, thread["generation"], request),
         ).fetchone()
         uid = actor["id"]
         if row:
-            if not row["voice_receipt"]:
-                raise PermissionError("只有按住说话发送的语音答复可以朗读")
+            if not row["voice_receipt"] or not row["read_aloud"]:
+                raise PermissionError("只有按住说话并启用朗读的答复可以朗读")
             if not progressive:
-                return uid, row[0][part * CHUNK : (part + 1) * CHUNK]
+                return uid, row[0][part * CHUNK : (part + 1) * CHUNK], row["voice_receipt"]
             pieces = chat_progress.sentences(row[0], final=True)
             if part < len(pieces):
-                return uid, pieces[part]
+                return uid, pieces[part], row["voice_receipt"]
             raise ValueError("已到答复结尾")
         if progressive and thread["pending"] == request:
             piece = chat_progress.pending(store, uid, scope, thread["generation"], request, part)
             if piece:
-                return uid, piece
+                return uid, piece, None
         raise PermissionError("此账号无法朗读该答复")
 
     now = store.now()
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
-        uid, piece = authorized(db)
+        uid, piece, voice_receipt = authorized(db)
         if not piece:
             raise ValueError("已到答复结尾")
         plan = latest(db)
@@ -114,6 +114,12 @@ def listen(store, token, payload, *, transport=None):
                       VALUES(?,?,'tts',?,?,?,'pending',?,?,'assistant.readAloud')""",
             (ref, plan["id"], uid, fingerprint, int(now.timestamp()), units, request),
         )
+        task = task_usage.for_receipt(db, "tokens", uid, "chat/" + request)
+        if not task and voice_receipt:
+            task = task_usage.for_receipt(db, "media", uid, voice_receipt)
+        # Replies saved before task accounting can still be read aloud.
+        with task_usage.scope("platform", task or task_usage.identifier("chat", uid, request)):
+            task_usage.attach(db, "media", uid, ref)
     try:
         if service and transport is None:
             raw = audio_adapters.synthesize(service, key, piece)

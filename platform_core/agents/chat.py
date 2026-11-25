@@ -1,6 +1,6 @@
 """Private conversation with metered evidence reads and explicit human actions."""
 
-from contextlib import closing
+from contextlib import ExitStack, closing
 from hashlib import sha256
 from http.client import HTTPException
 import json
@@ -9,11 +9,11 @@ from urllib.error import HTTPError, URLError
 from uuid import uuid4
 
 from .. import access_policy as policy, faq, provider
-from ..provider import completions, deepseek, token_receipt
+from ..provider import completions, deepseek, task_usage, token_receipt
 from ..store import Conflict, SignedOut
 from . import chat_context as ctx
-from . import chat_document_help, chat_math, community_skills, english, mcp_plugins
-from . import chat_forms, chat_navigation, chat_scope, chat_web, react, view_filters, ward_brief
+from . import chat_document_help, chat_math, community_skills, english, growth, mcp_plugins
+from . import chat_forms, chat_navigation, chat_scope, chat_web, pi_runtime, react, view_filters, ward_brief
 
 CONTEXT_LIMIT = 100_000
 MEMORY_TURNS = 5
@@ -59,6 +59,9 @@ def init(db):
         db.execute("ALTER TABLE assistant_turns ADD COLUMN tool_trace TEXT")
     if "voice_receipt" not in columns:
         db.execute("ALTER TABLE assistant_turns ADD COLUMN voice_receipt TEXT")
+    if "read_aloud" not in columns:
+        db.execute("ALTER TABLE assistant_turns ADD COLUMN read_aloud INTEGER NOT NULL DEFAULT 0")
+        db.execute("UPDATE assistant_turns SET read_aloud=1 WHERE voice_receipt IS NOT NULL")
     db.execute("CREATE UNIQUE INDEX IF NOT EXISTS assistant_turn_voice ON assistant_turns(voice_receipt) WHERE voice_receipt IS NOT NULL")
     db.execute(
         "CREATE INDEX IF NOT EXISTS assistant_recent ON assistant_turns(actor,scope,generation,seq DESC)"
@@ -67,10 +70,30 @@ def init(db):
 
 def rows(db, actor, scope, generation, limit):
     return db.execute(
-        """SELECT request,asked,answered,question,answer,action,hours,web_sources,tool_trace FROM assistant_turns
-        WHERE actor=? AND scope=? AND generation=? ORDER BY seq DESC LIMIT ?""",
+        """SELECT t.request,t.asked,t.answered,t.question,t.answer,t.action,t.hours,t.web_sources,t.tool_trace,u.taskId
+        FROM assistant_turns t LEFT JOIN agent_task_usage u ON u.meter='tokens' AND u.actor=t.actor
+            AND u.receipt='chat/' || t.request AND u.runtime='pi'
+        WHERE t.actor=? AND t.scope=? AND t.generation=? ORDER BY t.seq DESC LIMIT ?""",
         (actor, scope, generation, limit),
     )
+
+
+def upload_task(db, actor_id, origin_request):
+    """A picker opened by a signed-in employee links only that employee's upload turn.
+
+    Correlation is for accounting. The upload and resident operations recheck their
+    own current grants; a chat ID does not authorise an upload or unlock a chart.
+    """
+    if not isinstance(origin_request, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", origin_request):
+        raise ValueError("文件整理的对话编号无效")
+    row = db.execute("""SELECT u.taskId,t.action FROM assistant_turns t
+        JOIN assistant_threads th ON (t.actor,t.scope,t.generation)=(th.actor,th.scope,th.generation)
+        JOIN agent_task_usage u ON u.meter='tokens' AND u.actor=t.actor
+            AND u.receipt='chat/' || t.request AND u.runtime='pi'
+        WHERE t.actor=? AND t.request=?""", (actor_id, origin_request)).fetchone()
+    if not row or (json.loads(row["action"]) if row["action"] else {}).get("kind") not in chat_document_help.UPLOAD_ACTIONS:
+        raise ValueError("所选对话没有可关联的文件整理请求")
+    return row["taskId"]
 
 
 def messages(db, actor, scope, generation, limit, pages=None, area=None, *, memory=False):
@@ -92,6 +115,8 @@ def messages(db, actor, scope, generation, limit, pages=None, area=None, *, memo
                 "sources": json.loads(row["web_sources"]) if row["web_sources"] else [],
             },
         ]
+        if not memory and row["taskId"]:
+            pair[1].update(taskId=row["taskId"], runtime="pi")
         if not memory and row["tool_trace"]:
             pair[1]["toolTrace"] = json.loads(row["tool_trace"])
         size = len(ctx.compact(pair).encode()) + 32
@@ -117,7 +142,7 @@ def messages(db, actor, scope, generation, limit, pages=None, area=None, *, memo
                     previous = [destination]
                     answer["pageLinks"] = [destination.link()]
                 continue
-            if action.get("kind") == "uploadResidentProfile":
+            if action.get("kind") in chat_document_help.UPLOAD_ACTIONS:
                 previous = []
                 answer["pageLinks"] = []
                 continue
@@ -446,9 +471,14 @@ def extract(response, actions, request, scope):
 
 
 def reply(store, token, data, *, transport=None, progress=None, voice_receipt=None):
+    # Use the actor resolved inside the normal chat transaction. Keep that task
+    # binding across all provider/tool callbacks and clear it on every exit.
+    with ExitStack() as turn:
+        return _reply(store, token, data, turn, transport=transport, progress=progress, voice_receipt=voice_receipt)
+
+
+def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
     speak = progress is not None and progress.speak
-    if voice_receipt is not None and not speak:
-        raise ValueError("语音回执仅用于已启用朗读的消息")
     if set(data) - {
         "requestId",
         "page",
@@ -482,12 +512,12 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
 
     def save_turn(db, answer, action, sources=None):
         db.execute(
-            """INSERT INTO assistant_turns(actor,scope,generation,request,fingerprint,asked,answered,question,answer,action,hours,web_sources,voice_receipt,tool_trace)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO assistant_turns(actor,scope,generation,request,fingerprint,asked,answered,question,answer,action,hours,web_sources,voice_receipt,tool_trace,read_aloud)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 uid, scope, generation, request, fingerprint, now.isoformat(),
                 store.now().isoformat(), text, answer, ctx.compact(action) if action else None,
-                hours, ctx.compact(sources) if sources is not None else None, voice_receipt, ctx.compact(trace) if trace else None,
+                hours, ctx.compact(sources) if sources is not None else None, voice_receipt, ctx.compact(trace) if trace else None, int(speak),
             ),
         )
 
@@ -497,10 +527,13 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             store, db, token, area, data.get("scopeKey")
         )
         uid = user["id"]
-        if speak:
+        if speak or voice_receipt is not None:
             from ..provider import speech
 
-            speech.require_chat_receipt(db, user, area, voice_receipt)
+            task_id = speech.require_chat_receipt(db, user, area, voice_receipt)
+        else:
+            task_id = task_usage.identifier("chat", uid, request)
+        turn.enter_context(task_usage.scope("pi", task_id))
         pages = chat_navigation.visible(user, routes)
         previous_generation = thread["generation"] if thread else ""
         if not thread:
@@ -518,6 +551,8 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             signature.append(True)
         if speak:
             signature.append(voice_receipt)
+        elif voice_receipt is not None:
+            signature.append({"silentVoice": voice_receipt})
         fingerprint = sha256(ctx.compact(signature).encode()).hexdigest()
         saved = db.execute(
             "SELECT fingerprint FROM assistant_turns WHERE actor=? AND request=?",
@@ -571,10 +606,11 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             return view(db, uid, scope, thread, pages, selected)
         manual_form = (english.form(text) if is_english else None) or chat_forms.intent(text)
         manual_allowed = manual_form is not None and chat_forms.available(manual_form, user, routes)
-        document_request = chat_document_help.intent(text, last["question"] if last else "")
+        visit_request = chat_document_help.visit_intent(text)
+        document_request = visit_request or chat_document_help.intent(text, last["question"] if last else "")
         if document_request:
             manual_form, manual_allowed = None, False
-            document_reply, upload = chat_document_help.reply(user, routes)
+            document_reply, upload = chat_document_help.reply(user, routes, visit=visit_request)
             if is_english:
                 if upload:
                     upload["title"] = "Upload resident documents"
@@ -648,6 +684,8 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
         lines = []
         lookup_actions = ()
         builtin_reads = ()
+        rule_text = growth.guidance(db, user, "chat", campus_id=(selected or {}).get("campusId", ""))
+        rule_suffix = ("\n本院已审阅的呈现偏好（仅在与本轮任务相关时应用）：" + rule_text) if rule_text else ""
 
         def private_body(db, state, available):
             nonlocal lookup_actions, builtin_reads
@@ -711,6 +749,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                 web_enabled=web_enabled,
                 include_history=faq_request is None and manual_form is None and requested_filters is None and not direct,
             )
+            body["messages"][0]["content"] += rule_suffix
             if lookup_actions:
                 body["tools"] = [action.function() for action in lookup_actions]
                 body["tool_choice"] = "auto"
@@ -786,6 +825,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             "UPDATE assistant_threads SET pending=?,pendingAt=? WHERE actor=? AND scope=?",
             (request, int(now.timestamp()), uid, scope),
         )
+        provider.task_usage.attach(db, "tokens", uid, receipt)
 
     def current_search_state(db):
         _, _, _, visible, _, current = conversation(store, db, token, area, scope)
@@ -877,41 +917,70 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                 raise chat_web.SearchFailure(
                     "公开检索的会话、套餐或权限已经变化"
                 ) from None
-        if transport:
-            response = transport(key, body)
-        elif progress and requested_filters is None and not (
-            lookup_actions or brief or actions or sources is not None or faq_workflow or manual_form
-            or faq_request and faq_request["mode"] == "list"
-        ):
-            response = completions.stream(key, body, emit_delta)
-        else:
-            response = completions.send(key, body, timeout=60)
-        remote_receipt = token_receipt.read(response, allowance)
-        if remote_receipt is None:
-            raise ValueError
-        charged = remote_receipt.total
-        if lookup_actions and response["choices"][0]["finish_reason"] == "tool_calls":
-            def current_tools():
-                with closing(store.connect()) as live:
-                    live.execute("BEGIN")
-                    current_search_state(live)
-                    actor = store.actor(live, token)
-                    return (*builtin_reads, *(mcp_plugins.tools_for(actor, text) or mcp_plugins.tools_for(actor)),
-                            *community_skills.tools_for(actor, text), *chat_math.tools_for(actor))
+        observation = {}
+        response = None
+        answer = None
+        action = None
 
-            observation = react.from_response(response, current_tools(), offered=lookup_actions, trace=trace)
+        def current_tools():
+            with closing(store.connect()) as live:
+                live.execute("BEGIN")
+                current_search_state(live)
+                actor = store.actor(live, token)
+                return (*builtin_reads, *(mcp_plugins.tools_for(actor, text) or mcp_plugins.tools_for(actor)),
+                        *community_skills.tools_for(actor, text), *chat_math.tools_for(actor))
+
+        def first_model():
+            nonlocal charged, remote_receipt, response, answer, action
+            with closing(store.connect()) as live:
+                live.execute("BEGIN")
+                current_search_state(live)
+            if transport:
+                response = transport(key, body)
+            elif progress and requested_filters is None and not (
+                lookup_actions or brief or actions or sources is not None or faq_workflow or manual_form
+                or faq_request and faq_request["mode"] == "list"
+            ):
+                response = completions.stream(key, body, emit_delta)
+            else:
+                response = completions.send(key, body, timeout=60)
+            remote_receipt = token_receipt.read(response, allowance)
+            if remote_receipt is None:
+                raise ValueError
+            charged = remote_receipt.total
+            if lookup_actions and response["choices"][0]["finish_reason"] == "tool_calls":
+                chosen = react.requested_calls(response, current_tools(), offered=lookup_actions)
+                return {"calls": [{"id": f"read-{i}", "name": name, "arguments": args}
+                                  for i, (name, args) in enumerate(chosen.items())]}
+            _, answer, action = extract(response, {} if page_target else actions, request, scope)
+            return {"text": answer}
+
+        def execute_read(name, args):
+            # Pi dispatches calls sequentially. Resolve each tool again on the host
+            # at execution time so a scope change cannot release stale records.
+            call = {"type": "function", "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}}
+            read = react.from_response({"choices": [{"message": {"tool_calls": [call]}}]},
+                                       current_tools(), offered=lookup_actions, trace=trace)
+            observation.update(read)
+            return read[name]
+
+        def synthesis():
+            nonlocal answer
+            with closing(store.connect()) as live:
+                live.execute("BEGIN")
+                current_search_state(live)
             if arithmetic and re.search(r"然后|再算|再计算|据此|and then|then calculate|then compute", text, re.I):
                 react.next_step(store, uid, request, text, observation, current_tools, lookup_actions, trace)
             if "read_workflow_skill" in observation:
                 react.load_reference(store, uid, request, text, observation, current_tools)
             answer = react.answer(
-                store, uid, request, SYSTEM, text, observation,
+                store, uid, request, SYSTEM + rule_suffix, text, observation,
                 context=last["question"] if last and text != topics else "",
                 **({"on_delta": emit_delta} if progress else {}),
             )
-            action = None
-        else:
-            _, answer, action = extract(response, {} if page_target else actions, request, scope)
+            return answer
+
+        pi_runtime.run(body, first_model, execute_read, synthesis)
         if document_request:
             action = upload
         if direct:
@@ -999,6 +1068,11 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             progress.complete(answer)
         result = (answer, action)
         status = "ok"
+    except pi_runtime.Unavailable as err:
+        # The worker has no credentials; it can only have incurred the cloud
+        # charges already recorded by this thread's provider callback.
+        status, failure, rejected = "closed", str(err), not charged
+        failure_reason = "pi_unavailable"
     except chat_web.UnverifiedTopic:
         # An unsafe or unrecognized search topic never falls back to private evidence.
         result, status = (chat_scope.NO_TOPIC, {"kind": "scopeRefusal"}), "closed"

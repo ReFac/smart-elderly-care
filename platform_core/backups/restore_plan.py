@@ -20,6 +20,7 @@ MUTABLE = {
     "dossier_relatives": "亲属档案资料",
     "rounds_modes": "长辈巡查生成设置",
     "rounds_policy": "机构巡查排程设置",
+    "rounds_health_policy": "机构健康复核排程设置",
     "care_areas": "楼栋照护区域",
     "care_area_floors": "区域分层",
     "care_area_rooms": "区域房间分配",
@@ -49,6 +50,7 @@ ORIGINALS = {
     "protected_documents": "签发的加密文书",
     "rounds_observations": "已核对咳嗽时段观测",
     "rounds_reports": "已生成的长辈巡查简报",
+    "rounds_health_reviews": "健康复核助理逐人草稿",
     "scheduled_work_runs": "定时工单派发凭证",
     "permission_requests": "实名签署的权限申请和一次性使用凭证",
 }
@@ -149,6 +151,8 @@ def completed(rows):
 
 
 OPTIONAL_TABLES = {
+    "rounds_health_policy",
+    "rounds_health_reviews",
     "subsidy_policy", "subsidy_materials", "subsidy_claims",
     "legacy_bed_cards",
     "resident_medication_reports",

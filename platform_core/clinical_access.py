@@ -4,6 +4,8 @@ import re
 
 # Persist only our resource identifiers. Never store query strings, uploads, answers or headers.
 RESOURCE = re.compile(r"/api/(?:state|medical-visits/originals/[a-f0-9]{32}|"
+                      r"assistant/visit-jobs(?:/[a-f0-9]{32}(?:/originals/[a-f0-9]{32})?)?|"
+                      r"rounds/residents/[A-Za-z0-9_-]{1,100}|"
                       r"residents/[A-Za-z0-9_-]{1,100}/(?:health-profile|personal-brief|summary-draft|reported-medications|daily-life)"
                       r"|care-timeline/(?:resident|room)/[A-Za-z0-9_-]{1,100}|care/handover-draft|agent/room-context|daily-life/roster|documents/[A-Za-z0-9_-]{1,100}/(?:ocr|image|pages/[0-9]{1,4})|portal/history/(?:careSchedule|medication)|dossier/credentials/[a-f0-9]{32})")
 

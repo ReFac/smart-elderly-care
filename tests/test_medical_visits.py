@@ -53,6 +53,26 @@ def png(rgb):
     )
 
 
+def _crash_after_visit_draft(path):
+    """Exit only this test child, after the encrypted draft commit and before queue acknowledgement."""
+    import os
+    from platform_core import visit_jobs
+
+    store = Store(path)
+    complete = visits._complete
+
+    def stop_after_commit(*args, **kwargs):
+        complete(*args, **kwargs)
+        os._exit(73)
+
+    reviewed = {
+        "fields": {"eventDate": "2026-11-21", "orders": "测试医嘱，待员工核对"},
+        "warnings": [], "sourceRefs": {}, "identityConflict": False,
+    }
+    with patch("platform_core.visit_extraction.organize", return_value=reviewed), patch.object(visits, "_complete", stop_after_commit):
+        visit_jobs.run_next(store)
+
+
 class MedicalVisitTests(TestCase):
     def setUp(self):
         tmp = TemporaryDirectory()
@@ -96,6 +116,106 @@ class MedicalVisitTests(TestCase):
             "fields": self.fields,
             **extras,
         }
+
+    def test_running_job_recovers_after_actual_worker_exit_without_repeating_extraction(self):
+        import multiprocessing
+        from threading import Event
+        from platform_core import visit_jobs
+
+        body = self.body(mode="ai", consent=True, visitId="", fields={"eventDate": self.today})
+        ticket = visits.preview(self.store, self.token, RID, body, enqueue=True)
+        draft_id = ticket["draftId"]
+        child = multiprocessing.get_context("spawn").Process(target=_crash_after_visit_draft, args=(self.store.path,))
+        child.start()
+        try:
+            child.join(timeout=15)
+            self.assertEqual(child.exitcode, 73, "子进程须在存好待审草稿后、中途退出")
+        finally:
+            if child.is_alive():
+                child.kill()
+                child.join()
+            child.close()
+        self.assertEqual(visit_jobs.visible(self.store, self.token, draft_id)["state"], "running")
+
+        reopened = Store(self.store.path, now=self.store.now)
+        stopped = Event()
+        # dispatch checks its durable queue until idle; the first idle wait ends the test.
+        with patch.object(reopened.visit_job_wakeup, "wait", side_effect=lambda _: stopped.set()), patch(
+            "platform_core.visit_extraction.organize", side_effect=AssertionError("已完成的提取不可再次调用")
+        ) as extraction:
+            visit_jobs.dispatch(reopened, stopped)
+            extraction.assert_not_called()
+        saved = visit_jobs.visible(reopened, self.token, draft_id)
+        self.assertEqual((saved["state"], saved["taskId"]), ("ready", ticket["taskId"]))
+        self.assertEqual(saved["draft"]["fields"]["orders"], "测试医嘱，待员工核对")
+        self.assertFalse(visit_jobs.run_next(reopened))
+        self.assertEqual(reopened.snapshot(self.token)["data"]["medicalVisits"], [])
+
+    def test_clinician_can_reach_own_draft_but_cannot_read_other_operators_job_or_original(self):
+        from platform_core import visit_jobs
+
+        grants = ["medical", "medical.write", "clinical"]
+        author = self.account("draft-author", grants)
+        peer = self.account("draft-peer", grants)
+        body = self.body(mode="ai", consent=True, visitId="", fields={"eventDate": self.today})
+        ticket = visits.preview(self.store, author, RID, body, enqueue=True)
+        peer_ticket = visits.preview(self.store, peer, RID, {
+            **body, "requestId": "peer-submission", "attachments": [self.file(png((120, 25, 4)))],
+        }, enqueue=True)
+        mine = visit_jobs.visible(self.store, peer)["items"]
+        self.assertEqual([item["draftId"] for item in mine], [peer_ticket["draftId"]])
+        reviewed = {"fields": self.fields, "warnings": [], "sourceRefs": {}, "identityConflict": False}
+        with patch("platform_core.visit_extraction.organize", return_value=reviewed):
+            self.assertTrue(visit_jobs.run_next(self.store))
+            self.assertTrue(visit_jobs.run_next(self.store))
+        original_id = visit_jobs.visible(self.store, author, ticket["draftId"])["draft"]["attachments"][0]["id"]
+        mine = visit_jobs.visible(self.store, peer, peer_ticket["draftId"])
+        own_original = mine["draft"]["attachments"][0]["id"]
+        self.assertEqual(visit_jobs.visible(self.store, peer, peer_ticket["draftId"], attachment_id=own_original)[1], "image/png")
+        for draft_id, options in (
+            (ticket["draftId"], {}), (ticket["draftId"], {"retry": True}),
+            (ticket["draftId"], {"attachment_id": original_id}), (peer_ticket["draftId"], {"attachment_id": original_id}),
+        ):
+            with self.subTest(draft=draft_id, options=options), self.assertRaises(FileNotFoundError):
+                visit_jobs.visible(self.store, peer, draft_id, **options)
+        with self.assertRaises(FileNotFoundError):
+            visits.original(self.store, peer, original_id)
+
+    def test_background_job_survives_reopen_and_requires_signature(self):
+        from platform_core import visit_jobs
+
+        body = self.body(mode="ai", consent=True, visitId="", fields={"eventDate": self.today})
+        ticket = visits.preview(self.store, self.token, RID, body, enqueue=True)
+        self.assertEqual(ticket, visits.preview(self.store, self.token, RID, body, enqueue=True))
+        reopened = Store(self.store.path, now=self.store.now)
+        self.assertEqual(visit_jobs.visible(reopened, self.token)["items"][0]["taskId"], ticket["taskId"])
+        fake = {"fields": self.fields, "warnings": [], "sourceRefs": {}, "identityConflict": False}
+        with patch("platform_core.visit_extraction.organize", return_value=fake) as organize:
+            self.assertTrue(visit_jobs.run_next(reopened))
+            self.assertFalse(visit_jobs.run_next(reopened))
+            self.assertEqual(organize.call_count, 1)
+        result = visit_jobs.visible(reopened, self.token, ticket["draftId"])
+        self.assertEqual(result["state"], "ready")
+        draft = result["draft"]
+        attachment = draft["attachments"][0]["id"]
+        self.assertEqual(visit_jobs.visible(reopened, self.token, ticket["draftId"], attachment_id=attachment)[0], self.raw)
+        with closing(reopened.connect()) as db:
+            self.assertFalse(db.execute("SELECT 1 FROM dossier_visit_records WHERE id=?", (draft["draftId"],)).fetchone())
+        self.sign(draft)
+        self.assertEqual(visit_jobs.visible(reopened, self.token)["items"], [])
+
+    def test_background_job_must_recheck_original_session_and_uploader(self):
+        from platform_core import visit_jobs
+
+        ticket = visits.preview(self.store, self.token, RID, self.body(mode="ai", consent=True), enqueue=True)
+        self.store.logout(self.token)
+        self.token = self.store.login("owner", PASSWORD)[0]
+        with patch("platform_core.visit_extraction.organize") as organize:
+            self.assertTrue(visit_jobs.run_next(self.store))
+            organize.assert_not_called()
+        self.assertEqual(visit_jobs.visible(self.store, self.token, ticket["draftId"])["state"], "failed")
+        retry = visit_jobs.visible(self.store, self.token, ticket["draftId"], retry=True)
+        self.assertEqual((retry["state"], retry["taskId"]), ("queued", ticket["taskId"]))
 
     def sign(self, draft, token=None, **overrides):
         fields = {

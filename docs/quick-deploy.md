@@ -6,7 +6,7 @@
 
 ## 1. 安装
 
-以下示例在使用 apt、systemd 的 Linux 上执行。使用支持 Python 3.11 及以上的发行版，将经过验收的源代码部署在 /opt/care-workspace。正式发布从已经评审的提交或签名制品安装，在独立中文测试机构验证升级及回滚。
+以下示例在使用 apt、systemd 的 Linux 上执行。请先安装服务账号可执行的 Node.js 22.19 或更新版本及 npm。Pi 随对话进程启动，使用锁文件安装到本次发布目录。使用支持 Python 3.11 及以上的发行版，将经过验收的源代码部署在 /opt/care-workspace。正式发布从已经评审的提交或签名制品安装，在独立中文测试机构验证升级及回滚。
 
 ```sh
 sudo apt-get install python3-venv python3-dev build-essential pkg-config libsqlcipher-dev poppler-utils caddy
@@ -16,11 +16,14 @@ sudo install -d -m 750 /etc/care-workspace
 cd /opt/care-workspace
 sudo python3 -m venv .venv
 sudo .venv/bin/pip install -r requirements-storage.txt -r requirements-payments.txt -r requirements-harness.txt -r requirements-a2a.txt
+sudo npm ci --prefix runtimes/pi --omit=dev --ignore-scripts
 sudo install -m 600 deploy/linux/service.env.example /etc/care-workspace/service.env
 sudoedit /etc/care-workspace/service.env
 ```
 
 把 NH_PUBLIC_ORIGIN 改为机构的真实 HTTPS 域名。NH_DEPLOYMENT_LANGUAGE 选 zh-CN、en、fr 或 es；首次建库时锁定，后续启动会核对。已有中文机构库保持中文。不同语种的机构可各自部署独立实例。中国版使用高德，其他语种默认使用国际版的 Google Maps。医院的在线检索需要运营方配置相应地图服务。只输入医院或城市名称，选择结果后由员工核实。界面词典在本机加载。原始病历、姓名和员工笔记保留原文。现有账务以人民币记账，营业日沿用机构系统的上海时区；其他币种或税务规则需单独适配。
+
+按锁定版本安装独立的 DeerFlow 2.0 文档与巡查工作进程，并核对 Owner 部署控制台中的组件状态。[安装步骤](../deploy/deerflow/README.md) · [各组件职责](agent-components.md)
 
 ## 2. 正式建库
 

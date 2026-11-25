@@ -204,3 +204,14 @@ def document_guidance(user):
     if "xlsx" not in skills or skills["xlsx"].path != BUNDLED / "xlsx" / "SKILL.md":
         return ""
     return ReadSkill(skills).execute({"name": "xlsx"})["instructions"]
+
+
+def scheduled_guidance(name):
+    """Read only the assigned, bundled procedure for a scheduled resident specialist."""
+    grants = {"resident-health-review": "clinical", "resident-daily-life": "care"}
+    if name not in grants:
+        raise ValueError("未知的长辈定时技能")
+    skill = _describe(BUNDLED / name / "SKILL.md")
+    if skill.name != name or skill.grant != grants[name]:
+        raise ValueError("长辈定时技能与岗位范围不匹配")
+    return ReadSkill({name: skill}).execute({"name": name})["instructions"]

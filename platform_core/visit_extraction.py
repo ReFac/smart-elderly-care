@@ -6,7 +6,8 @@ import re
 import unicodedata
 
 from . import document_ocr
-from .provider import generation
+from .agents import deerflow_worker, growth
+from .provider import generation, task_usage
 
 LABELS = {
     "eventDate": "本次就诊日期",
@@ -138,7 +139,7 @@ def _recognized(store, token, files, manifest, authorize, name):
     return evidence, warnings, mismatch, dates
 
 
-def organize(store, token, actor, rid, name, files, manifest, initial, authorize):
+def organize(store, token, actor, rid, name, files, manifest, initial, authorize, *, draft_id=None, task_id=None):
     # Canonical ordering makes a retry with a reordered file picker reuse the same
     # cloud receipt. The manifest displayed to the operator stays in upload order.
     pairs = sorted(zip(files, manifest), key=lambda pair: pair[0][1])
@@ -146,9 +147,12 @@ def organize(store, token, actor, rid, name, files, manifest, initial, authorize
     batch = generation.fingerprint(
         [rid, [(item[1], meta["category"]) for item, meta in pairs]]
     )
-    evidence, warnings, identity_conflict, dates = _recognized(
-        store, token, files, manifest, authorize, name
-    )
+    task_id = task_id or task_usage.identifier("visit", rid, draft_id or batch)
+    # Page recognition belongs to the workspace, not to the DeerFlow evidence graph.
+    with task_usage.scope("platform", task_id):
+        evidence, warnings, identity_conflict, dates = _recognized(
+            store, token, files, manifest, authorize, name
+        )
     date_conflict = bool(
         dates and initial["eventDate"] and initial["eventDate"] not in dates
     )
@@ -158,12 +162,22 @@ def organize(store, token, actor, rid, name, files, manifest, initial, authorize
     fields, refs = dict(initial), {}
     if evidence and not conflict:
         with closing(store.connect()) as db:
-            authorize(db, token)
-        selected = generation.generate(
-            store,
+            current = authorize(db, token)
+            row = db.execute("""SELECT json_extract(r.value,'$.bedId'),json_extract(r.value,'$.registeredCampusId')
+                FROM workspace w,json_each(w.data,'$.residents') r
+                WHERE w.id=1 AND json_extract(r.value,'$.id')=?""", (rid,)).fetchone()
+            style = growth.guidance(db, current, "medical-documents",
+                                    bed_id=row[0] or "", campus_id=row[1] or "") if row else ""
+
+        def still_authorized():
+            with closing(store.connect()) as db:
+                authorize(db, token)
+
+        selected = deerflow_worker.generate(
+            "medical-documents", task_id, store,
             actor,
             "medical-visit/group/" + batch,
-            GUIDE,
+            GUIDE + ("\n" + style if style else ""),
             {
                 "字段": LABELS,
                 "原文": [[n, r["text"]] for n, r in enumerate(evidence, 1)],
@@ -172,6 +186,7 @@ def organize(store, token, actor, rid, name, files, manifest, initial, authorize
             feature="dossier.visitExtraction",
             output_tokens=1400,
             shared_once=True,
+            authorize=still_authorized,
         )
         for field, ids in selected.items():
             if not ids or fields[field]:
@@ -202,4 +217,6 @@ def organize(store, token, actor, rid, name, files, manifest, initial, authorize
         "sourceRefs": refs,
         "warnings": warnings,
         "identityConflict": conflict,
+        "taskId": task_id,
+        "draftRuntime": deerflow_worker.backend() if evidence and not conflict else "platform",
     }

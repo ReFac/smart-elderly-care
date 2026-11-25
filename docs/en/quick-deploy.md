@@ -6,7 +6,7 @@ Use a separate instance, domain, service account, database and recovery keys for
 
 ## 1. Prepare a host
 
-These commands assume an apt-based Linux host with systemd and Python 3.11 or newer. Install your reviewed release in /opt/care-workspace. Rehearse upgrades and rollback on a Simplified Chinese staging installation.
+These commands assume an apt-based Linux host with systemd and Python 3.11 or newer. Install Node.js 22.19+ and npm on the service account’s system path. Pi starts with the first conversation and loads the pinned dependencies from the release directory. Install your reviewed release in /opt/care-workspace. Rehearse upgrades and rollback on a Simplified Chinese staging installation.
 
 ```sh
 sudo apt-get install python3-venv python3-dev build-essential pkg-config libsqlcipher-dev poppler-utils caddy
@@ -16,11 +16,18 @@ sudo install -d -m 750 /etc/care-workspace
 cd /opt/care-workspace
 sudo python3 -m venv .venv
 sudo .venv/bin/pip install -r requirements-storage.txt -r requirements-payments.txt -r requirements-harness.txt -r requirements-a2a.txt
+sudo npm ci --prefix runtimes/pi --omit=dev --ignore-scripts
 sudo install -m 600 deploy/linux/service.env.example /etc/care-workspace/service.env
 sudoedit /etc/care-workspace/service.env
 ```
 
 Set NH_PUBLIC_ORIGIN to the institution's HTTPS origin. Set NH_DEPLOYMENT_LANGUAGE to en, zh-CN, fr or es. Initialization fixes this choice in the encrypted database. Existing Chinese installations remain Chinese. Each institution can deploy its own locale. The China edition uses Amap. Other locales inherit Google Maps from the international edition. Configure the institution's map provider for online hospital suggestions. Submit only the hospital name or city and review the selection. Original clinical text, names and staff notes stay in their original language. The current finance ledger uses CNY and Shanghai business dates. Institutions requiring other accounting currencies, time zones or tax rules need a local acceptance review.
+
+Install the pinned DeerFlow 2.0 document and rounds worker before commissioning and review both runtimes in the Owner console. [Worker setup](../../deploy/deerflow/README.en.md) · [Component responsibilities](agent-components.md)
+
+Signed updates include the Pi bridge, the DeerFlow worker, its configuration and both dependency manifests. The updater uses offline dependencies from the original installation if the locks match. Before it admits traffic, the candidate exercises Pi with a synthetic turn and starts the enabled DeerFlow worker. This readiness check uses no cloud credentials or records. A failed check restores the previous version and its snapshot.
+
+For a new dependency lock, set `NH_AGENT_RUNTIME_STORE` to an absolute path readable by the service account. Under `pi/<sha256-of-package-lock.json>/`, provision the release's two npm manifests and production `node_modules` using the locked install above. Under `deerflow/<sha256-of-requirements.txt-followed-by-sdk.txt>/`, place both original manifests and the prepared `venv/bin/python`. Compute the hash over the concatenated file bytes in that order. Keep both the current and previous dependency directories available for rollback. Only the deployment operator needs write access.
 
 ## 2. Initialize and start
 

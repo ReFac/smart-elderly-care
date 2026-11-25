@@ -1,6 +1,7 @@
 import { residentLabel, residentAnchor } from './people-labels.js';
-import { node, btn, badge, records } from './shared.js';
-import { localStamp, residentInsights, roundsWrite } from './resident-insights.js';
+import { node, btn, badge, field, records, select } from './shared.js';
+import { residentInsights, roundsWrite } from './resident-insights.js';
+import { localStamp, specialistSchedules } from './round-specialists.js';
 
 function input(type, value, attrs = {}) {
   const el = node('input');
@@ -30,6 +31,7 @@ export function roundsSettings(ctx) {
     try {
       const data = await ctx.get('/api/rounds/settings'),
         s = data.settings;
+      const hasSpecialists = Array.isArray(data.agents) && data.agents.length > 0;
       const enabled = choice(
         [
           ['on', '启用定时巡查'],
@@ -50,15 +52,15 @@ export function roundsSettings(ctx) {
       save.type = 'submit';
       const form = node('form', 'rounds-config', [
         node('div', 'rounds-form-grid', [
-          labeled('巡查状态', enabled),
-          labeled('巡查间隔（分钟）', interval),
+          hasSpecialists ? null : labeled('巡查状态', enabled),
+          hasSpecialists ? null : labeled('巡查间隔（分钟）', interval),
           labeled('长辈默认生成方式', mode),
           labeled('每日站内提醒时间（北京时间）', notify),
         ]),
         node(
           'p',
           'fx-muted',
-          '巡查服务在后台运行。每位长辈可在档案内单独选择生成方式；家属的站内简报还需取得长辈授权和家属订阅。',
+          '每位长辈可在档案内单独选择生成方式。发送生活简报还需要长辈授权和家属订阅。',
         ),
         save,
       ]);
@@ -80,8 +82,7 @@ export function roundsSettings(ctx) {
               title: '保存机构巡查设置',
               target: ctx.state.uiSettings.institutionName,
               fields: [
-                ['状态', enabled.selectedOptions[0].text],
-                ['巡查间隔', interval.value + ' 分钟'],
+                ...(hasSpecialists ? [] : [['状态', enabled.selectedOptions[0].text], ['巡查间隔', interval.value + ' 分钟']]),
                 ['默认生成', mode.selectedOptions[0].text],
                 ['站内提醒', notify.value + ' 北京时间'],
               ],
@@ -98,13 +99,48 @@ export function roundsSettings(ctx) {
           save.disabled = false;
         }
       };
+      function configureAgent(plan, title) {
+        const editor = ctx.dialog({
+          title: '调整' + title + '计划',
+          fields: [
+            select('mode', '运行状态', [
+              {value:'on', label:'启用'}, {value:'off', label:'暂停'},
+            ], {value:plan.enabled ? 'on' : 'off'}),
+            field('intervalMinutes', '运行周期（分钟）', {
+              type:'number', value:plan.intervalMinutes, min:5, max:1440, step:1,
+            }),
+          ],
+          submitLabel: '核对计划',
+          onSubmit: async values => {
+            try {
+              const result = await roundsWrite(ctx, '/api/rounds/settings', {
+                agentId:plan.id, enabled:values.mode === 'on', intervalMinutes:Number(values.intervalMinutes),
+              }, data.revision, {
+                title:'确认定时整理计划', target:title,
+                fields:[['运行状态', values.mode === 'on' ? '启用' : '暂停'], ['周期', values.intervalMinutes + ' 分钟']],
+              });
+              if (!result) return;
+              await load();
+              ctx.toast(title + '计划已保存');
+              return true;
+            } catch (error) {
+              if (error.status !== 409) throw error;
+              ctx.toast(error.message);
+              editor.close();
+              await load();
+              return;
+            }
+          },
+        });
+      }
       box.replaceChildren(
+        ...(hasSpecialists ? [specialistSchedules(ctx, data.agents, configureAgent, load)] : []),
         node('div', 'rounds-card', [
           node('header', 'rounds-heading', [
-            node('div', 'rounds-identity', [ctx.ui.icon('care', 23), node('h2', '', '定时巡查')]),
-            badge(ctx, s.enabled ? '运行中' : '已暂停', s.enabled ? 'green' : 'neutral'),
+            node('div', 'rounds-identity', [ctx.ui.icon('care', 23), node('h2', '', hasSpecialists ? '生成规则与站内提醒' : '定时巡查')]),
+            hasSpecialists ? null : badge(ctx, s.enabled ? '运行中' : '已暂停', s.enabled ? 'green' : 'neutral'),
           ]),
-          node('div', 'rounds-schedule', [
+          hasSpecialists ? null : node('div', 'rounds-schedule', [
             node('div', '', [
               node('small', '', '上次巡查'),
               node('strong', '', localStamp(s.lastRunAt)),

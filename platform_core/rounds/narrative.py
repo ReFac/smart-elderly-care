@@ -4,7 +4,8 @@ from datetime import timedelta
 import re
 
 from ..care.timeline import routine_label
-from ..provider import generation
+from ..agents import deerflow_worker
+from ..provider import generation, task_usage
 
 # A completed plan is not a normal finding. Standard phrases describe the care
 # provided; individual intake, sleep quality and wellbeing require a signed observation.
@@ -230,7 +231,8 @@ def clinical_facts(db, state, person, now, cough):
     return facts, suggestions
 
 
-def arrange(store, rid, scope, rows, *, attributed_actor=None):
+def arrange(store, rid, scope, rows, *, attributed_actor=None, task_id=None, style="", authorize=None):
+    from ..agents.community_skills import scheduled_guidance
     # The model can edit paragraph structure, but cannot insert unrecorded food,
     # diagnoses or reassuring statements. Neither identifiers nor staff names
     # from the surrounding application are needed to arrange these sentences.
@@ -257,22 +259,28 @@ def arrange(store, rid, scope, rows, *, attributed_actor=None):
             raise ValueError("简报遗漏或重复了原始资料")
         return {"paragraphs": groups}
 
-    request = ["resident-life-v2", rid, scope, generation.fingerprint(facts)]
-    result = generation.generate(
-        store,
-        "rounds-agent",
+    guide = GUIDE
+    if scope == "care":
+        guide = scheduled_guidance("resident-daily-life") + "\n" + GUIDE
+    if style:
+        guide += "\n" + style
+    request = ["resident-life-v3", rid, scope, generation.fingerprint([facts, guide])]
+    result = deerflow_worker.generate(
+        "daily-life", task_id or task_usage.identifier("round", rid, scope, facts[0]["日期"]), store,
+        "daily-life" if scope == "care" else "rounds-agent",
         request,
-        GUIDE,
+        guide,
         {"事实": facts},
         validate,
         feature="care.roundNarrative",
         attributed_actor=attributed_actor,
         output_tokens=400,
+        authorize=authorize,
     )
     return result["paragraphs"]
 
 
-def paragraphs(store, rid, scope, facts, *, attributed_actor=None):
+def paragraphs(store, rid, scope, facts, *, attributed_actor=None, task_id=None, style="", authorize=None):
     # Small independent chunks bound provider input even on busy days and keep
     # the same reference ordering on a retry. Free-text notes stay intact.
     result = []
@@ -280,7 +288,7 @@ def paragraphs(store, rid, scope, facts, *, attributed_actor=None):
     for offset in range(0, len(facts), 12):
         rows = facts[offset : offset + 12]
         for indexes in arrange(
-            store, rid, scope, rows, attributed_actor=attributed_actor
+            store, rid, scope, rows, attributed_actor=attributed_actor, task_id=task_id, style=style, authorize=authorize
         ):
             selected = [rows[i - 1] for i in indexes]
             result.append(

@@ -8,7 +8,7 @@ from uuid import uuid4
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from . import active, audio_adapters, deepseek, latest, local_time, read_key
+from . import active, audio_adapters, deepseek, latest, local_time, read_key, task_usage
 
 ENDPOINT = "https://api.deepseek.com/v1/tools/"
 UNITS = {"ocr": "页", "asr": "秒"}
@@ -309,6 +309,10 @@ def execute(
                 feature,
             ),
         )
+        if feature == "assistant.voiceAsr":
+            task_usage.link_chat_voice(db, actor["id"], call)
+        else:
+            task_usage.attach(db, "media", actor["id"], call)
         if kind == "asr":
             audit_asr(
                 db,

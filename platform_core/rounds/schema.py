@@ -12,6 +12,23 @@ def init(db, now):
         "INSERT OR IGNORE INTO rounds_policy VALUES (1,1,60,'auto','17:30',?,NULL)",
         ((now + timedelta(hours=1)).isoformat(),),
     )
+    # Existing daily schedules retain their cadence. Sending additional clinical chart
+    # excerpts to the model requires the Owner to enable the new specialist explicitly.
+    db.execute("""CREATE TABLE IF NOT EXISTS rounds_health_policy(
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1), enabled INTEGER NOT NULL,
+        interval_min INTEGER NOT NULL, next_at TEXT NOT NULL, last_at TEXT)""")
+    db.execute("INSERT OR IGNORE INTO rounds_health_policy VALUES(1,0,1440,?,NULL)", (now.isoformat(),))
+    db.execute("""CREATE TABLE IF NOT EXISTS rounds_agent_outcomes(
+        agent TEXT PRIMARY KEY, result TEXT NOT NULL, at TEXT NOT NULL)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS rounds_health_jobs(
+        resident TEXT PRIMARY KEY, day TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+        due_at TEXT NOT NULL DEFAULT '', lease TEXT NOT NULL DEFAULT '')""")
+    db.execute("CREATE INDEX IF NOT EXISTS rounds_health_due ON rounds_health_jobs(due_at,resident)")
+    db.execute("""CREATE TABLE IF NOT EXISTS rounds_health_reviews(
+        id TEXT PRIMARY KEY, resident TEXT NOT NULL, bed TEXT NOT NULL, stay TEXT NOT NULL, day TEXT NOT NULL,
+        basis TEXT NOT NULL, created_at TEXT NOT NULL, payload TEXT NOT NULL)""")
+    db.execute("""CREATE INDEX IF NOT EXISTS rounds_health_by_person ON
+        rounds_health_reviews(resident,bed,stay,day,created_at)""")
     db.execute("""CREATE TABLE IF NOT EXISTS rounds_modes (
         resident TEXT PRIMARY KEY, mode TEXT NOT NULL)""")
     db.execute("""CREATE TABLE IF NOT EXISTS rounds_observations (
