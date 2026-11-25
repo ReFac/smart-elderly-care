@@ -337,6 +337,35 @@ def token_allowance(body):
     )
 
 
+def fit_private_context(body, available, pages, topics, current_page, actions, *, follow_up):
+    if token_allowance(body) <= available:
+        return
+    prompt = body["messages"][1]
+    envelope = json.loads(prompt["content"])
+    route_ids = {current_page, *actions}
+    route_ids.update(page.route for page in chat_navigation.named(topics, pages))
+    envelope["本人可见页面"] = {
+        key: title for key, title in envelope["本人可见页面"].items() if key in route_ids
+    }
+    envelope["可见办理入口（页面及分页签）"] = chat_navigation.directory(
+        [page for page in pages if page.route in route_ids]
+    )
+    prompt["content"] = ctx.compact(envelope)
+    history = envelope["对话上文"]
+    # Keep the latest exchange for questions whose subject comes from the previous turn.
+    while len(history) > (2 if follow_up else 0) and token_allowance(body) > available:
+        del history[:2]
+        prompt["content"] = ctx.compact(envelope)
+    shortfall = token_allowance(body) - available
+    if shortfall > 0 and body["max_tokens"] > 256:
+        body["max_tokens"] = max(256, body["max_tokens"] - shortfall)
+
+
+def quota_message(available, required):
+    return (f"机构 AI 套餐剩余 {max(available, 0)} token，本次请求至少需要预留 {required} token。"
+            "可以缩小查询范围，或联系管理员核对机构套餐额度。")
+
+
 def resident_wording_stream(deliver):
     # Provider chunks can split the old two-character term between events.
     trailing = ""
@@ -575,7 +604,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
         lines = []
         lookup_actions = ()
 
-        def private_body(db, state):
+        def private_body(db, state, available):
             nonlocal lookup_actions
             if manual_form:
                 facts = {"可打开的手填表单": manual_form.title if manual_allowed else None}
@@ -635,6 +664,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                     "\n只根据本轮提供的公开常见问题回答。说明适用的操作步骤，"
                     "不推断本机构的记录、实际授权、已办结果或当地政策。无法据条目回答时如实说明。"
                 )
+            fit_private_context(body, available, pages, topics, page, actions, follow_up=text != topics)
             return body
 
         def read_latest():
@@ -655,14 +685,15 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
         )
         # The public excerpt size is unknown. Hold the baseline now, then resize the
         # reservation under a write transaction once the exact selected excerpts are known.
+        available = plan["tokenLimit"] - sum(provider.usage(db, plan["id"]))
         body = (
             chat_web.public_body(model, text, [], OUTPUT_LIMIT, now)
             if consider_search
-            else private_body(db, state)
+            else private_body(db, state, available)
         )
         allowance = token_allowance(body)
-        if sum(provider.usage(db, plan["id"])) + allowance > plan["tokenLimit"]:
-            raise Unavailable("机构的云端 AI 套餐可用额度不足，请联系管理员")
+        if allowance > available:
+            raise Unavailable(quota_message(available, allowance))
         db.execute(
             """INSERT INTO api_usage(actor,request,planId,fingerprint,model,createdAt,status,allowance,feature)
             VALUES(?,?,?,?,?,?,'pending',?,?)""",
@@ -714,6 +745,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
     charged = 0
     remote_receipt = None
     rejected = False
+    failure_reason = "provider_unavailable"
     result, failure = None, ""
     try:
         if progress:
@@ -762,9 +794,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
                     ]
                     allowance = token_allowance(body)
                     if allowance > available:
-                        raise chat_web.SearchFailure(
-                            "机构套餐剩余额度不足以整理本轮答复，请联系管理员"
-                        )
+                        raise chat_web.SearchFailure(quota_message(available, allowance))
                     changed = db.execute(
                         "UPDATE api_usage SET allowance=?,feature=? WHERE actor=? AND request=? AND status='pending'",
                         (allowance, feature, uid, receipt),
@@ -893,8 +923,24 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
     except HTTPError as err:
         rejected = err.code in deepseek.REJECTED_HTTP
         status = "closed" if rejected else "uncertain"
+        code = err.code
         err.close()
-        failure = "云端模型暂未接受请求，请联系管理员检查套餐和模型，或稍后重试"
+        failure_reason = f"provider_http_{code}"
+        if code == 402 and completions.provider_name() == "deepseek":
+            failure = "DeepSeek API 余额不足，请联系平台管理员充值"
+        elif code == 402:
+            failure = "云端模型服务商要求付款，请联系平台管理员核对服务商账户的账务状态"
+        elif code == 401:
+            failure = "云端模型服务商未接受当前凭据，请联系平台管理员核对 API 密钥"
+        elif code == 403:
+            failure = "云端模型服务商拒绝访问，请联系平台管理员核对模型访问权限"
+        elif code == 429:
+            failure = "云端模型请求已达服务商限制，请稍后重试，持续出现时请管理员核对服务商配额"
+        elif 500 <= code < 600:
+            failure = "云端模型服务商暂时无法处理请求，请稍后重试"
+        else:
+            failure = "云端模型服务商未接受本次请求，请联系平台管理员核对请求和模型配置"
+        failure += f"（HTTP {code}）"
     except (
         HTTPException,
         URLError,
@@ -917,7 +963,7 @@ def reply(store, token, data, *, transport=None, progress=None, voice_receipt=No
             (
                 status,
                 charged,
-                "chat" if result else "provider_unavailable",
+                "chat" if result else failure_reason,
                 uid,
                 receipt,
             ),
