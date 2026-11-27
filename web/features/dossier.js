@@ -19,7 +19,7 @@ import { careTimeline } from './care-timeline.js';
 import { recentChanges } from './recent-changes.js';
 import { previewSummary } from './dossier-summary.js';
 import { asBase64, originalViewer } from './document-original.js';
-import { pendingDocument, recognizeDocument, reviewReceipt } from './document-ocr.js';
+import { ocrPageEstimate, pendingDocument, recognizeDocument, reviewReceipt } from './document-ocr.js';
 import { openVisitEditor } from './medical-visit-intake.js';
 import { showVisit, visitHistory, visitsFor } from './medical-visit-review.js';
 import { residencyDetails } from './residency.js';
@@ -250,7 +250,7 @@ function newDocument(ctx, resident, visit, reopenVisit) {
     consentField.hidden = !local;
     consent.required = local;
     if (inspected) chosen.textContent = inspected.file.name + ' · ' + inspected.pages + ' 页'
-      + (local ? ' · 预计使用 ' + inspected.pages + ' 页 OCR 额度' : '');
+      + (local ? ' · ' + ocrPageEstimate(inspected.pages) : '');
     submit.textContent = local ? '留存原件并提交 DeepSeek OCR' : '确认原文并存档';
   };
   updateMethod();
@@ -305,7 +305,7 @@ function newDocument(ctx, resident, visit, reopenVisit) {
           ['来源', source.value],
           [
             '处理方式',
-            imageHash ? '先加密保留完整原件，再发送至 DeepSeek 识别，预计使用 ' + pages + ' 页 OCR 额度。' : description.value,
+            imageHash ? '加密保留完整原件后，由 DeepSeek 识别。' + ocrPageEstimate(pages) : description.value,
           ],
         ],
         quiet: Boolean(imageHash),

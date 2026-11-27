@@ -1,4 +1,4 @@
-"""Private, once-per-original OCR. Only literal labelled lines become profile candidates."""
+"""Private OCR of an original and at most one enhanced rendering."""
 
 from contextlib import closing
 import json
@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 
-from . import access, ocr_review, pdf_original
+from . import access, ocr_recovery, ocr_review, pdf_original
 from .provider import media
 
 METHOD = "DeepSeek OCR"
@@ -198,6 +198,8 @@ def parse_result(obj, width, height, page_count=1):
         or len(result["lines"]) > 500
         or sum(len(line["text"]) for line in result["lines"]) > 16000
     ):
+        if result["pages"][0]["state"] == "partial":
+            result["_recoveryAnchors"] = ocr_recovery.anchors(result["lines"])
         result.update(state="failed", lines=[], candidates=[])
         result["error"] = "该页未得到完整可核对的文字，请按原件手工补录"
     if result["state"] == "failed" and "error" not in result:
@@ -205,7 +207,7 @@ def parse_result(obj, width, height, page_count=1):
     return result, page_count, obj["id"]
 
 
-def recognize(store, token, raw, authorize, *, feature="dossier.documentOcr"):
+def recognize(store, token, raw, authorize, *, feature="dossier.documentOcr", recover=True):
     from .dossier import jpeg_dimensions, png_dimensions
 
     if raw.startswith(b"%PDF-"):
@@ -235,8 +237,27 @@ def recognize(store, token, raw, authorize, *, feature="dossier.documentOcr"):
         lambda obj: parse_result(obj, width, height, page_count),
         feature=feature,
     )
-    # Old, metered receipts can be reviewed using today's checks without repeating OCR.
-    result.update(ocr_review.quality(result, None if mime == "application/pdf" else (width, height)))
+    image_size = None if mime == "application/pdf" else (width, height)
+    if recover and page_count == 1 and feature != "access.resumeOcr" and ocr_recovery.needed(result):
+        try:
+            source = raw if image_size else pdf_original.render_page(raw, 1)
+            enhanced = ocr_recovery.enhanced_png(source)
+            if enhanced is not None:
+                alternative = media.execute(
+                    store, token, "ocr", raw, 1, "document-enhanced.png", "image/png", authorize,
+                    lambda obj: parse_result(obj, width, height), feature=feature, upload=enhanced, ocr_recovery=True,
+                )
+                if ocr_recovery.preferred(result, alternative):
+                    result = {**alternative, "recoveryUsed": True}
+        except (OSError, ValueError):
+            # Primary OCR has settled; errors in the second pass should not hide its result.
+            with closing(store.connect()) as db:
+                authorize(db, token)
+    result.pop("_recoveryAnchors", None)
+    result.update(ocr_review.quality(result, image_size))
+    if ocr_recovery.missing_nodule_size(result["lines"]):
+        result["reviewWarnings"].append("未读到带单位的结节尺寸，请对照原报告手工核对。")
+        result["manualReportReview"] = True
     return result
 
 
@@ -331,7 +352,7 @@ def prepare(store, token, p, revision):
         busy = db.execute(
             """SELECT 1 FROM dossier_ocr_jobs j JOIN dossier_documents d ON j.document_id=d.id
                     WHERE d.image_hash=? AND j.result IS NULL AND j.started>?""",
-            (digest, now - 240),
+            (digest, now - 420),
         ).fetchone()
         if busy:
             raise ValueError("此原件正在识别，请稍后查看")

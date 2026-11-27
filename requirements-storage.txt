@@ -2,3 +2,4 @@ sqlcipher3==0.6.5
 cryptography>=46
 qrcode==8.2
 webauthn==3.0.1
+Pillow>=12.2,<14

@@ -255,6 +255,8 @@ export function documentIntake(getContext, changed, hide) {
       footer.append(action('关闭本组', discard));
       card.append(node('h3', '', heading), node('p', '', hint),
         node('ul', '', rows.map(fileRow)));
+      if (stage === 'choose' && rows.some(row => !row.workbook))
+        card.append(node('p', 'assistant-document-hint', '单页原件如需补识别，最多额外使用 1 页 OCR 额度。'));
       if (stage === 'confirmed' && rows.some(clinical))
         card.append(node('p', '', canOpenVisit(getContext())
           ? '同一位长辈、同一次就诊的原件可一起勾选。下一步选择长辈和就诊记录。'

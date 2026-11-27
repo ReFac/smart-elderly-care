@@ -246,6 +246,7 @@ def execute(
     upload=None,
     audit_scope=None,
     duration_ms=None,
+    ocr_recovery=False,
 ):
     """Persist the outbound reservation first. A crash or lost reply never causes an automatic re-send."""
     now = store.now()
@@ -255,19 +256,25 @@ def execute(
         identity = (
             (actor["id"] + "\0" + reference + "\0").encode() if kind == "asr" else b""
         )
-        digest = sha256(identity + raw).hexdigest()
+        original_digest = sha256(identity + raw).hexdigest()
+        digest = sha256(b"ocr-enhanced-page/v1\0" + raw).hexdigest() if ocr_recovery else original_digest
+        save_original = kind == "asr" or (
+            not ocr_recovery and feature in ("assistant.documentOcr", "access.resumeOcr")
+        )
         prior = db.execute(
             """SELECT id,state,result FROM media_usage WHERE kind=? AND fingerprint=?
-             AND (state IN ('complete','pending','uncertain') OR
+             AND (? OR state IN ('complete','pending','uncertain') OR
                   (state='reconciled' AND charged>0)) ORDER BY rowid DESC LIMIT 1""",
-            (kind, digest),
+            (kind, digest, ocr_recovery),
         ).fetchone()
         if prior:
             if prior["state"] == "complete":
-                if feature in ("assistant.documentOcr", "access.resumeOcr"):
+                if kind == "ocr" and save_original:
                     db.execute("UPDATE media_usage SET original=? WHERE id=? AND original IS NULL",
                                (raw, prior["id"]))
                 return json.loads(prior["result"])
+            if ocr_recovery:
+                raise MediaError("此原件的补充识别已有提交记录")
             if prior["state"] == "reconciled":
                 raise ValueError("该原件已对账扣费，请按保留的原件人工核对")
             raise ValueError("识别正在处理或待平台核对，请稍后查看")
@@ -304,8 +311,8 @@ def execute(
                 digest,
                 int(now.timestamp()),
                 reserve,
-                raw if kind == "asr" or feature in ("assistant.documentOcr", "access.resumeOcr") else None,
-                reference,
+                raw if save_original else None,
+                original_digest if ocr_recovery else reference,
                 feature,
             ),
         )
@@ -323,11 +330,11 @@ def execute(
                 audit_scope,
             )
     try:
-        audio = upload if upload is not None else raw
+        payload = upload if upload is not None else raw
         obj = (
-            invoke_asr(service, audio, filename, mime, key, duration_ms)
+            invoke_asr(service, payload, filename, mime, key, duration_ms)
             if service
-            else invoke(kind, audio, filename, mime, key)
+            else invoke(kind, payload, filename, mime, key)
         )
         result, units, source_id = parse(obj)
         if kind == "asr":

@@ -204,6 +204,7 @@ export function openVisitEditor(ctx, resident = null, mode = 'ai', visitId = '',
       node('label', 'access-check', [check, ai
         ? '已核对资料归属，同意由 DeepSeek 识别原件，并由机构配置的云端模型整理识别文字。'
         : '已核对长辈与就诊日期。']),
+      ai ? node('p', 'fx-muted', '单页原件如需补识别，最多额外使用 1 页 OCR 额度。') : null,
       note, error,
     ]);
     stage(ai ? '上传就诊资料' : '添加原件与记录', [inputGroup], [

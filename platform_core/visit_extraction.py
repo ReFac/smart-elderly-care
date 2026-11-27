@@ -78,7 +78,7 @@ def _recognized(store, token, files, manifest, authorize, name):
     mismatch = False
     for (raw, _, _), item in zip(files, manifest):
         result = document_ocr.recognize(
-            store, token, raw, authorize, feature="dossier.visitOcr"
+            store, token, raw, authorize, feature="dossier.visitOcr", recover=item["category"] != "CT影像",
         )
         pages = {p["page"]: p["state"] for p in result.get("pages", [])}
         label = item["filename"]

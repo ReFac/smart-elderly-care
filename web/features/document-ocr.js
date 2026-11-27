@@ -5,6 +5,11 @@ import { originalViewer } from './document-original.js';
 const fields = { summary: '病史摘要', allergies: '过敏史', risk: '高危要点' };
 const names = { name: '原件姓名', ...fields };
 
+export function ocrPageEstimate(pages) {
+  return pages === 1 ? '首轮使用 1 页 OCR 额度，必要时补识别最多再用 1 页。'
+    : '预计使用 ' + pages + ' 页 OCR 额度。';
+}
+
 function input(label, control) {
   return node('label', 'field', [node('span', '', label), control]);
 }
@@ -247,7 +252,7 @@ export function pendingDocument(ctx, doc, reopenVisit) {
           () =>
             ctx.dialog({
               title: '确认发送文书原件',
-              description: '此原件共 ' + (doc.pageCount || 1) + ' 页，预计使用 ' + (doc.pageCount || 1) + ' 页 OCR 额度。',
+              description: ocrPageEstimate(doc.pageCount || 1),
               fields: [],
               submitLabel: '确认并发送',
               onSubmit: async () => {
