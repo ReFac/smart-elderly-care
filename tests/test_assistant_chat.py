@@ -268,6 +268,53 @@ class ChatTests(unittest.TestCase):
         self.assertIn("权限", denied["content"])
         self.transport.assert_not_called()
 
+    def test_registration_workbook_from_this_turn_requires_manual_download(self):
+        self.transport.return_value["choices"][0]["message"]["content"] = (
+            '{"fields":["name","birthDate","language","nativeRegion"]}'
+        )
+        question = ("请把这条资料填进一份长辈登记 Excel 供我下载。姓名是测试长辈甲，"
+                    "出生日期是1951年3月8日，常用语言是普通话，籍贯是河南省平顶山市。现在不用新建档案。")
+        initial = self.store.version(self.owner)["revision"]
+        response = self.ask(question, "sheet", webSearch=True)
+        message = response["messages"][-1]
+        fields = {"name": "测试长辈甲", "birthDate": "1951-03-08", "language": "普通话",
+                  "nativeRegion": {"codes": ["41", "4104"], "detail": ""}}
+        self.assertEqual(message["action"], {"kind": "registrationWorkbook", "fields": fields,
+                                            "labels": {"nativeRegion": "河南省 · 平顶山市"}})
+        self.assertEqual(message["runtime"], "deerflow")
+        self.assertFalse(message["webSearched"])
+        self.assertEqual(message["pageLinks"], [])
+        self.assertEqual(self.store.version(self.owner)["revision"], initial)
+        body = self.transport.call_args.args[1]
+        self.assertEqual(json.loads(body["messages"][1]["content"]), fields)
+        self.assertNotIn("tools", body)
+        self.assertEqual(chat.read(self.store, self.owner)["messages"][-1]["action"], message["action"])
+        self.assertEqual(self.ask(question, "sheet", webSearch=True), response)
+        self.transport.assert_called_once()
+
+        self.transport.return_value["choices"][0]["message"]["content"] = "云端答复"
+        self.ask("能讲讲交班要注意的事项吗？", "after-sheet")
+        self.assertNotIn("测试长辈甲", json.dumps(self.transport.call_args.args[1], ensure_ascii=False))
+
+    def test_registration_workbook_ambiguous_or_unauthorized_does_not_draft(self):
+        request = "生成长辈登记 Excel。姓名：测试甲，姓名：测试乙，联系电话：13800001010"
+        reply = self.ask(request, "two-residents")["messages"][-1]
+        self.assertEqual(reply["action"], {"kind": "registrationWorkbook"})
+        self.assertIn("一次提供一位", reply["content"])
+        self.transport.assert_not_called()
+
+        staff = self.staff(["assistants"])
+        reply = self.ask("生成长辈登记 Excel。姓名：测试甲", "staff-sheet", staff)["messages"][-1]
+        self.assertIsNone(reply["action"])
+        self.assertIn("权限", reply["content"])
+        self.transport.assert_not_called()
+
+        self.transport.return_value["choices"][0]["message"]["content"] = '{"fields":["name","phone"]}'
+        reply = self.ask("生成长辈登记 Excel。姓名：测试甲，家属 电话：13800001010",
+                         "unsupported", self.owner)["messages"][-1]
+        self.assertEqual(reply["action"], {"kind": "registrationWorkbook"})
+        self.assertEqual(json.loads(self.transport.call_args.args[1]["messages"][1]["content"]), {"name": "测试甲"})
+
     def test_skill_arguments_and_permission_recheck(self):
         from platform_core.agents import community_skills
         def choose(_key, body):

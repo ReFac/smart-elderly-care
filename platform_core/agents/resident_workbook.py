@@ -53,7 +53,18 @@ def authorize(store, token):
             raise PermissionError("当前账号没有长辈档案入口")
 
 
-def _value(key, raw, *, international=False):
+def field_aliases(*, international=False):
+    if international:
+        return {label: key for key, label in _EN_COLUMNS.items()}
+    return {label: key for key, labels in _COLUMNS.items() for label in labels}
+
+
+def region_labels(fields):
+    return {key: profile_fields.address_fields(value, birthplace=key != "addressRegion")[1]
+            for key, value in fields.items() if key.endswith("Region")}
+
+
+def normalize_value(key, raw, *, international=False):
     if isinstance(raw, (datetime, date)):
         raw = raw.strftime("%Y-%m-%d")
     if isinstance(raw, float) and raw.is_integer():
@@ -158,13 +169,12 @@ def preview(raw, *, international=False):
             for key, value in zip(keys, row):
                 if key and value is not None and str(value).strip():
                     try:
-                        fields[key] = _value(key, value, international=international)
+                        fields[key] = normalize_value(key, value, international=international)
                     except (ValueError, OverflowError):
                         ambiguous.append(key)
             if fields or ambiguous:
-                labels = {key: profile_fields.address_fields(value, birthplace=key != "addressRegion")[1]
-                          for key, value in fields.items() if key.endswith("Region")}
-                records.append({"row": n, "fields": fields, "ambiguous": ambiguous, "labels": labels})
+                records.append({"row": n, "fields": fields, "ambiguous": ambiguous,
+                                "labels": region_labels(fields)})
         return {"category": "电子表格", "records": records, "note": f"读到 {len(records)} 行长辈资料，请逐位核对。"}
     except ImportError as err:
         raise ValueError("机构尚未安装表格服务组件") from err
@@ -225,7 +235,7 @@ def export(fields, *, international=False):
             elif raw and not isinstance(raw, str):
                 raise ValueError("工作表字段格式错误")
             else:
-                value = _value(key, raw, international=international) if raw else None
+                value = normalize_value(key, raw, international=international) if raw else None
                 if international and key in ("language","maritalStatus","education","occupation"):
                     value = next((en for en, stored in _ENUMS.items() if value == stored), value)
                 row.append(value)

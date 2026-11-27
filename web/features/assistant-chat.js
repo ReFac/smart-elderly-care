@@ -10,7 +10,7 @@ import { openPriorReports } from './assistants.js';
 import { assistantCommand, assistantPageLinks, openAssistantAction } from './assistant-actions.js';
 import { canReadDocuments, documentIntake } from './assistant-documents.js';
 import { canDraftProfile } from './assistant-materials.js';
-import { workbookButton } from './assistant-workbook.js';
+import { reviewWorkbook, workbookButton } from './assistant-workbook.js';
 import { dictationReview } from './assistant-dictation.js';
 import { taskReceipt } from './evidence-runtime.js';
 
@@ -424,6 +424,14 @@ function buildChat(getContext, actor, area, region, label) {
       });
       body.append(attach);
       if (!visitUpload) body.append(workbookButton(getContext()));
+    }
+    if (!mine && item.action?.kind === 'registrationWorkbook' && canDraftProfile(getContext())) {
+      if (item.action.fields) {
+        body.append(control(en ? 'Review registration workbook' : '核对登记工作表', 'file',
+          'assistant-action', () => reviewWorkbook(getContext(), item.action)));
+      } else {
+        body.append(workbookButton(getContext()));
+      }
     }
     if (!mine && item.at && ['staff', 'owner'].includes(getContext().state.user.kind)) {
       body.append(control('改进回答', 'edit', 'assistant-action', () => openAgentLearning(getContext(), region.campusId)));

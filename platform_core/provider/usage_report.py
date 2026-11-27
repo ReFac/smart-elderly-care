@@ -11,6 +11,7 @@ from . import ZONE, local_time, task_usage
 
 FEATURES = {
     "assistant.chat": "健康助理 · 对话",
+    "assistant.registrationWorkbook": "健康助理 · 登记工作表",
     "assistant.faq": "健康助理 · 常见问题",
     "assistant.experience": "健康助理 · 经验提议",
     "assistant.toolAnswer": "健康助理 · 核对资料后回答",

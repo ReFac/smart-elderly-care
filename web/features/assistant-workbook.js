@@ -1,4 +1,4 @@
-import { btn, node } from './shared.js';
+import { btn, facts, node } from './shared.js';
 import { medicalResidentPicker } from './medical-resident-picker.js';
 
 const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -39,6 +39,21 @@ export function workbookButton(ctx, fields = {}) {
   });
   button.disabled = !permitted(ctx);
   return button;
+}
+
+export function reviewWorkbook(ctx, {fields, labels = {}}) {
+  if (!permitted(ctx)) return;
+  const international = window.NH_DEPLOYMENT?.edition === 'international';
+  const supplied = Object.entries(columns())
+    .filter(([key]) => fields[key] != null)
+    .map(([key, label]) => [label, labels[key] || fields[key]]);
+  ctx.detail(international ? 'Review registration workbook' : '核对登记工作表', node('div', '', [
+    node('p', 'muted', international
+      ? 'Review the supplied fields. You can complete the remaining fields in the downloaded workbook.'
+      : '请核对对话中提供的资料。未填写的项目可在下载后补充。'),
+    facts(supplied),
+    workbookButton(ctx, fields),
+  ]));
 }
 
 export function workbookActions({ctx, row, getContext, active, accompany}) {

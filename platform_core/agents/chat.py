@@ -12,7 +12,7 @@ from .. import access_policy as policy, faq, provider
 from ..provider import completions, deepseek, task_usage, token_receipt
 from ..store import Conflict, SignedOut
 from . import chat_context as ctx
-from . import chat_document_help, community_skills, english, growth, mcp_plugins
+from . import chat_document_help, chat_workbook, community_skills, english, growth, mcp_plugins
 from . import chat_forms, chat_navigation, chat_scope, chat_web, deerflow_chat, react, resident_status, view_filters, ward_brief
 
 CONTEXT_LIMIT = 100_000
@@ -100,8 +100,7 @@ def messages(db, actor, scope, generation, limit, pages=None, area=None, *, memo
     turns = []
     for row in rows(db, actor, scope, generation, MEMORY_TURNS if memory else -1):
         action = json.loads(row["action"]) if row["action"] else None
-        declined = action and action.get("kind") == "scopeRefusal"
-        if memory and declined:
+        if memory and action and action.get("kind") in ("scopeRefusal", chat_workbook.ACTION):
             continue
         pair = [
             {"role": "user", "content": row["question"], "at": row["asked"]},
@@ -142,7 +141,7 @@ def messages(db, actor, scope, generation, limit, pages=None, area=None, *, memo
                     previous = [destination]
                     answer["pageLinks"] = [destination.link()]
                 continue
-            if action.get("kind") in chat_document_help.UPLOAD_ACTIONS:
+            if action.get("kind") in (*chat_document_help.UPLOAD_ACTIONS, chat_workbook.ACTION):
                 previous = []
                 answer["pageLinks"] = []
                 continue
@@ -586,7 +585,7 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             ORDER BY seq DESC LIMIT 1""",
             (uid, scope, generation),
         ).fetchone()
-        if last and last["action"] and json.loads(last["action"]).get("kind") == "scopeRefusal":
+        if last and last["action"] and json.loads(last["action"]).get("kind") in ("scopeRefusal", chat_workbook.ACTION):
             last = None
         hours = requested_hours(text, data.get("hours"), last["hours"] if last else None)
         topics = text
@@ -599,17 +598,31 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             )
         ):
             topics += " " + last["question"]
-        page_request = english.navigation_page(text) if is_english else None
+        workbook_request = chat_workbook.requested(text)
+        page_request = english.navigation_page(text) if is_english and not workbook_request else None
         page_target = english.destination(page_request, pages) if page_request else None
         if page_request and not page_target:
             save_turn(db, "Your account does not have access to this page.", {"kind":"scopeRefusal"})
             return view(db, uid, scope, thread, pages, selected)
         manual_form = (english.form(text) if is_english else None) or chat_forms.intent(text)
         manual_allowed = manual_form is not None and chat_forms.available(manual_form, user, routes)
+        workbook_candidates = {}
+        if workbook_request:
+            if not chat_workbook.allowed(user, routes):
+                answer = ("This account cannot prepare registration workbooks." if is_english
+                          else "当前账号没有整理长辈登记工作表的权限。")
+                save_turn(db, answer, {"kind": "scopeRefusal"})
+                return view(db, uid, scope, thread, pages, selected)
+            workbook_candidates = chat_workbook.fields(text, now.date().isoformat(), international=is_english)
+            if not workbook_candidates:
+                save_turn(db, *chat_workbook.outcome({}, international=is_english))
+                return view(db, uid, scope, thread, pages, selected)
         visit_request = chat_document_help.visit_intent(text)
-        document_request = visit_request or chat_document_help.intent(text, last["question"] if last else "")
+        document_request = workbook_request or visit_request or chat_document_help.intent(text, last["question"] if last else "")
         if document_request:
             manual_form, manual_allowed = None, False
+        upload = None
+        if document_request and not workbook_request:
             document_reply, upload = chat_document_help.reply(user, routes, visit=visit_request)
             if is_english:
                 if upload:
@@ -622,10 +635,10 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
                 return view(db, uid, scope, thread, pages, selected)
         last_action = json.loads(last["action"]) if last and last["action"] else {}
         last_location = last_action.get("location") if last_action.get("kind") == "residentLocation" else None
-        location = None if is_english else resident_status.question(text, followup=bool(
+        location = None if is_english or workbook_request else resident_status.question(text, followup=bool(
             last and (last_location or ward_brief.topic(last["question"]) == "health")
         ), previous=last_location)
-        plugins = () if page_target or location else mcp_plugins.tools_for(user, text)
+        plugins = () if page_target or location or workbook_request else mcp_plugins.tools_for(user, text)
         skill_request = bool(re.search(r"工作方法|工作指南|指南模板|技能|skill|工作簿|电子表格|xlsx?|简报草稿|草拟|起草|周报|通报|整理.{0,5}(?:表格|材料|资料)", text, re.I))
         faq_request = None if location or page_target or manual_form or document_request or plugins or skill_request else faq.intent(text, last["question"] if last else "")
         faq_workflow = next((entry for entry in faq_request["items"] if entry.destinations), None) if faq_request else None
@@ -670,7 +683,7 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             return view(db, uid, scope, thread, pages, selected)
         if user["kind"] not in ("owner", "staff"):
             brief = ""
-        if chat_scope.obvious_unrelated(text):
+        if not workbook_request and chat_scope.obvious_unrelated(text):
             save_turn(db, english.REFUSAL if is_english else chat_scope.REFUSAL, {"kind": "scopeRefusal"})
             return view(db, uid, scope, thread, pages, selected)
         # An unfamiliar expression is a conversation turn. Withhold records, tools
@@ -691,7 +704,9 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
         except (OSError, ValueError):
             raise Unavailable("机构的云端 AI 服务尚未配置，请联系管理员") from None
         feature = "assistant." + ("faq" if faq_request else brief or "chat")
-        if actions.get("care") == "medicationRound":
+        if workbook_request:
+            feature = "assistant.registrationWorkbook"
+        elif actions.get("care") == "medicationRound":
             feature = "assistant.medication"
         elif actions.get("care") == "scheduledMeal":
             feature = "assistant.scheduledMeal"
@@ -716,6 +731,8 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
                 return {"model":model, "thinking":{"type":"disabled"}, "max_tokens":96,
                         "messages":[{"role":"system","content":"Invite the user to open the named workspace page using the button. The user chooses whether to navigate."},
                                     {"role":"user","content":page_target.title}]}
+            if workbook_request:
+                return chat_workbook.prompt(model, workbook_candidates)
             if document_request:
                 return {
                     "model": model, "thinking": {"type": "disabled"}, "max_tokens": 250,
@@ -961,7 +978,7 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             if transport:
                 response = transport(key, body)
             elif progress and requested_filters is None and not (
-                lookup_actions or brief or actions or sources is not None or faq_workflow or manual_form
+                workbook_request or lookup_actions or brief or actions or sources is not None or faq_workflow or manual_form
                 or faq_request and faq_request["mode"] == "list"
             ):
                 response = completions.stream(key, body, emit_delta)
@@ -987,7 +1004,9 @@ def _reply(store, token, data, turn, *, transport, progress, voice_receipt):
             return result
 
         deerflow_chat.run(body, first_model, tool_turn.read, synthesis)
-        if document_request:
+        if workbook_request:
+            answer, action = chat_workbook.outcome(workbook_candidates, answer, international=is_english)
+        elif document_request:
             action = upload
         if direct:
             action = direct
