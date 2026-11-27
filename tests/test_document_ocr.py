@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from provider_fixture import isolate_credentials
 from test_medical_visits import fixture_visit
-from platform_core import document_ocr, provider
+from platform_core import document_ocr, ocr_review, provider
 from platform_core.provider import media
 from platform_core.store import Store
 
@@ -35,6 +35,25 @@ RESULT = {
     ],
     "candidates": [{"field": "allergies", "value": "原文乙", "line": 1}],
 }
+
+
+class ImagingReportReviewTests(unittest.TestCase):
+    def test_only_missing_report_sections_and_explicit_empty_measurements_request_manual_entry(self):
+        for text, missing in (
+            ("胸部CT检查报告\n结节数量：1枚\n最大直径：3.98 mm\n胸腔积液：未见胸腔积液\n影像结论：肺结节", ""),
+            ("头颅CT报告\n检查所见\n按原件记录的所见。\n影像结论：按原件记录的印象。", ""),
+            ("头颅CT报告\n检查所见：按原件记录的所见。", "影像结论"),
+            ("胸部CT报告\n影像所见：按原件记录。 最大直径：\n报告医师：测试\n影像结论：待随访", "最大直径"),
+            ("常规就诊记录\n检查项目：头颅CT", ""),
+        ):
+            with self.subTest(text=text):
+                result = {"lines": [{"page": 1, "text": row} for row in text.splitlines()]}
+                review = ocr_review.quality(result, (1120, 1600))
+                self.assertEqual(review["manualReportReview"], bool(missing))
+                if missing:
+                    self.assertIn(missing, review["reviewWarnings"][0])
+                else:
+                    self.assertEqual(review["reviewWarnings"], [])
 
 
 class DocumentOcrTests(unittest.TestCase):

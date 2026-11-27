@@ -246,7 +246,9 @@ class VisitWorkflow:
         )["nodeId"]
         b.call("DOM.setFileInputFiles", files=[str(self.original)], nodeId=picker)
         click("识别并分类")
+        b.wait_for("document.querySelector('.assistant-document-card')?.innerText.includes('细小文字可能漏读')")
         click("确认分类")
+        b.wait_for("document.querySelector('.assistant-document-card')?.innerText.includes('手动核对并归档')")
         click("整理所选就诊资料")
         type_in("dialog[open] input[role=combobox]", self.resident)
         b.click("dialog[open] [role=option]")

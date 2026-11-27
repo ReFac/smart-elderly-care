@@ -551,6 +551,23 @@ class MedicalVisitTests(TestCase):
         with closing(self.store.connect()) as db:
             self.assertEqual(media.overview(db)["ocr"]["used"], 2)
 
+    def test_ct_report_with_an_impression_but_no_findings_needs_manual_review(self):
+        self.metering()
+        _, model = self.cloud(
+            "胸部CT检查报告\n检查日期:2026-10-01\n检查编号: CT-005\n检查方式:胸部低剂量CT平扫\n影像结论:肺结节",
+            classify={"diagnosis": [1], "tests": [1]},
+        )
+        draft = visits.preview(self.store, self.token, RID, self.body(
+            mode="ai", consent=True, fields={"eventDate": self.today},
+            attachments=[self.file(self.raw, "检查报告")],
+        ))
+        self.assertTrue(any("「检查所见」未读到可核对的文字" in warning for warning in draft["warnings"]))
+        self.assertEqual((draft["fields"]["diagnosis"], draft["fields"]["tests"], draft["sourceRefs"]), ("", "", {}))
+        model.assert_not_called()
+        self.assertFalse(self.data()["medicalVisits"])
+        self.sign(draft, fields={**draft["fields"], "tests": "工作人员对照书面原件核实的检查摘录"})
+        self.assertEqual(self.data()["medicalVisits"][0]["fields"]["tests"], "工作人员对照书面原件核实的检查摘录")
+
     def test_cached_ocr_names_with_other_fields_keep_the_patient_safety_check(self):
         name = next(r["name"] for r in self.data()["residents"] if r["id"] == RID)
         seen = (name, "确实是另一人", name + "；患者姓名：确实是另一人")
@@ -559,14 +576,16 @@ class MedicalVisitTests(TestCase):
             cached = {
                 "state": "recognized",
                 "pages": [{"page": 1, "state": "complete"}, {"page": 2, "state": "partial"}],
-                "lines": [{"page": 2, "line": 1, "text": "患者姓名：" + inline}],
+                "lines": [{"page": 2, "line": 1, "text": "患者姓名：" + inline},
+                          {"page": 2, "line": 2, "text": "就诊日期：2024-01-01"}],
                 "candidates": [{"field": "name", "page": 2, "line": 1, "value": inline}],
             }
             with patch.object(visits.visit_extraction.document_ocr, "recognize", return_value=cached):
                 result = visits.preview(self.store, self.token, RID, self.body(
-                    requestId=f"cached-inline-{index}", mode="ai", consent=True,
+                    requestId=f"cached-inline-{index}", mode="ai", consent=True, visitId="",
                 ))
             self.assertEqual(result["identityConflict"], index != 0)
+            self.assertEqual(result["fields"]["eventDate"], self.today)
 
     def test_mixed_patient_or_encounter_blocked_even_if_client_edits_fields(self):
         self.metering()

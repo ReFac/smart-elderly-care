@@ -82,11 +82,12 @@ def _recognized(store, token, files, manifest, authorize, name):
         )
         pages = {p["page"]: p["state"] for p in result.get("pages", [])}
         label = item["filename"]
-        if (
-            any(v != "complete" for v in pages.values())
-            or result.get("state") != "recognized"
-        ):
+        warnings.extend(label + "：" + message for message in result.get("reviewWarnings", ()))
+        incomplete_pages = any(state != "complete" for state in pages.values())
+        if incomplete_pages and not result.get("reviewWarnings"):
             warnings.append(label + " 有未识别或不完整的页，请对照原件手工补充。")
+        elif result.get("state") != "recognized" and not incomplete_pages:
+            warnings.append(label + "：" + (result.get("error") or "未得到可核对的文字，请手工补充。"))
         if item["category"] == "CT影像":
             warnings.append(label + " 的影像已留存，检查结论请核对医生出具的书面报告。")
         budget = 18000 // len(files)
@@ -98,14 +99,16 @@ def _recognized(store, token, files, manifest, authorize, name):
             names = document_ocr.names_on_line(comparable)
             if any(value and value != clean(name) for value in names):
                 mismatch = True
+            if pages.get(line["page"], "complete") != "complete":
+                continue
             if hit := VISIT_DATE.search(comparable):
                 if when := day(hit[1]):
                     dates.add(when)
             if (
                 item["category"] == "CT影像"
+                or result.get("manualReportReview")
                 or names
                 or SENSITIVE.search(comparable)
-                or pages.get(line["page"], "complete") != "complete"
             ):
                 continue
             if len(source) > 1500 or budget < len(source) or count >= 300 // len(files):

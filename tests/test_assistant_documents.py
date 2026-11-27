@@ -58,6 +58,19 @@ class AssistantDocuments(TestCase):
             self.assertEqual(tuple(receipt), ("assistant.documentOcr", self.raw, 1))
             self.assertEqual(db.execute("SELECT count(*) FROM api_usage WHERE feature='assistant.documentClassify'").fetchone()[0], 1)
 
+    def test_medical_upload_shows_partial_page_and_low_resolution_without_a_second_model_call(self):
+        reply = {"id": "cutoff", "purpose": "text_recognition", "object": "ocr.result", "page_count": 1,
+                 "pages": [{"index": 0, "finish_reason": "length", "text": "CT检查报告\n检查所见："}]}
+        with patch.object(media, "read_key", return_value="test-key"), patch.object(media, "invoke", return_value=reply) as ocr, \
+             patch("platform_core.agents.document_intake.generation.generate") as classify:
+            preview = self.preview()
+            self.assertEqual(preview, self.preview())
+        ocr.assert_called_once()
+        classify.assert_not_called()
+        self.assertEqual(preview["excerpt"], "")
+        self.assertTrue(any("第 1 页识别中断" in warning for warning in preview["reviewWarnings"]))
+        self.assertTrue(any("像素" in warning for warning in preview["reviewWarnings"]))
+
     def test_photograph_without_text_uses_one_visual_call_and_never_invents_form_fields(self):
         reply = {"id": "photo-ocr", "purpose": "text_recognition", "object": "ocr.result", "page_count": 1,
                  "pages": [{"index": 0, "finish_reason": "stop", "text": ""}]}

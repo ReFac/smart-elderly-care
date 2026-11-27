@@ -122,6 +122,7 @@ def preview(store, token, raw, mime):
     actor = check(store, token)
     excerpt = "\n".join(resident_credentials.NUMBER.sub("〔证件号码已隐藏〕", line["text"])[:240] for line in lines[:18])[:1800]
     response = {"category": category, "note": note, "pageCount": result.get("pageCount", 0),
+                "reviewWarnings": result.get("reviewWarnings", []),
                 "excerpt": "" if material_hint or category in (*resident_credentials.CATEGORIES, resident_profile_intake.PROFILE) else excerpt}
     if access.has(actor, "finance") or access.has(actor, "intake"):
         material = resident_credentials.suggestions(lines)

@@ -18,6 +18,7 @@ export async function reviewOcr(ctx, doc, reopenVisit) {
   }
   const resident = ctx.state.residents.find((r) => r.id === doc.residentId);
   const recognized = doc.ocr.state === 'recognized';
+  const manual = doc.ocr.manualReportReview;
   const form = node('form', 'fx-profile fx-document');
   const totalPages = doc.pageCount || 1;
   const checked = new Set();
@@ -63,6 +64,8 @@ export async function reviewOcr(ctx, doc, reopenVisit) {
       totalPages > 1 ? pageRecheck : null, totalPages > 1 ? count : null,
     ]),
   ]));
+  for (const warning of doc.ocr.reviewWarnings || [])
+    form.append(node('p', 'medical-visit-warning', warning));
   const identity = node('input');
   identity.required = true;
   identity.maxLength = 60;
@@ -79,12 +82,13 @@ export async function reviewOcr(ctx, doc, reopenVisit) {
   factsText.required = true;
   factsText.maxLength = 8000;
   factsText.rows = 4;
-  if (recognized)
-    factsText.value = doc.ocr.lines
+  const completeLines = doc.ocr.lines.filter(line => !issues.has(line.page) || issues.get(line.page) === 'complete');
+  if (recognized && !manual)
+    factsText.value = completeLines
       .map((l) => l.text)
       .join('\n')
       .slice(0, 8000);
-  if (recognized && doc.ocr.lines.map((line) => line.text).join('\n').length > 8000)
+  if (recognized && !manual && completeLines.map((line) => line.text).join('\n').length > 8000)
     form.append(
       node(
         'p',
@@ -95,7 +99,7 @@ export async function reviewOcr(ctx, doc, reopenVisit) {
   const pending = node('textarea');
   pending.maxLength = 2000;
   form.append(
-    input(recognized ? '核对并修订原文事实' : '手工摘录原文事实', factsText),
+    input(recognized && !manual ? '核对并修订原文事实' : '手工摘录原文事实', factsText),
     input('待核实事项', pending)
   );
   const controls = [];
@@ -110,7 +114,7 @@ export async function reviewOcr(ctx, doc, reopenVisit) {
   if (!mismatch && hasGrant(ctx, 'clinical')) {
     const box = node('fieldset', 'fx-form-group', [node('legend', '', '逐项确认档案回填')]);
     for (const [key, title] of Object.entries(fields)) {
-      const candidates = doc.ocr.candidates.filter((c) => c.field === key);
+      const candidates = manual ? [] : doc.ocr.candidates.filter((c) => c.field === key);
       const check = node('input');
       check.type = 'checkbox';
       check.name = key;
@@ -189,7 +193,7 @@ export async function reviewOcr(ctx, doc, reopenVisit) {
         verifiedName: identity.value,
         sourceFacts: factsText.value,
         pending: pending.value,
-        method: recognized
+        method: recognized && !manual
           ? doc.ocr.engine === 'DeepSeek OCR'
             ? 'DeepSeek OCR 人工核对'
             : '院内 OCR 人工核对'

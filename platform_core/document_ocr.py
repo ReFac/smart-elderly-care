@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 
-from . import access, pdf_original
+from . import access, ocr_review, pdf_original
 from .provider import media
 
 METHOD = "DeepSeek OCR"
@@ -223,7 +223,7 @@ def recognize(store, token, raw, authorize, *, feature="dossier.documentOcr"):
         filename, mime = (
             ("document.png", "image/png") if png else ("document.jpg", "image/jpeg")
         )
-    return media.execute(
+    result = media.execute(
         store,
         token,
         "ocr",
@@ -235,6 +235,9 @@ def recognize(store, token, raw, authorize, *, feature="dossier.documentOcr"):
         lambda obj: parse_result(obj, width, height, page_count),
         feature=feature,
     )
+    # Old, metered receipts can be reviewed using today's checks without repeating OCR.
+    result.update(ocr_review.quality(result, None if mime == "application/pdf" else (width, height)))
+    return result
 
 
 def source(db, p):
@@ -395,5 +398,7 @@ def detail(db, user, document_id):
     if not row:
         raise FileNotFoundError("找不到可核对的 OCR 原件")
     result = json.loads(row[0]) if row[0] else {"state": "queued", "lines": []}
+    if "reviewWarnings" not in result:
+        result.update(ocr_review.quality(result))
     result["candidates"] = list(normalized_candidates(result.get("candidates", [])))
     return result

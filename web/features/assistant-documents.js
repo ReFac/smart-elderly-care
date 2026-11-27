@@ -213,6 +213,8 @@ export function documentIntake(getContext, changed, hide) {
     if (stage === 'review' && (row.error || row.result?.note))
       parts.push(node('p', 'assistant-document-hint', row.error || row.result.note));
     if (!row.workbook && (stage === 'review' || stage === 'confirmed')) {
+      for (const warning of row.result?.reviewWarnings || [])
+        parts.push(node('p', 'medical-visit-warning', warning));
       parts.push(action('查看原件', () => {
         if (canReadDocuments(getContext())) originalDialog = previewOriginal(getContext(), row);
       }));
@@ -245,7 +247,7 @@ export function documentIntake(getContext, changed, hide) {
           const open = action('整理所选就诊资料', () => visits(), true);
           open.disabled = !medical.some(r => r.checked);
           footer.append(open);
-          if (medical.some(r => r.checked && r.error))
+          if (medical.some(r => r.checked && (r.error || r.result?.reviewWarnings?.length)))
             footer.append(action('手动核对并归档', () => visits('manual')));
         }
         footer.append(action('修改分类', () => {stage = 'review'; render();}));

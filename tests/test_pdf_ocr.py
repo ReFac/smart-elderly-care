@@ -147,6 +147,8 @@ class PdfTests(unittest.TestCase):
                 [line["page"] for line in receipt["lines"]], list(range(1, 7))
             )
             self.assertEqual(receipt["pages"][2]["state"], "partial")
+            self.assertTrue(any("第 3 页识别中断" in warning for warning in receipt["reviewWarnings"]))
+            self.assertFalse(any("像素" in warning for warning in receipt["reviewWarnings"]))
             with closing(store.connect()) as db:
                 self.assertEqual(media.amounts(db, plan, "ocr")["used"], 6)
             person = next(r for r in data["residents"] if r["id"] == "r001")
